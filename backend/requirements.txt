@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+sqlalchemy
+pg8000
+pyjwt
+passlib
+python-multipart
+python-dotenv
+bcrypt
+reportlab

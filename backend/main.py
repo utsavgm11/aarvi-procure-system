@@ -1,0 +1,713 @@
+import random
+import logging
+from typing import List, Optional
+from datetime import date
+from pydantic import BaseModel
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from database import get_db
+from fastapi.responses import StreamingResponse
+from docxtpl import DocxTemplate
+import models
+import io
+
+# 1. System Logging Configurations
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("AarviProcure")
+
+app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.0.0")
+
+# 2. Complete CORS Cross-Origin Resource Sharing Rules
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:5174"], 
+    allow_credentials=True,
+    allow_methods=["*"], 
+    allow_headers=["*"], 
+)
+
+# -------------------------------------------------------------------
+# PYDANTIC INCOMING DATA VALIDATORS (Data Contracts)
+# -------------------------------------------------------------------
+class RequisitionRowItem(BaseModel):
+    product_description: str
+    make_brand: Optional[str] = None
+    quantity: int
+    purpose: str
+
+class CreateRequisitionPayload(BaseModel):
+    project_code: str
+    project_name: str
+    coordinator_id: int
+    category: str # 🎯 'GOODS', 'VEHICLE', or 'ACCOMMODATION'
+    items: List[RequisitionRowItem]
+
+class UpdateRequisitionItem(BaseModel):
+    item_index: int
+    product_description: str
+    make_brand: Optional[str] = None
+    quantity: int
+    purpose: str
+
+# Payloads for the Dual-Signature Negotiation Loop
+class ProposeEditsPayload(BaseModel):
+    user_name: str
+    user_role: str
+    remarks: str
+    items: List[UpdateRequisitionItem]
+
+class DualApprovalPayload(BaseModel):
+    user_name: str
+    user_role: str
+
+class QuotationRowItem(BaseModel):
+    item_index: int
+    vendor_name: str
+    total_amount: float
+    product_description: Optional[str] = None
+    make_brand: Optional[str] = None
+    quantity: Optional[int] = None
+    unit_price: Optional[float] = None
+    gst_percentage: Optional[float] = None
+    freight_charges: Optional[float] = None
+    time_of_delivery: Optional[str] = None
+    payment_terms: Optional[str] = None
+    contract_start_date: Optional[date] = None
+    contract_end_date: Optional[date] = None
+    file_url: Optional[str] = None
+    special_terms: Optional[str] = None # 🎯 Extra clauses
+    
+    # 🎯 Upgraded Data Fields for Branded PDF Mapping (Duplicates Cleaned)
+    vendor_address: Optional[str] = None
+    vendor_contact: Optional[str] = None
+    vendor_email: Optional[str] = None
+    delivery_address: Optional[str] = None
+    site_contact_person: Optional[str] = None
+    site_contact_phone: Optional[str] = None
+    base_total_value: Optional[float] = 0.0
+    net_amount_payable: Optional[float] = 0.0
+
+class SubmitQuotationsPayload(BaseModel):
+    quotations: List[QuotationRowItem]
+
+class FinanceApprovalPayload(BaseModel):
+    user_name: str
+    action: str # 'Approve' or 'Raise Query'
+    remarks: Optional[str] = None
+    selected_bids: Optional[dict] = None  # Dictionary mapping { "item_index": "vendor_name" }
+
+
+# -------------------------------------------------------------------
+# STAGE 1: SITE COORDINATOR ENTRY GATEWAY
+# -------------------------------------------------------------------
+@app.post("/api/requisitions", status_code=201)
+def raise_material_requisition(payload: CreateRequisitionPayload, db: Session = Depends(get_db)):
+    ticket_number = f"REQ-2026-{random.randint(100000, 999999)}"
+    
+    master_ticket = models.MaterialTicket(
+        ticket_number=ticket_number,
+        project_code=payload.project_code,
+        project_name=payload.project_name,
+        coordinator_id=payload.coordinator_id,
+        category=payload.category, # Save the category to DB
+        status="Vetting Active"
+    )
+    db.add(master_ticket)
+    
+    for idx, row in enumerate(payload.items, start=1):
+        db_item = models.TicketItem(
+            ticket_number=ticket_number,
+            item_index=idx,
+            product_description=row.product_description,
+            make_brand=row.make_brand,
+            quantity=row.quantity,
+            purpose=row.purpose
+        )
+        db.add(db_item)
+        
+    history = models.TicketHistory(
+        ticket_number=ticket_number,
+        user_name=f"User ID: {payload.coordinator_id}",
+        action_taken="Ticket Raised",
+        remarks="Material Sheet uploaded from site terminal."
+    )
+    db.add(history)
+    db.commit()
+    
+    logger.info(f"💾 [GRID SAVED] -> Requisition {ticket_number} pushed to Site Manager inbox.")
+    return {"ticket_number": ticket_number, "status": "Vetting Active"}
+
+
+# -------------------------------------------------------------------
+# STAGE 2: DUAL-SIGNATURE NEGOTIATION LOOP (Infinite Handshake)
+# -------------------------------------------------------------------
+@app.put("/api/requisitions/{ticket_number}/propose-edits")
+def propose_ticket_edits(ticket_number: str, payload: ProposeEditsPayload, db: Session = Depends(get_db)):
+    """ Allows either party to edit the list and bounce it back to the other. """
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
+    if not ticket: raise HTTPException(status_code=404, detail="Requisition not found.")
+        
+    db.query(models.TicketItem).filter(models.TicketItem.ticket_number == ticket_number).delete()
+    for row in payload.items:
+        db.add(models.TicketItem(
+            ticket_number=ticket_number,
+            item_index=row.item_index,
+            product_description=row.product_description,
+            make_brand=row.make_brand,
+            quantity=row.quantity,
+            purpose=row.purpose
+        ))
+        
+    # Bouncing the state to the opposite party
+    if payload.user_role == "Site Manager":
+        ticket.status = "Awaiting Coordinator Sign-Off"
+    else:
+        ticket.status = "Vetting Active"
+    
+    db.add(models.TicketHistory(
+        ticket_number=ticket_number,
+        user_name=payload.user_name,
+        action_taken="Proposed Counter-Edits",
+        remarks=payload.remarks
+    ))
+    db.commit()
+    return {"ticket_number": ticket_number, "status": ticket.status}
+
+
+@app.put("/api/requisitions/{ticket_number}/approve")
+def dual_sign_approve(ticket_number: str, payload: DualApprovalPayload, db: Session = Depends(get_db)):
+    """ Safely locks the sign-off for one party. If both have signed, it dispatches to Sourcing. """
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
+    if not ticket: raise HTTPException(status_code=404, detail="Requisition not found.")
+
+    remarks_text = f"List Approved & Locked by {payload.user_role}."
+
+    if payload.user_role == "Site Manager":
+        if ticket.status == "Approved by Coordinator":
+            ticket.status = "Pending Sourcing"
+            remarks_text += " Dual-Agreement complete. Dispatched to Purchasing Desk."
+        else:
+            ticket.status = "Approved by Manager"
+            
+    elif payload.user_role == "Site Coordinator":
+        if ticket.status == "Approved by Manager":
+            ticket.status = "Pending Sourcing"
+            remarks_text += " Dual-Agreement complete. Dispatched to Purchasing Desk."
+        else:
+            ticket.status = "Approved by Coordinator"
+
+    db.add(models.TicketHistory(
+        ticket_number=ticket_number,
+        user_name=payload.user_name,
+        action_taken="Explicit Sign-Off Applied",
+        remarks=remarks_text
+    ))
+    db.commit()
+    return {"ticket_number": ticket_number, "status": ticket.status}
+
+
+# -------------------------------------------------------------------
+# STAGE 3: PURCHASING DESK QUOTATION ATTACHMENT (Sagar & Aadarsh)
+# -------------------------------------------------------------------
+@app.post("/api/requisitions/{ticket_number}/quotations")
+def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayload, db: Session = Depends(get_db)):
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
+    if not ticket: raise HTTPException(status_code=404, detail="Active requisition sheet not found.")
+        
+    highest_landed_total = 0.0
+
+    for quote in payload.quotations:
+        db_quote = models.Quotation(
+            ticket_number=ticket_number,
+            item_index=quote.item_index,
+            vendor_name=quote.vendor_name,
+            total_amount=quote.total_amount,
+            product_description=quote.product_description,
+            make_brand=quote.make_brand,
+            quantity=quote.quantity,
+            unit_price=quote.unit_price,
+            gst_percentage=quote.gst_percentage,
+            freight_charges=quote.freight_charges,
+            time_of_delivery=quote.time_of_delivery,
+            payment_terms=quote.payment_terms,
+            contract_start_date=quote.contract_start_date,
+            contract_end_date=quote.contract_end_date,
+            file_url=getattr(quote, "file_url", "No attachment provided"),
+            special_terms=quote.special_terms,
+            
+            # 🎯 Maps expanded metadata fields explicitly into the DB engine
+            vendor_address=quote.vendor_address,
+            vendor_contact=quote.vendor_contact,
+            vendor_email=quote.vendor_email,
+            delivery_address=quote.delivery_address,
+            site_contact_person=quote.site_contact_person,
+            site_contact_phone=quote.site_contact_phone,
+            base_total_value=quote.base_total_value,
+            net_amount_payable=quote.net_amount_payable
+        )
+        db.add(db_quote)
+        
+        if quote.total_amount > highest_landed_total:
+            highest_landed_total = quote.total_amount
+
+    # 3-TIER DELEGATION OF AUTHORITY MATRIX
+    if highest_landed_total <= 50000:
+        ticket.status = "Pending Purchase Approval"
+        routing_msg = "Order value under ₹50k. Routed to internal Purchasing Desk for direct approval."
+    elif highest_landed_total <= 1000000:
+        ticket.status = "Pending Project Manager"
+        routing_msg = "Order value between ₹50k - ₹10L. Routed to Project Manager."
+    else: 
+        ticket.status = "Pending Director"
+        routing_msg = "High-value order exceeding ₹10L. Routed to Executive Director Board."
+        
+    db.add(models.TicketHistory(
+        ticket_number=ticket_number,
+        user_name="Procurement Desk Officer",
+        action_taken="Quotations Processed",
+        remarks=routing_msg
+    ))
+    db.commit()
+    return {"ticket_number": ticket_number, "status": ticket.status}
+
+# -------------------------------------------------------------------
+# STAGE 4 & 5: MANAGEMENT SIGN-OFF & AUTOMATED DOCUMENT COMPILATION
+# -------------------------------------------------------------------
+@app.post("/api/requisitions/{ticket_number}/action")
+def process_financial_signoff(ticket_number: str, payload: FinanceApprovalPayload, db: Session = Depends(get_db)):
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
+    if not ticket: raise HTTPException(status_code=404, detail="Requisition not found.")
+
+    if payload.action == "Approve":
+        if not payload.selected_bids:
+            raise HTTPException(status_code=400, detail="You must select a winning bid for the items to approve.")
+            
+        for item_idx_str, winning_vendor in payload.selected_bids.items():
+            item_idx = int(item_idx_str)
+            db.query(models.Quotation).filter(
+                models.Quotation.ticket_number == ticket_number,
+                models.Quotation.item_index == item_idx,
+                models.Quotation.vendor_name == winning_vendor
+            ).update({"is_selected": True})
+
+        ticket.status = "Awaiting Digital Signature"
+        po_number = f"PO-2026-{random.randint(100000, 999999)}"
+        
+        new_po = models.PurchaseOrder(
+            po_number=po_number,
+            ticket_number=ticket_number,
+            pdf_url=f"/storage/aarvi_pos/{po_number}.pdf"
+        )
+        db.add(new_po)
+        remarks_text = f"Budget cleared by {payload.user_name}. Winning vendor bids locked. Draft PO template {po_number} generated and sent to Purchasing Department."
+        
+    elif payload.action == "Raise Query":
+        ticket.status = "Query Raised"
+        remarks_text = f"Query flagged by {payload.user_name}: {payload.remarks}"
+    else:
+        raise HTTPException(status_code=400, detail="Invalid operational action type.")
+
+    db.add(models.TicketHistory(
+        ticket_number=ticket_number,
+        user_name=payload.user_name,
+        action_taken=payload.action,
+        remarks=remarks_text
+    ))
+    db.commit()
+    return {"ticket_number": ticket_number, "status": ticket.status}
+
+
+# -------------------------------------------------------------------
+# STAGE 6: PURCHASE ORDER DIGITAL SIGNATURE COMPLETION
+# -------------------------------------------------------------------
+@app.post("/api/purchase-orders/{po_number}/sign")
+def sign_and_finalize_purchase_order(po_number: str, payload: DualApprovalPayload, db: Session = Depends(get_db)):
+    """Applies the purchasing department signature and updates statuses for downloading."""
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase Order records not found.")
+        
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+    if ticket:
+        ticket.status = "Approved"
+        
+    db.add(models.TicketHistory(
+        ticket_number=po.ticket_number,
+        user_name=payload.user_name,
+        action_taken="PO Digitally Signed",
+        remarks=f"Purchase Order {po_number} digitally verified and sealed by {payload.user_name}. Document open for logistics release."
+    ))
+    db.commit()
+    return {"po_number": po_number, "status": "Approved"}
+
+# -------------------------------------------------------------------
+# SYNCHRONIZATION ENDPOINTS (Live Dashboard Tracking)
+# -------------------------------------------------------------------
+@app.get("/api/requisitions/pending-vetting", response_model=List[dict])
+def get_pending_vetting_tickets(db: Session = Depends(get_db)):
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"])
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    
+    # 🎯 OPTIMIZATION: Added category parameter for easier tracking in the Manager UI
+    return [
+        {
+            "ticket_number": t.ticket_number, 
+            "project_code": t.project_code, 
+            "project_name": t.project_name, 
+            "status": t.status,
+            "category": t.category
+        } for t in tickets
+    ]
+
+@app.get("/api/requisitions/pending-handshake/{coordinator_id}", response_model=List[dict])
+def get_coordinator_handshake_queue(coordinator_id: int, db: Session = Depends(get_db)):
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.coordinator_id == coordinator_id,
+        models.MaterialTicket.status.in_(["Awaiting Coordinator Sign-Off", "Approved by Manager"])
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    
+    # 🎯 OPTIMIZATION: Added category parameter for explicit validation loops
+    return [
+        {
+            "ticket_number": t.ticket_number, 
+            "project_name": t.project_name, 
+            "status": t.status,
+            "category": t.category
+        } for t in tickets
+    ]
+
+@app.get("/api/requisitions/{ticket_number}/items", response_model=List[dict])
+def get_ticket_line_items(ticket_number: str, db: Session = Depends(get_db)):
+    items = db.query(models.TicketItem).filter(models.TicketItem.ticket_number == ticket_number).order_by(models.TicketItem.item_index.asc()).all()
+    return [{"item_index": i.item_index, "product_description": i.product_description, "make_brand": i.make_brand, "quantity": i.quantity, "purpose": i.purpose} for i in items]
+
+@app.get("/api/requisitions/{ticket_number}/history", response_model=List[dict])
+def get_ticket_history_logs(ticket_number: str, db: Session = Depends(get_db)):
+    logs = db.query(models.TicketHistory).filter(models.TicketHistory.ticket_number == ticket_number).order_by(models.TicketHistory.timestamp.desc()).all()
+    return [{"user_name": l.user_name, "action_taken": l.action_taken, "remarks": l.remarks, "timestamp": str(l.timestamp)} for l in logs]
+
+@app.get("/api/requisitions/pending-purchase-approval", response_model=List[dict])
+def get_pending_purchase_approval_tickets(db: Session = Depends(get_db)):
+    """Pulls all tickets < ₹50k waiting for direct Purchase Executive approval."""
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status == "Pending Purchase Approval"
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    
+    # 🎯 FIX: Added category parameter to ensure unified adaptive functionality
+    return [
+        {
+            "ticket_number": t.ticket_number, 
+            "project_code": t.project_code, 
+            "project_name": t.project_name, 
+            "status": t.status,
+            "category": t.category
+        } for t in tickets
+    ]
+
+@app.get("/api/requisitions/coordinator-history/{coordinator_id}", response_model=List[dict])
+def get_coordinator_completed_history(coordinator_id: int, db: Session = Depends(get_db)):
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.coordinator_id == coordinator_id,
+        models.MaterialTicket.status.notin_(["Vetting Active", "Awaiting Coordinator Sign-Off"])
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    
+    response = []
+    for t in tickets:
+        log = db.query(models.TicketHistory).filter(
+            models.TicketHistory.ticket_number == t.ticket_number,
+            models.TicketHistory.action_taken.in_(["Ticket Raised", "Explicit Sign-Off Applied"])
+        ).order_by(models.TicketHistory.id.desc()).first()
+        
+        response.append({
+            "ticket_number": t.ticket_number,
+            "project_code": t.project_code,
+            "project_name": t.project_name,
+            "status": t.status,
+            "action_date": str(log.timestamp) if log else "Date Unavailable"
+        })
+    return response
+
+@app.get("/api/requisitions/manager-history", response_model=List[dict])
+def get_manager_vetted_history_ledger(db: Session = Depends(get_db)):
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status.notin_(["Vetting Active", "Awaiting Coordinator Sign-Off", "Approved by Manager"])
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    
+    response = []
+    for t in tickets:
+        log = db.query(models.TicketHistory).filter(
+            models.TicketHistory.ticket_number == t.ticket_number,
+            models.TicketHistory.action_taken == "Explicit Sign-Off Applied"
+        ).order_by(models.TicketHistory.id.desc()).first()
+        
+        response.append({
+            "ticket_number": t.ticket_number,
+            "project_code": t.project_code,
+            "project_name": t.project_name,
+            "status": t.status,
+            "action_date": str(log.timestamp) if log else "Date Unavailable"
+        })
+    return response
+
+@app.get("/api/requisitions/pending-sourcing", response_model=List[dict])
+def get_pending_sourcing_tickets(db: Session = Depends(get_db)):
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status == "Pending Sourcing"
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    
+    # 🎯 FIX: Added category parameter to the response dictionary mapping
+    return [
+        {
+            "ticket_number": t.ticket_number, 
+            "project_code": t.project_code, 
+            "project_name": t.project_name, 
+            "status": t.status,
+            "category": t.category
+        } for t in tickets
+    ]
+
+@app.get("/api/requisitions/purchase-history", response_model=List[dict])
+def get_purchase_history(db: Session = Depends(get_db)):
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status.in_(["Pending Project Manager", "Pending Director", "Awaiting Digital Signature", "Approved", "Dispatched"])
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    
+    response = []
+    for t in tickets:
+        log = db.query(models.TicketHistory).filter(
+            models.TicketHistory.ticket_number == t.ticket_number,
+            models.TicketHistory.action_taken.in_(["Quotations Processed", "PO Digitally Signed"])
+        ).order_by(models.TicketHistory.id.desc()).first()
+        
+        response.append({
+            "ticket_number": t.ticket_number,
+            "project_code": t.project_code,
+            "project_name": t.project_name,
+            "status": t.status,
+            "action_date": str(log.timestamp) if log else "Date Unavailable"
+        })
+    return response
+
+@app.get("/api/requisitions/pending-management-approval", response_model=List[dict])
+def get_pending_management_approval_tickets(db: Session = Depends(get_db)):
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status.in_(["Pending Project Manager", "Pending Director", "Query Raised"])
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    return [{"ticket_number": t.ticket_number, "project_code": t.project_code, "project_name": t.project_name, "status": t.status} for t in tickets]
+
+@app.get("/api/requisitions/pm-history", response_model=List[dict])
+def get_pm_history(db: Session = Depends(get_db)):
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status.in_(["Pending Director", "Awaiting Digital Signature", "Approved", "Dispatched"])
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    
+    response = []
+    for t in tickets:
+        log = db.query(models.TicketHistory).filter(
+            models.TicketHistory.ticket_number == t.ticket_number,
+            models.TicketHistory.action_taken == "Approve"
+        ).order_by(models.TicketHistory.id.desc()).first()
+        
+        response.append({
+            "ticket_number": t.ticket_number,
+            "project_code": t.project_code,
+            "project_name": t.project_name,
+            "status": t.status,
+            "approval_date": str(log.timestamp) if log else "Date Unavailable"
+        })
+    return response
+
+@app.get("/api/requisitions/director-history", response_model=List[dict])
+def get_director_history(db: Session = Depends(get_db)):
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status.in_(["Awaiting Digital Signature", "Approved", "Dispatched"])
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    
+    response = []
+    for t in tickets:
+        log = db.query(models.TicketHistory).filter(
+            models.TicketHistory.ticket_number == t.ticket_number,
+            models.TicketHistory.action_taken == "Approve"
+        ).order_by(models.TicketHistory.id.desc()).first()
+        
+        response.append({
+            "ticket_number": t.ticket_number,
+            "project_code": t.project_code,
+            "project_name": t.project_name,
+            "status": t.status,
+            "approval_date": str(log.timestamp) if log else "Date Unavailable"
+        })
+    return response
+
+@app.get("/api/requisitions/{ticket_number}/quotations", response_model=List[dict])
+def get_ticket_vendor_quotations(ticket_number: str, db: Session = Depends(get_db)):
+    quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == ticket_number).all()
+    return [
+        {
+            "item_index": q.item_index,
+            "vendor_name": q.vendor_name,
+            "total_amount": float(q.total_amount),
+            "product_description": q.product_description,
+            "make_brand": q.make_brand,
+            "quantity": q.quantity,
+            "time_of_delivery": q.time_of_delivery,
+            "special_terms": q.special_terms,
+            "is_selected": q.is_selected,
+            
+            # 🎯 NEW: Safely serialize advanced legal, logistics & calculation metrics downstream
+            "vendor_address": q.vendor_address,
+            "vendor_contact": q.vendor_contact,
+            "vendor_email": q.vendor_email,
+            "delivery_address": q.delivery_address,
+            "site_contact_person": q.site_contact_person,
+            "site_contact_phone": q.site_contact_phone,
+            "base_total_value": float(q.base_total_value or 0),
+            "net_amount_payable": float(q.net_amount_payable or 0)
+        } for q in quotes
+    ]
+
+@app.get("/api/purchase-orders/pending-signature", response_model=List[dict])
+def get_purchase_orders_awaiting_signature(db: Session = Depends(get_db)):
+    orders = db.query(
+        models.PurchaseOrder, 
+        models.MaterialTicket
+    ).join(
+        models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number
+    ).filter(models.MaterialTicket.status == "Awaiting Digital Signature").all()
+    
+    response = []
+    for po_obj, ticket_obj in orders:
+        winning_quotes = db.query(models.Quotation).filter(
+            models.Quotation.ticket_number == po_obj.ticket_number,
+            models.Quotation.is_selected == True
+        ).all()
+        
+        grand_total = sum(q.total_amount for q in winning_quotes)
+        
+        vendor_names = list(set(q.vendor_name for q in winning_quotes))
+        primary_vendor = vendor_names[0] if vendor_names else "Pending Vendor Linking"
+        if len(vendor_names) > 1:
+            primary_vendor += f" (+{len(vendor_names)-1} more)"
+
+        response.append({
+            "po_number": po_obj.po_number,
+            "ticket_number": po_obj.ticket_number,
+            "vendor_name": primary_vendor,
+            "grand_total": float(grand_total),
+            "project_name": ticket_obj.project_name,
+            "project_code": ticket_obj.project_code,
+            "status": "Awaiting Digital Signature",
+            "approved_by": "Pending Executive Seal",
+            "category": ticket_obj.category 
+        })
+        
+    return response
+
+# -------------------------------------------------------------------
+# WORD DOCUMENT GENERATION ENGINE
+# -------------------------------------------------------------------
+@app.get("/api/purchase-orders/{po_number}/download-docx")
+def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
+    # 1. Fetch data from DB
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase Order not found in database.")
+        
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+    winning_quotes = db.query(models.Quotation).filter(
+        models.Quotation.ticket_number == po.ticket_number,
+        models.Quotation.is_selected == True
+    ).all()
+
+    if not winning_quotes:
+        raise HTTPException(status_code=400, detail="No selected winning bids found.")
+
+    primary_quote = winning_quotes[0]
+
+    # 2. Calculate financial totals
+    base_grand_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
+    net_grand_total = sum(float(q.net_amount_payable or 0) for q in winning_quotes)
+
+    # Convert numeric total to words for Indian Rupees
+    def number_to_words(num):
+        if num == 0: return 'Zero'
+        ones = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen ']
+        tens = ['', '', 'Twenty ', 'Thirty ', 'Forty ', 'Fifty ', 'Sixty ', 'Seventy ', 'Eighty ', 'Ninety ']
+        def convert_less_thousand(n):
+            s = ''
+            if n >= 100: s += ones[int(n // 100)] + 'Hundred '; n %= 100
+            if n >= 20: s += tens[int(n // 10)]; n %= 10
+            if n > 0: s += ones[int(n)]
+            return s
+        str_val = ''
+        crore = int(num // 10000000); num %= 10000000
+        lakh = int(num // 100000); num %= 100000
+        thousand = int(num // 1000); num %= 1000
+        if crore > 0: str_val += convert_less_thousand(crore) + 'Crore '
+        if lakh > 0: str_val += convert_less_thousand(lakh) + 'Lakh '
+        if thousand > 0: str_val += convert_less_thousand(thousand) + 'Thousand '
+        if num > 0: str_val += convert_less_thousand(num)
+        return str_val.strip() + ' Only'
+
+    # 3. Create the data list for the Word table
+    items_data = []
+    for idx, item in enumerate(winning_quotes, start=1):
+        qty = item.quantity or 1
+        base_val = float(item.base_total_value or 0)
+        rate = base_val / qty
+        items_data.append({
+            "sr": f"0{idx}",
+            "desc": f"{item.product_description} [Brand: {item.make_brand}]" if item.make_brand else item.product_description,
+            "qty": str(qty),
+            "rate": f"{rate:,.2f}",
+            "total": f"{base_val:,.2f}"
+        })
+
+    # 4. Load the Official Word Template
+    try:
+        doc = DocxTemplate("official_PO.docx")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Template 'official_PO.docx' not found. Error: {str(e)}")
+
+    category_code = ticket.category[:4].upper() if ticket and ticket.category else "GEN"
+
+    # 5. Inject tags into the template
+    context = {
+        "po_number": po_number.split('-')[-1],
+        "category_code": category_code,
+        "date": date.today().strftime('%d-%m-%Y'),
+        "vendor_name": primary_quote.vendor_name,
+        "vendor_address": primary_quote.vendor_address or "Address Not Provided",
+        "vendor_contact": primary_quote.vendor_contact or "N/A",
+        "vendor_email": primary_quote.vendor_email or "N/A",
+        "project_name": ticket.project_name if ticket else "N/A",
+        "project_code": ticket.project_code if ticket else "N/A",
+        "delivery_address": primary_quote.delivery_address or "As per site guidelines",
+        "site_contact": primary_quote.site_contact_person or "Site In-Charge",
+        "site_phone": primary_quote.site_contact_phone or "N/A",
+        "base_total": f"{base_grand_total:,.2f}",
+        "gst_adjustment": f"{(net_grand_total - base_grand_total):,.2f}",
+        "net_amount": f"{net_grand_total:,.2f}",
+        "amount_in_words": f"Rupees {number_to_words(int(round(net_grand_total)))}",
+        "items": items_data
+    }
+
+    doc.render(context)
+    
+    # 6. Return the finished document as a direct browser download
+    file_stream = io.BytesIO()
+    doc.save(file_stream)
+    file_stream.seek(0)
+    
+    return StreamingResponse(
+        file_stream,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename=Aarvi_{category_code}_{po_number}.docx"}
+    )
+
+# --- SYSTEM HEALTH ROUTER ---
+@app.get("/")
+def connection_ping():
+    return {"status": "online", "message": "Aarvi Encon SCM Routing Router fully initialized."}
