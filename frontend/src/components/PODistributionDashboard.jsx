@@ -1,8 +1,8 @@
 // src/components/PODistributionDashboard.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Download, FileText, Edit3 } from 'lucide-react';
-import { Card } from './ui/SharedUI';
+import { Download, FileText, Edit3, Stamp, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Card, Button } from './ui/SharedUI';
 import aarviLogo from '../assets/logo.png';
 import Letterhead from '../assets/letter_head.jpg';
 
@@ -13,6 +13,8 @@ export default function PODistributionDashboard({ currentUser }) {
   const [selectedPo, setSelectedPo] = useState(null);
   const [poItems, setPoItems] = useState([]); 
   const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false); // 🎯 NEW: Added for seal action
+  const [alert, setAlert] = useState(null); // 🎯 NEW: Added for success/error messages
   
   const [pdfEngineReady, setPdfEngineReady] = useState(() => typeof window !== 'undefined' && !!window.html2pdf);
 
@@ -45,6 +47,7 @@ export default function PODistributionDashboard({ currentUser }) {
 
   const openPoTemplate = async (po) => {
     setSelectedPo(po);
+    setAlert(null); // 🎯 Reset alerts when switching POs
     setLoading(true);
     try {
       const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${po.ticket_number}/quotations`);
@@ -54,6 +57,27 @@ export default function PODistributionDashboard({ currentUser }) {
       console.error("Error loading PO items", err); 
     } finally { 
       setLoading(false); 
+    }
+  };
+
+  // 🎯 NEW: Seal & Dispatch function
+  const handleSealAndDispatch = async () => {
+    if (!selectedPo) return;
+    
+    setActionLoading(true);
+    try {
+      await axios.post(`${API_BASE_URL}/purchase-orders/${selectedPo.po_number}/sign`, {
+        user_name: currentUser?.name || "Purchase Executive",
+        user_role: currentUser?.role || "Purchase Executive"
+      });
+      
+      setAlert({ type: 'success', message: `PO ${selectedPo.po_number} successfully sealed and dispatched!` });
+      setSelectedPo(null);
+      fetchReleasedPOs(); // Refresh the queue
+    } catch (err) {
+      setAlert({ type: 'error', message: "Failed to seal the Purchase Order. Please try again." });
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -136,7 +160,7 @@ export default function PODistributionDashboard({ currentUser }) {
   const nextYear = currentYear + 1;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-12">
       
       {/* 🛡️ DEEP CSS ISOLATION: Prevents splitting lines during print */}
       <style>{`
@@ -147,7 +171,7 @@ export default function PODistributionDashboard({ currentUser }) {
         }
         @media print {
           html, body { background: #ffffff !important; color: #000000 !important; margin: 0 !important; padding: 0 !important; }
-          .print\\:hidden, nav, aside, header, button, .bg-slate-900 { display: none !important; }
+          .print\\:hidden, nav, aside, header, button, .bg-slate-900, .seal-footer { display: none !important; }
           #root, main, .grid, .xl\\:col-span-9, #isolated-print-wrapper, .bg-white { display: block !important; width: 100% !important; max-width: 100% !important; background: #ffffff !important; margin: 0 !important; padding: 0 !important; border: none !important; box-shadow: none !important; position: static !important; overflow: visible !important; }
         }
       `}</style>
@@ -158,6 +182,14 @@ export default function PODistributionDashboard({ currentUser }) {
           <p className="text-sm text-slate-500 font-medium">Verify dynamically generated parameters and download full multi-page PDFs.</p>
         </div>
       </div>
+
+      {/* 🎯 NEW: Alert Banner */}
+      {alert && (
+        <div className={`p-4 rounded-xl flex items-center space-x-3 border ${alert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
+          {alert.type === 'success' ? <CheckCircle2 size={18} className="flex-shrink-0" /> : <AlertCircle size={18} className="flex-shrink-0" />}
+          <span className="font-semibold text-sm">{alert.message}</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
         
@@ -206,8 +238,8 @@ export default function PODistributionDashboard({ currentUser }) {
                 </button>
               </div>
 
-              {/* 🎯 TIGHTENED PADDING: We remove heavy screen padding so the margin engine takes over perfectly */}
-              <div id="printable-po" className="p-8 space-y-6 font-sans bg-white select-text relative w-full h-auto overflow-visible text-justify">
+              {/* 🎯 TIGHTENED PADDING */}
+              <div id="printable-po" className="p-8 pb-32 space-y-6 font-sans bg-white select-text relative w-full h-auto overflow-visible text-justify">
                 
                 <div className="hidden print:block print:fixed print:top-0 print:left-0 print:z-0 w-12 pt-3 pl-3">
                   <img src={aarviLogo} alt="Aarvi running logo" className="w-full h-auto object-contain opacity-90" />
@@ -616,6 +648,23 @@ export default function PODistributionDashboard({ currentUser }) {
                 </div>
 
               </div>
+              
+              {/* 🎯 NEW: THE MISSING SEAL & DISPATCH FOOTER */}
+              <div className="seal-footer absolute bottom-0 left-0 right-0 bg-slate-50 border-t border-slate-200 p-4 flex justify-between items-center shadow-[0_-10px_20px_rgba(0,0,0,0.03)] print:hidden">
+                <div className="text-xs text-slate-500 font-medium">
+                  Applying cryptographic seal records action to ledger.
+                </div>
+                <Button 
+                  onClick={handleSealAndDispatch} 
+                  disabled={actionLoading}
+                  className="bg-[#2c2a57] hover:bg-[#1e1c3a] text-white px-6 py-2.5 text-sm font-bold shadow-md flex items-center gap-2 transition-all"
+                >
+                  <Stamp size={16} />
+                  <span>{actionLoading ? "Sealing Document..." : "Seal & Dispatch Order"}</span>
+                  {!actionLoading && <ArrowRight size={16} />}
+                </Button>
+              </div>
+
             </Card>
           ) : (
             <div className="h-64 border border-dashed border-slate-300 rounded-xl bg-white flex flex-col items-center justify-center text-slate-400 text-sm p-6 text-center">

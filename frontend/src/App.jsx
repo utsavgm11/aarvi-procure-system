@@ -8,11 +8,12 @@ import PurchaseExecutiveDashboard from './components/PurchaseExecutiveDashboard'
 import ProjectManagerDashboard from './components/ProjectManagerDashboard';
 import DirectorDashboard from './components/DirectorDashboard';
 
-// 🎯 NEW: Import the PODistributionDashboard!
+// 🎯 COMPONENTS IMPORT UPGRADES
 import PODistributionDashboard from './components/PODistributionDashboard'; 
+import MasterPOLedgerDesk from './components/MasterPOLedgerDesk'; // 🎯 NEW: Linked missing Master Ledger component
 
 // Role Dashboard Router Component
-function DashboardViewSelector({ userSession }) {
+function DashboardViewSelector({ userSession, defaultTab = "commercial" }) {
   if (!userSession) {
     return <div className="text-center py-20 text-slate-500 font-medium mt-10">Initializing session profile context...</div>;
   }
@@ -25,7 +26,8 @@ function DashboardViewSelector({ userSession }) {
     case 'Purchase Executive':
       return <PurchaseExecutiveDashboard currentUser={userSession} />;
     case 'Project Manager':
-      return <ProjectManagerDashboard currentUser={userSession} />;
+      // 🎯 SPLIT-APP PASSING: Feeds an initial perspective filter to the Project Manager's dual workspace
+      return <ProjectManagerDashboard currentUser={userSession} defaultTab={defaultTab} />;
     case 'Director':
       return <DirectorDashboard currentUser={userSession} />;
     default:
@@ -46,10 +48,17 @@ function App() {
       <Routes>
         <Route path="/" element={<Layout userSession={userSession} setUserSession={setUserSession} />}>
           
+          {/* Base Layout Main Entry View */}
           <Route index element={<DashboardViewSelector userSession={userSession} />} />
           
-          {/* 🎯 FIXED: Replaced the "Coming Soon" text with the actual PO Dashboard component */}
+          {/* 🎯 FIXED: PO Distribution Workspace Catch Route */}
           <Route path="pos" element={<PODistributionDashboard currentUser={userSession} />} />
+          
+          {/* 🎯 FIXED: Missing Master PO Ledger Analytics Catch Route */}
+          <Route path="po-ledger" element={<MasterPOLedgerDesk currentUser={userSession} />} />
+
+          {/* 🎯 FIXED: Project Manager Technical Vetting Sub-Route Mapping */}
+          <Route path="vetting" element={<DashboardViewSelector userSession={userSession} defaultTab="vetting" />} />
           
           {/* Future workflow placeholders */}
           <Route path="inbox" element={<div className="text-center py-20 text-slate-500 font-medium mt-10">Manager Inbox Grid Gateway Coming Soon...</div>} />

@@ -10,6 +10,8 @@ class User(Base):
     email = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False)
+    # 🎯 NEW: Added to support fetching active users for the dropdowns
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class MaterialTicket(Base):
@@ -19,13 +21,16 @@ class MaterialTicket(Base):
     project_code = Column(String, nullable=False)
     project_name = Column(String, nullable=False)
     coordinator_id = Column(Integer, ForeignKey("users.id"))
+    
+    # 🎯 NEW: Dynamic Routing Assignments
+    assigned_site_manager_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_project_manager_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
     category = Column(String, default="GOODS")
     status = Column(String, default="Pending Site Manager")
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    # 🎯 NEW: Financial tracking flags for the Accounts Ledger
-    is_reimbursable = Column(Boolean, default=False)
-    reimbursement_notes = Column(Text, nullable=True)
+    # Note: is_reimbursable removed from here and moved to TicketItem
 
 class TicketItem(Base):
     __tablename__ = "ticket_items"
@@ -36,6 +41,11 @@ class TicketItem(Base):
     make_brand = Column(String, nullable=True)
     quantity = Column(Integer, nullable=False)
     purpose = Column(String, nullable=False)
+    
+    # 🎯 NEW: Financial tracking flags shifted to the LINE-ITEM level
+    is_reimbursable = Column(Boolean, default=False)
+    reimbursement_notes = Column(Text, nullable=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Quotation(Base):
@@ -60,10 +70,8 @@ class Quotation(Base):
     is_selected = Column(Boolean, default=False)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     
-    # 🎯 NEW: Quality tracking column for PM Bidding Desk evaluation
     quality_remarks = Column(Text, nullable=True)
     
-    # 🎯 Complete Legal, Billing & Site Logistics Data Structure
     vendor_address = Column(Text, nullable=True)
     vendor_contact = Column(String, nullable=True)
     vendor_email = Column(String, nullable=True)
@@ -89,3 +97,6 @@ class PurchaseOrder(Base):
     ticket_number = Column(String, ForeignKey("material_tickets.ticket_number", ondelete="CASCADE"))
     generated_at = Column(DateTime, default=datetime.utcnow)
     pdf_url = Column(String, nullable=False)
+    invoice_no = Column(String, nullable=True)
+    invoice_date = Column(String, nullable=True)
+    invoice_remark = Column(String, nullable=True)

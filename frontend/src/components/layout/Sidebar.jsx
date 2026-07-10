@@ -2,7 +2,7 @@
 import React from 'react';
 import { 
   LayoutDashboard, FileSpreadsheet, FileCheck, ShieldAlert, 
-  LogOut, UserCheck, ShoppingCart, CheckSquare, DollarSign, X 
+  LogOut, UserCheck, ShoppingCart, CheckSquare, X 
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -34,13 +34,20 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
         return [
           { name: 'Sourcing Hub', path: '/', icon: ShoppingCart },
           { name: 'PO Distribution', path: '/pos', icon: FileCheck },
+          // 🎯 NEW: Master PO Ledger added for Purchase Executives
+          { name: 'Master PO Ledger', path: '/po-ledger', icon: FileSpreadsheet },
         ];
       case 'Project Manager':
+        // 🎯 SPLIT APP: PM gets both Technical Vetting and Commercial Approvals
+        return [
+          { name: 'Commercial Approvals', path: '/', icon: CheckSquare },
+          { name: 'Technical Vetting', path: '/vetting', icon: ShieldAlert },
+          { name: 'Master PO Ledger', path: '/po-ledger', icon: FileCheck },
+        ];
       case 'Director':
         return [
           { name: 'Corporate Approvals', path: '/', icon: CheckSquare },
-          { name: 'Budget Control', path: '/dashboard', icon: DollarSign },
-          { name: 'ERP Analytics', path: '/analytics', icon: LayoutDashboard },
+          { name: 'Master PO Ledger', path: '/po-ledger', icon: FileCheck },
         ];
       default:
         return [
@@ -57,10 +64,8 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
         ${isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}
     >
-      {/* 🎯 FLEX-1 WRAPPER WITH INTERNAL SCROLL TO PREVENT CONTENT OVERLAPPING */}
       <div className="flex flex-col flex-1 min-h-0 overflow-y-auto custom-scrollbar justify-between">
         
-        {/* Navigation Navigation Section */}
         <div className="py-6 px-3 space-y-1">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-3 mb-3 select-none">
             Main Navigation
@@ -82,7 +87,6 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
                       : 'text-slate-500 hover:bg-slate-50 hover:text-[#2c2a57]'
                   }`}
                 >
-                  {/* Visual Active Left Indicator (Aarvi Emerald Green from website banner) */}
                   {isActive && (
                     <div className="absolute left-0 top-2 bottom-2 w-1 bg-[#0b9c54] rounded-r-md"></div>
                   )}
@@ -98,7 +102,6 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
           </nav>
         </div>
 
-        {/* Identity Profile Swapper (Pinned Safely at the Bottom container) */}
         <div className="p-4 border-t border-slate-100 bg-slate-50/60 flex-shrink-0">
           <div className="mb-3">
             <div className="flex items-center space-x-1.5 text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1.5 px-1">
@@ -121,7 +124,6 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
             </select>
           </div>
 
-          {/* Secure Logout Action Button */}
           <button className="w-full flex items-center justify-center space-x-2 px-3 py-2.5 text-slate-500 hover:text-rose-600 bg-white border border-slate-200 hover:border-rose-200 hover:bg-rose-50/50 rounded-lg text-sm font-semibold transition-all shadow-xs">
             <LogOut size={16} className="flex-shrink-0" />
             <span>Secure Logout</span>

@@ -1,7 +1,6 @@
 // src/components/SiteCoordinatorDashboard.jsx
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import axiosInstance from 'axios'; // Fallback to raw axios if instance isn't decoupled
+import axiosInstance from 'axios'; 
 import { Plus, Trash2, Send, Clock, FileSpreadsheet, CheckCircle2, MessageSquare, Check, AlertTriangle, FileText, CheckCircle } from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI'; 
 
@@ -10,14 +9,29 @@ const MOCK_USER_ID = 1;
 const MOCK_USER_NAME = "Amit Sharma";
 const MOCK_USER_ROLE = "Site Coordinator";
 
+// 🎯 STATIC MOCK DIRECTORY (Will be replaced by a live /users API later)
+const MOCK_SITE_MANAGERS = [
+  { id: '', name: '-- None (Route Direct to PM) --' },
+  { id: 2, name: 'Vikram Rathore' },
+  { id: 7, name: 'Rahul Desai' }
+];
+
+const MOCK_PROJECT_MANAGERS = [
+  { id: '', name: '-- Select Project Manager --' },
+  { id: 5, name: 'Rohan Kapoor' },
+  { id: 8, name: 'Priya Singh' }
+];
+
 export default function SiteCoordinatorDashboard() {
   const [activeTab, setActiveTab] = useState('new_request'); 
   const [projectCode, setProjectCode] = useState('');
   const [projectName, setProjectName] = useState('');
-  
-  // 🎯 NEW: Procurement Category State (Defaults to GOODS)
   const [category, setCategory] = useState('GOODS'); 
   
+  // 🎯 Routing Assignment States
+  const [siteManagerId, setSiteManagerId] = useState('');
+  const [projectManagerId, setProjectManagerId] = useState('');
+
   const [items, setItems] = useState([{ product_description: '', make_brand: '', quantity: 1, purpose: '' }]);
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
@@ -138,40 +152,50 @@ export default function SiteCoordinatorDashboard() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!projectManagerId) {
+      setAlert({ type: 'error', message: 'You must assign a Project Manager for this pipeline.' });
+      return;
+    }
+
     setLoading(true); setAlert(null);
     try {
       const response = await axiosInstance.post(`${API_BASE_URL}/requisitions`, {
         project_code: projectCode, 
         project_name: projectName, 
         coordinator_id: MOCK_USER_ID,
-        category: category, // 🎯 NEW: Sending the selected category to the backend
+        category: category,
+        assigned_site_manager_id: siteManagerId ? parseInt(siteManagerId) : null,
+        assigned_project_manager_id: parseInt(projectManagerId),
         items: items.map(item => ({ ...item, quantity: parseInt(item.quantity) || 1 }))
       });
-      setAlert({ type: 'success', message: `Ticket ${response.data.ticket_number} launched into Vetting Phase.` });
       
-      // Reset form
+      setAlert({ type: 'success', message: `Ticket ${response.data.ticket_number} launched into routing matrix.` });
+      
       setProjectCode(''); 
       setProjectName(''); 
-      setCategory('GOODS'); // Reset to default
+      setCategory('GOODS');
+      setSiteManagerId('');
+      setProjectManagerId('');
       setItems([{ product_description: '', make_brand: '', quantity: 1, purpose: '' }]);
     } catch (error) { setAlert({ type: 'error', message: 'Failed to submit requisition.' }); } 
     finally { setLoading(false); }
   };
 
+  // 🎯 FIXED & STREAMLINED STATUS MAP
   const getStepStatus = (currentStatus, stepIndex) => {
     const statusMap = {
       'Vetting Active': 1,
       'Awaiting Coordinator Sign-Off': 1,
       'Approved by Manager': 1,
       'Approved by Coordinator': 1,
+      'Pending PM Vetting': 1, 
       'Pending Sourcing': 2,
-      'Pending Purchase Approval': 3, // Fits in Mgmt step for Petty Cash
+      'Pending Purchase Approval': 3,
       'Pending Project Manager': 3,
       'Pending Director': 3,
       'Query Raised': 3,
-      'Awaiting Digital Signature': 4,
-      'Approved': 4,
-      'Dispatched': 5
+      'Awaiting Digital Signature': 4, // 🟡 Step 4 Active (Draft generated, waiting for seal)
+      'Approved': 5                    // 🟢 Step 4 Completed (Fully complete!)
     };
 
     const currentStep = statusMap[currentStatus] || 1;
@@ -189,10 +213,10 @@ export default function SiteCoordinatorDashboard() {
           <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Site Coordinator Workspace</h1>
           <p className="text-sm text-slate-500 font-medium">Raise, evaluate, and coordinate project material pipelines</p>
         </div>
-        <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full md:w-auto">
-          <Button variant={activeTab === 'new_request' ? 'primary' : 'ghost'} onClick={() => setActiveTab('new_request')} className="text-xs py-1.5 flex-1 md:flex-none">New Request</Button>
-          <Button variant={activeTab === 'proposals' ? 'primary' : 'ghost'} onClick={() => setActiveTab('proposals')} className="text-xs py-1.5 flex-1 md:flex-none">Needs Review ({proposals.length})</Button>
-          <Button variant={activeTab === 'history' ? 'primary' : 'ghost'} onClick={() => setActiveTab('history')} className="text-xs py-1.5 flex-1 md:flex-none">Pipeline Tracker</Button>
+        <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full md:w-auto overflow-x-auto">
+          <Button variant={activeTab === 'new_request' ? 'primary' : 'ghost'} onClick={() => setActiveTab('new_request')} className="text-xs py-1.5 flex-1 md:flex-none whitespace-nowrap">New Request</Button>
+          <Button variant={activeTab === 'proposals' ? 'primary' : 'ghost'} onClick={() => setActiveTab('proposals')} className="text-xs py-1.5 flex-1 md:flex-none whitespace-nowrap">Needs Review ({proposals.length})</Button>
+          <Button variant={activeTab === 'history' ? 'primary' : 'ghost'} onClick={() => setActiveTab('history')} className="text-xs py-1.5 flex-1 md:flex-none whitespace-nowrap">Pipeline Tracker</Button>
         </div>
       </div>
 
@@ -205,23 +229,53 @@ export default function SiteCoordinatorDashboard() {
       {/* VIEW A: NEW REQUEST FORM SUBMISSION CONTAINER */}
       {activeTab === 'new_request' && (
         <form onSubmit={handleSubmit} className="space-y-6 max-w-6xl">
-          
-          {/* 🎯 UPDATED: 3-Column Grid includes the new Category Select */}
-          <Card className="p-5 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Input label="Project Cost Center Code" required value={projectCode} onChange={e => setProjectCode(e.target.value)} placeholder="e.g. REL-JAM-04" />
-            <Input label="Project / Site Name Description" required value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. Jamnagar Plant Block C" />
-            
-            <div className="flex flex-col space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Procurement Category</label>
-              <select 
-                value={category} 
-                onChange={e => setCategory(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-semibold text-[#2c2a57] focus:bg-white focus:border-[#2c2a57] outline-none transition-all"
-              >
-                <option value="GOODS">Standard Goods & Materials</option>
-                <option value="VEHICLE">Vehicle & Transport Rental</option>
-                <option value="ACCOMMODATION">Guest House & Accommodation</option>
-              </select>
+          <Card className="p-5 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input label="Project Cost Center Code" required value={projectCode} onChange={e => setProjectCode(e.target.value)} placeholder="e.g. REL-JAM-04" />
+              <Input label="Project / Site Name Description" required value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. Jamnagar Plant Block C" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4">
+              <div className="flex flex-col space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Procurement Category</label>
+                <select 
+                  value={category} 
+                  onChange={e => setCategory(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-semibold text-[#2c2a57] focus:bg-white focus:border-[#2c2a57] outline-none transition-all"
+                >
+                  <option value="GOODS">Standard Goods & Materials</option>
+                  <option value="VEHICLE">Vehicle & Transport Rental</option>
+                  <option value="ACCOMMODATION">Guest House & Accommodation</option>
+                  <option value="FOOD">Food & Canteen Services</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Site Manager (Vetting)</label>
+                <select 
+                  value={siteManagerId} 
+                  onChange={e => setSiteManagerId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 focus:bg-white focus:border-indigo-400 outline-none transition-all"
+                >
+                  {MOCK_SITE_MANAGERS.map(sm => (
+                    <option key={sm.id} value={sm.id}>{sm.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col space-y-1.5">
+                <label className="text-[11px] font-bold text-rose-500 uppercase tracking-wider">Project Manager (Required)</label>
+                <select 
+                  required
+                  value={projectManagerId} 
+                  onChange={e => setProjectManagerId(e.target.value)}
+                  className="w-full bg-rose-50/30 border border-rose-200 rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 focus:bg-white focus:border-rose-400 outline-none transition-all"
+                >
+                  {MOCK_PROJECT_MANAGERS.map(pm => (
+                    <option key={pm.id} value={pm.id}>{pm.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </Card>
 
@@ -262,7 +316,7 @@ export default function SiteCoordinatorDashboard() {
 
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-3">
               <Button type="button" variant="secondary" onClick={addRow} className="w-full sm:w-auto text-xs py-2"><Plus size={14} /> <span>Add Row Item</span></Button>
-              <Button type="submit" variant="success" disabled={loading} className="w-full sm:w-auto text-xs py-2 shadow-sm"><Send size={14} /> <span>Submit to Manager</span></Button>
+              <Button type="submit" variant="success" disabled={loading} className="w-full sm:w-auto text-xs py-2 shadow-sm"><Send size={14} /> <span>Submit to Routing Engine</span></Button>
             </div>
           </Card>
         </form>
@@ -327,8 +381,8 @@ export default function SiteCoordinatorDashboard() {
                   <div className="p-4 border-t border-slate-100 bg-slate-50 space-y-4">
                     <Input label="Your Counter Remarks (Required to push adjustments)" value={coordinatorRemarks} onChange={e => setCoordinatorRemarks(e.target.value)} placeholder="Provide reasoning if adjustments or re-additions were made..." />
                     <div className="flex flex-col sm:flex-row justify-end gap-2 pt-1">
-                      <Button variant="danger" onClick={handleCounterPush} disabled={loading} className="text-xs py-2"><MessageSquare size={14} /> <span>Propose Counter-Edits</span></Button>
-                      <Button variant="success" onClick={handleFinalSignOff} disabled={loading} className="text-xs py-2"><Check size={14} /> <span>Approve & Sign-Off</span></Button>
+                      <Button variant="danger" onClick={handleCounterPush} disabled={loading} className="w-full sm:w-auto text-xs py-2"><MessageSquare size={14} /> <span>Propose Counter-Edits</span></Button>
+                      <Button variant="success" onClick={handleFinalSignOff} disabled={loading} className="w-full sm:w-auto text-xs py-2"><Check size={14} /> <span>Approve & Sign-Off</span></Button>
                     </div>
                   </div>
                 </Card>
@@ -380,73 +434,91 @@ export default function SiteCoordinatorDashboard() {
                   </div>
                 </div>
 
-                {/* VISUAL STEPPER TRACK MATRIX */}
-                <div className="grid grid-cols-5 gap-1.5 relative pt-1">
-                  
-                  {/* Step 1: Site Alignment */}
-                  <div className="text-center flex flex-col items-center relative group">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center border font-bold text-xs transition-all ${
-                      getStepStatus(ticket.status, 1) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
-                      getStepStatus(ticket.status, 1) === 'active' ? 'bg-indigo-50 border-indigo-400 text-indigo-600 animate-pulse' :
-                      'bg-slate-50 border-slate-200 text-slate-400'
-                    }`}>
-                      {getStepStatus(ticket.status, 1) === 'completed' ? <CheckCircle size={14} /> : "1"}
+                {/* VISUAL STEPPER TRACK MATRIX (Now Responsive & 4 Steps) */}
+                <div className="overflow-x-auto custom-scrollbar pb-2">
+                  <div className="grid grid-cols-4 min-w-[500px] sm:min-w-full gap-2 relative pt-2">
+                    
+                    {/* Step 1: Site Alignment */}
+                    <div className="text-center flex flex-col items-center relative group">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 font-bold text-xs transition-all relative ${
+                        getStepStatus(ticket.status, 1) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
+                        getStepStatus(ticket.status, 1) === 'active' ? 'bg-indigo-50 border-indigo-400 text-indigo-600' :
+                        'bg-slate-50 border-slate-200 text-slate-400'
+                      }`}>
+                        {/* PING ANIMATION DOT */}
+                        {getStepStatus(ticket.status, 1) === 'active' && (
+                          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                          </span>
+                        )}
+                        {getStepStatus(ticket.status, 1) === 'completed' ? <CheckCircle size={15} /> : "1"}
+                      </div>
+                      <span className={`text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 1) === 'active' ? 'text-indigo-600' : 'text-slate-600'}`}>Site Handshake</span>
+                      <p className="text-[8px] text-slate-400 font-medium">Dual-Vetting</p>
                     </div>
-                    <span className={`text-[10px] font-bold mt-1.5 tracking-tight ${getStepStatus(ticket.status, 1) === 'active' ? 'text-indigo-600' : 'text-slate-600'}`}>Site Handshake</span>
-                    <p className="text-[8px] text-slate-400 font-medium">Dual-Vetting</p>
-                  </div>
 
-                  {/* Step 2: Sourcing Desk */}
-                  <div className="text-center flex flex-col items-center relative group">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center border font-bold text-xs transition-all ${
-                      getStepStatus(ticket.status, 2) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
-                      getStepStatus(ticket.status, 2) === 'active' ? 'bg-cyan-50 border-cyan-400 text-cyan-600 animate-pulse' :
-                      'bg-slate-50 border-slate-200 text-slate-400'
-                    }`}>
-                      {getStepStatus(ticket.status, 2) === 'completed' ? <CheckCircle size={14} /> : "2"}
+                    {/* Step 2: Sourcing Desk */}
+                    <div className="text-center flex flex-col items-center relative group">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 font-bold text-xs transition-all relative ${
+                        getStepStatus(ticket.status, 2) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
+                        getStepStatus(ticket.status, 2) === 'active' ? 'bg-cyan-50 border-cyan-400 text-cyan-600' :
+                        'bg-slate-50 border-slate-200 text-slate-400'
+                      }`}>
+                        {/* PING ANIMATION DOT */}
+                        {getStepStatus(ticket.status, 2) === 'active' && (
+                          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                          </span>
+                        )}
+                        {getStepStatus(ticket.status, 2) === 'completed' ? <CheckCircle size={15} /> : "2"}
+                      </div>
+                      <span className={`text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 2) === 'active' ? 'text-cyan-600' : 'text-slate-400'}`}>Sourcing Hub</span>
+                      <p className="text-[8px] text-slate-400 font-medium">Sagar Bidding</p>
                     </div>
-                    <span className={`text-[10px] font-bold mt-1.5 tracking-tight ${getStepStatus(ticket.status, 2) === 'active' ? 'text-cyan-600' : 'text-slate-400'}`}>Sourcing Hub</span>
-                    <p className="text-[8px] text-slate-400 font-medium">Sagar Bidding</p>
-                  </div>
 
-                  {/* Step 3: Management Clearance */}
-                  <div className="text-center flex flex-col items-center relative group">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center border font-bold text-xs transition-all ${
-                      getStepStatus(ticket.status, 3) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
-                      getStepStatus(ticket.status, 3) === 'active' ? 'bg-amber-50 border-amber-400 text-amber-600' :
-                      'bg-slate-50 border-slate-200 text-slate-400'
-                    }`}>
-                      {getStepStatus(ticket.status, 3) === 'completed' ? <CheckCircle size={14} /> : "3"}
+                    {/* Step 3: Management Clearance */}
+                    <div className="text-center flex flex-col items-center relative group">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 font-bold text-xs transition-all relative ${
+                        getStepStatus(ticket.status, 3) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
+                        getStepStatus(ticket.status, 3) === 'active' ? 'bg-amber-50 border-amber-400 text-amber-600' :
+                        'bg-slate-50 border-slate-200 text-slate-400'
+                      }`}>
+                        {/* PING ANIMATION DOT */}
+                        {getStepStatus(ticket.status, 3) === 'active' && (
+                          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                          </span>
+                        )}
+                        {getStepStatus(ticket.status, 3) === 'completed' ? <CheckCircle size={15} /> : "3"}
+                      </div>
+                      <span className={`text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 3) === 'active' ? 'text-amber-600' : 'text-slate-400'}`}>Mgmt Approval</span>
+                      <p className="text-[8px] text-slate-400 font-medium">Director Signature</p>
                     </div>
-                    <span className={`text-[10px] font-bold mt-1.5 tracking-tight ${getStepStatus(ticket.status, 3) === 'active' ? 'text-amber-600' : 'text-slate-400'}`}>Mgmt Approval</span>
-                    <p className="text-[8px] text-slate-400 font-medium">Director Signature</p>
-                  </div>
 
-                  {/* Step 4: PO Compilation */}
-                  <div className="text-center flex flex-col items-center relative group">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center border font-bold text-xs transition-all ${
-                      getStepStatus(ticket.status, 4) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
-                      getStepStatus(ticket.status, 4) === 'active' ? 'bg-emerald-50 border-[#0b9c54] text-[#0b9c54]' :
-                      'bg-slate-50 border-slate-200 text-slate-400'
-                    }`}>
-                      {getStepStatus(ticket.status, 4) === 'completed' ? <CheckCircle size={14} /> : <FileText size={12} />}
+                    {/* Step 4: PO Compilation (Final Step) */}
+                    <div className="text-center flex flex-col items-center relative group">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 font-bold text-xs transition-all relative ${
+                        getStepStatus(ticket.status, 4) === 'completed' ? 'bg-[#0b9c54] border-[#0b9c54] text-white' :
+                        getStepStatus(ticket.status, 4) === 'active' ? 'bg-emerald-50 border-[#0b9c54] text-[#0b9c54]' :
+                        'bg-slate-50 border-slate-200 text-slate-400'
+                      }`}>
+                        {/* PING ANIMATION DOT */}
+                        {getStepStatus(ticket.status, 4) === 'active' && (
+                          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-[#0b9c54]"></span>
+                          </span>
+                        )}
+                        {getStepStatus(ticket.status, 4) === 'completed' ? <CheckCircle size={15} /> : <FileText size={13} />}
+                      </div>
+                      <span className={`text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 4) === 'completed' ? 'text-[#0b9c54]' : getStepStatus(ticket.status, 4) === 'active' ? 'text-[#0b9c54]' : 'text-slate-400'}`}>PO Generation</span>
+                      <p className="text-[8px] text-slate-400 font-medium">Document Sealing</p>
                     </div>
-                    <span className={`text-[10px] font-bold mt-1.5 tracking-tight ${getStepStatus(ticket.status, 4) === 'active' ? 'text-[#0b9c54]' : 'text-slate-400'}`}>PO Generation</span>
-                    <p className="text-[8px] text-slate-400 font-medium">Document Sealing</p>
-                  </div>
 
-                  {/* Step 5: Dispatched */}
-                  <div className="text-center flex flex-col items-center relative group">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center border font-bold text-xs transition-all ${
-                      getStepStatus(ticket.status, 5) === 'completed' ? 'bg-[#0b9c54] border-[#0b9c54] text-white' :
-                      'bg-slate-50 border-slate-200 text-slate-400'
-                    }`}>
-                      <CheckCircle size={14} />
-                    </div>
-                    <span className={`text-[10px] font-bold mt-1.5 tracking-tight ${getStepStatus(ticket.status, 5) === 'completed' ? 'text-[#0b9c54] font-bold' : 'text-slate-400'}`}>Logistics Release</span>
-                    <p className="text-[8px] text-slate-400 font-medium">En Route to Site</p>
                   </div>
-
                 </div>
 
               </Card>

@@ -1,7 +1,7 @@
 // src/components/DirectorDashboard.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { CheckSquare, ShieldCheck, ThumbsUp, HelpCircle, DollarSign, Inbox, Archive, Clock } from 'lucide-react';
+import { CheckSquare, ShieldCheck, ThumbsUp, DollarSign, Inbox, Archive, Clock, Award, AlertCircle } from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI';
 
 const API_BASE_URL = "http://127.0.0.1:8000/api";
@@ -17,33 +17,48 @@ export default function DirectorDashboard({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
-  const fetchDirectorQueue = async () => {
+  const currentUserId = currentUser?.id || 6;
+
+  // 🎯 FIXED: Passed the currentUserId parameter to synchronize with the main SCM engine
+  const fetchDirectorQueue = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/requisitions/pending-management-approval`);
-      setTickets(res.data.filter(t => t.status === "Pending Director"));
-    } catch (err) { console.error("Error loading Director queue", err); } 
-    finally { setLoading(false); }
-  };
+      const res = await axios.get(`${API_BASE_URL}/requisitions/pending-management-approval/${currentUserId}`);
+      // Filter strictly for high-value tickets routed to the director tier
+      setTickets(res.data.filter(t => t.status === "Pending Director" || t.status === "Query Raised"));
+    } catch (err) { 
+      console.error("Error loading Director queue", err); 
+    } finally { 
+      setLoading(false); 
+    }
+  }, [currentUserId]);
 
-  const fetchDirectorHistory = async () => {
+  const fetchDirectorHistory = useCallback(async () => {
     setLoading(true);
     try {
       const res = await axios.get(`${API_BASE_URL}/requisitions/director-history`);
       setHistoryTickets(res.data);
-    } catch (err) { console.error("Error loading Director history", err); } 
-    finally { setLoading(false); }
-  };
+    } catch (err) { 
+      console.error("Error loading Director history", err); 
+    } finally { 
+      setLoading(false); 
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
-    if (activeTab === 'queue') {
-      setTimeout(() => { if (isMounted) fetchDirectorQueue(); }, 0);
-    } else if (activeTab === 'history') {
-      setTimeout(() => { if (isMounted) fetchDirectorHistory(); }, 0);
-    }
-    return () => { isMounted = false; };
-  }, [activeTab]);
+    const timer = setTimeout(() => {
+      if (isMounted) {
+        if (activeTab === 'queue') fetchDirectorQueue();
+        if (activeTab === 'history') fetchDirectorHistory();
+      }
+    }, 0);
+
+    return () => { 
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [activeTab, fetchDirectorQueue, fetchDirectorHistory]);
 
   const openTicket = async (ticket) => {
     setSelectedTicket(ticket);
@@ -54,7 +69,9 @@ export default function DirectorDashboard({ currentUser }) {
       setItems(itemsRes.data);
       const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/quotations`);
       setVendorQuotes(quotesRes.data);
-    } catch (err) { console.error("Error loading financial data", err); }
+    } catch (err) { 
+      console.error("Error loading financial data", err); 
+    }
   };
 
   const handleDirectorSignOff = async (actionType) => {
@@ -101,7 +118,7 @@ export default function DirectorDashboard({ currentUser }) {
             onClick={() => { setActiveTab('queue'); setSelectedTicket(null); }} 
             className="text-xs py-1.5 flex-1 md:flex-none flex items-center justify-center gap-1.5"
           >
-            <Inbox size={14} /> <span>CAPEX Backlog</span>
+            <Inbox size={14} /> <span>CAPEX Backlog ({tickets.length})</span>
           </Button>
           <Button 
             variant={activeTab === 'history' ? 'primary' : 'ghost'} 
@@ -137,7 +154,7 @@ export default function DirectorDashboard({ currentUser }) {
                   <p className="text-xs font-semibold text-slate-600 truncate">{t.project_name}</p>
                   <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between items-center text-[10px] text-slate-400 font-mono">
                     <span>Site: {t.project_code}</span>
-                    <span className="text-[#2c2a57] font-black flex items-center"><DollarSign size={10}/>CAPEX Run</span>
+                    <span className="text-amber-600 font-black flex items-center"><DollarSign size={10}/>CAPEX Run</span>
                   </div>
                 </div>
               ))
@@ -166,23 +183,55 @@ export default function DirectorDashboard({ currentUser }) {
                       const itemBids = vendorQuotes.filter(q => q.item_index === item.item_index);
                       return (
                         <div key={item.item_index} className="pt-4 first:pt-0 space-y-3">
-                          <div className="flex flex-col sm:flex-row justify-between sm:items-baseline gap-1">
-                            <h4 className="text-sm font-bold text-[#2c2a57]">{item.item_index}. {item.product_description}</h4>
-                            <span className="text-xs text-slate-400 font-medium">Justification Statement: <span className="italic text-slate-600 font-semibold">{item.purpose}</span></span>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            {itemBids.map((bid, bIdx) => (
-                              <div key={bIdx} className="p-3 rounded-xl border border-slate-200 bg-white shadow-xs flex flex-col justify-between">
-                                <div>
-                                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">Supplier Bid {bIdx + 1}</span>
-                                  <span className="text-xs font-bold text-slate-800 truncate block">{bid.vendor_name}</span>
-                                </div>
-                                <div className="mt-3 flex justify-between items-baseline">
-                                  <span className="text-xs font-black text-[#0b9c54]">₹{bid.total_amount.toLocaleString('en-IN')}</span>
-                                  <span className="text-[9px] font-bold text-slate-400">{bid.time_of_delivery}</span>
-                                </div>
+                          <div className="flex flex-col sm:flex-row justify-between sm:items-baseline gap-2">
+                            <div>
+                              <h4 className="text-sm font-bold text-[#2c2a57]">{item.item_index}. {item.product_description}</h4>
+                              <span className="text-xs text-slate-400 font-medium block mt-0.5">Justification Statement: <span className="italic text-slate-600 font-semibold">{item.purpose}</span></span>
+                            </div>
+                            
+                            {/* 🎯 NEW: Dynamic Client-Reimbursable Audit Asset Badge */}
+                            {item.is_reimbursable && (
+                              <div className="flex items-center space-x-1 bg-cyan-50 border border-cyan-200 text-cyan-800 text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-tight h-max flex-shrink-0">
+                                <AlertCircle size={10} />
+                                <span>Client Billed Expense</span>
                               </div>
-                            ))}
+                            )}
+                          </div>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            {itemBids.map((bid, bIdx) => {
+                              // 🎯 NEW: Highlighting chosen vendor options locked down by Sourcing/PM
+                              const isWinner = bid.is_selected === true;
+                              return (
+                                <div 
+                                  key={bIdx} 
+                                  className={`p-3 rounded-xl border flex flex-col justify-between relative overflow-hidden transition-all ${
+                                    isWinner 
+                                      ? 'border-[#0b9c54] bg-emerald-50/30 ring-1 ring-[#0b9c54] shadow-xs' 
+                                      : 'border-slate-200 bg-white opacity-85'
+                                  }`}
+                                >
+                                  {isWinner && (
+                                    <div className="absolute top-0 right-0 bg-[#0b9c54] text-white p-1 rounded-bl-lg flex items-center" title="Locked Winner option">
+                                      <Award size={11} />
+                                    </div>
+                                  )}
+                                  <div>
+                                    <span className={`text-[9px] font-black uppercase tracking-wider block mb-1 ${isWinner ? 'text-[#0b9c54]' : 'text-slate-400'}`}>
+                                      Supplier Bid {bIdx + 1} {isWinner && "• LOCKED CHOICE"}
+                                    </span>
+                                    <span className="text-xs font-bold text-slate-800 truncate block">{bid.vendor_name}</span>
+                                    {bid.special_terms && <span className="text-[9px] font-medium text-slate-400 italic block mt-1 line-clamp-1">Clauses: {bid.special_terms}</span>}
+                                  </div>
+                                  <div className="mt-3 flex justify-between items-baseline border-t border-slate-100 pt-2">
+                                    <span className={`text-xs font-black ${isWinner ? 'text-[#0b9c54]' : 'text-slate-700'}`}>
+                                      ₹{bid.total_amount.toLocaleString('en-IN')}
+                                    </span>
+                                    <span className="text-[9px] font-bold text-slate-400">{bid.time_of_delivery}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       );
@@ -213,7 +262,7 @@ export default function DirectorDashboard({ currentUser }) {
         </div>
       )}
 
-      {/* VIEW 2: EXECUTIVE HISTORY LEDGER (FRONTEND UI FOR HISTORY) */}
+      {/* VIEW 2: EXECUTIVE HISTORY LEDGER */}
       {activeTab === 'history' && (
         <Card className="p-5 max-w-5xl">
           <div className="flex items-center space-x-2 mb-6">
@@ -234,9 +283,7 @@ export default function DirectorDashboard({ currentUser }) {
                       <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-tight">Cost Center: {ticket.project_code}</span>
                     </div>
                     <p className="text-xs font-bold text-slate-600">{ticket.project_name}</p>
-                    
-                    {/* 🎯 UNIVERSAL DATETIME AUDIT STAMP */}
-                    <div className="flex items-center space-x-1.5 mt-2 text-[10px] font-mono text-slate-500 bg-slate-50 inline-block px-2 py-1 rounded w-max border border-slate-100">
+                    <div className="flex items-center space-x-1.5 mt-2 text-[10px] font-mono text-slate-500 bg-slate-50  px-2 py-1 rounded w-max border border-slate-100">
                       <Clock size={10} className="text-[#0b9c54]" />
                       <span>Approved On: <strong className="text-slate-700">{ticket.approval_date || "Date Unavailable"}</strong></span>
                     </div>

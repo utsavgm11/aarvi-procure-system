@@ -1,7 +1,10 @@
 // src/components/ProjectManagerDashboard.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { CheckSquare, ShieldCheck, ThumbsUp, Inbox, Archive, Clock, Award } from 'lucide-react';
+import { 
+  CheckSquare, ShieldCheck, ThumbsUp, Inbox, Archive, Clock, 
+  Award, MessageSquare, AlertTriangle 
+} from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI';
 
 const API_BASE_URL = "http://127.0.0.1:8000/api";
@@ -13,30 +16,35 @@ export default function ProjectManagerDashboard({ currentUser }) {
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [items, setItems] = useState([]);
   const [vendorQuotes, setVendorQuotes] = useState([]);
+  const [historyLogs, setHistoryLogs] = useState([]);
   
-  // 🎯 NEW: Interactive Selection Tracking State
+  // Interactive States
   const [selectedBids, setSelectedBids] = useState({});
   const [remarks, setRemarks] = useState('');
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
-  const fetchPMQueue = async () => {
+  const currentUserId = currentUser?.id || 5;
+
+  const fetchPMQueue = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/requisitions/pending-management-approval`);
-      setTickets(res.data);
+      const res = await axios.get(`${API_BASE_URL}/requisitions/pending-management-approval/${currentUserId}`);
+      // Filter out 'Pending PM Vetting' because that is handled in the /vetting tab now
+      const commercialTickets = res.data.filter(t => t.status !== 'Pending PM Vetting');
+      setTickets(commercialTickets);
     } catch (err) { console.error("Error loading PM queue", err); } 
     finally { setLoading(false); }
-  };
+  }, [currentUserId]);
 
-  const fetchPMHistory = async () => {
+  const fetchPMHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/requisitions/pm-history`);
+      const res = await axios.get(`${API_BASE_URL}/requisitions/pm-history/${currentUserId}`);
       setHistoryTickets(res.data);
     } catch (err) { console.error("Error loading PM history", err); } 
     finally { setLoading(false); }
-  };
+  }, [currentUserId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -46,38 +54,43 @@ export default function ProjectManagerDashboard({ currentUser }) {
       setTimeout(() => { if (isMounted) fetchPMHistory(); }, 0);
     }
     return () => { isMounted = false; };
-  }, [activeTab]);
+  }, [activeTab, fetchPMQueue, fetchPMHistory]);
 
   const openTicket = async (ticket) => {
     setSelectedTicket(ticket);
-    setSelectedBids({}); // Reset selection matrices
+    setSelectedBids({}); 
     setRemarks('');
     setAlert(null);
     try {
       const itemsRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
-      setItems(itemsRes.data);
+      setItems(itemsRes.data.map(item => ({ ...item, is_reimbursable: item.is_reimbursable || false })));
+      
       const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/quotations`);
       setVendorQuotes(quotesRes.data);
+
+      const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
+      setHistoryLogs(histRes.data);
     } catch (err) { console.error("Error loading ticket specifications", err); }
   };
 
-  // 🎯 NEW: Grid Choice Interaction Handler
   const toggleBidSelection = (itemIndex, vendorName) => {
-    setSelectedBids(prev => ({
-      ...prev,
-      [itemIndex]: vendorName
-    }));
+    setSelectedBids(prev => ({ ...prev, [itemIndex]: vendorName }));
   };
 
-  const handleAuthorization = async (actionType) => {
+  const handleReimbursableToggle = (itemIndex, newValue) => {
+    setItems(prevItems => prevItems.map(item => 
+      item.item_index === itemIndex ? { ...item, is_reimbursable: newValue } : item
+    ));
+  };
+
+  const handleCommercialAuthorization = async (actionType) => {
     if (actionType === "Raise Query" && !remarks) {
       setAlert({ type: 'error', message: "Operational remarks are mandatory before raising technical deviations." });
       return;
     }
 
-    // 🎯 NEW: Front-end safeguard verifying that every single row item has been allocated a winner
     if (actionType === "Approve" && Object.keys(selectedBids).length !== items.length) {
-      setAlert({ type: 'error', message: "You must explicitly select exactly 1 winning vendor option for every line item before authorizing budget clearance." });
+      setAlert({ type: 'error', message: "You must explicitly select exactly 1 winning vendor option for every line item." });
       return;
     }
 
@@ -87,7 +100,8 @@ export default function ProjectManagerDashboard({ currentUser }) {
         user_name: currentUser?.name || "Project Manager",
         action: actionType,
         remarks: remarks || "Authorized under PM site budget allowances.",
-        selected_bids: actionType === "Approve" ? selectedBids : null // 🎯 NEW: Forwards map values cleanly to main.py
+        selected_bids: actionType === "Approve" ? selectedBids : null,
+        items: items 
       });
       
       setAlert({
@@ -106,17 +120,17 @@ export default function ProjectManagerDashboard({ currentUser }) {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
       
-      {/* HEADER SECTION WITH TABS */}
+      {/* HEADER SECTION */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Project Manager Clearance Board</h1>
-          <p className="text-sm text-slate-500 font-medium">Verify structural quantities, operational budgets, and release local site clearances</p>
+          <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">PM Commercial Clearance</h1>
+          <p className="text-sm text-slate-500 font-medium">Evaluate supplier matrices, verify client-billing flags, and authorize budgets</p>
         </div>
         <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full md:w-auto">
           <Button variant={activeTab === 'queue' ? 'primary' : 'ghost'} onClick={() => { setActiveTab('queue'); setSelectedTicket(null); }} className="text-xs py-1.5 flex-1 md:flex-none flex items-center justify-center gap-1.5">
-            <Inbox size={14} /> <span>Approval Queue</span>
+            <Inbox size={14} /> <span>Approval Queue ({tickets.length})</span>
           </Button>
           <Button variant={activeTab === 'history' ? 'primary' : 'ghost'} onClick={() => { setActiveTab('history'); setSelectedTicket(null); }} className="text-xs py-1.5 flex-1 md:flex-none flex items-center justify-center gap-1.5">
             <Archive size={14} /> <span>PM Authorization Ledger</span>
@@ -130,12 +144,12 @@ export default function ProjectManagerDashboard({ currentUser }) {
         </div>
       )}
 
-      {/* VIEW 1: ACTIVE APPROVAL QUEUE */}
       {activeTab === 'queue' && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
           
-          <div className="xl:col-span-4 space-y-3">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">PM Backlog Queue</h2>
+          {/* QUEUE LIST */}
+          <div className="xl:col-span-3 space-y-3">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Pending Budget Clearance</h2>
             {tickets.length === 0 ? (
               <Card className="p-6 text-center text-slate-400 border-dashed border-2 bg-white text-sm">Clear queue. No sites waiting for PM operational sign-off.</Card>
             ) : (
@@ -152,14 +166,18 @@ export default function ProjectManagerDashboard({ currentUser }) {
             )}
           </div>
 
-          <div className="xl:col-span-8">
+          <div className="xl:col-span-9">
             {selectedTicket ? (
               <div className="space-y-6">
                 <Card className="p-4 bg-slate-50 border-slate-200 flex justify-between items-center">
                   <div className="flex items-center space-x-3">
-                    <div className="bg-[#2c2a57]/10 p-2 rounded-lg text-[#2c2a57]"><ShieldCheck size={18} /></div>
+                    <div className="bg-[#2c2a57]/10 p-2 rounded-lg text-[#2c2a57]">
+                      <ShieldCheck size={18} />
+                    </div>
                     <div>
-                      <h3 className="font-bold text-[#2c2a57] text-sm uppercase tracking-wider">PM Commercial Valuation</h3>
+                      <h3 className="font-bold text-[#2c2a57] text-sm uppercase tracking-wider">
+                        PM Commercial Valuation & Billing Checks
+                      </h3>
                       <p className="text-xs text-slate-500 font-mono mt-0.5">{selectedTicket.ticket_number} • {selectedTicket.project_name}</p>
                     </div>
                   </div>
@@ -175,14 +193,32 @@ export default function ProjectManagerDashboard({ currentUser }) {
                       const itemBids = vendorQuotes.filter(q => q.item_index === item.item_index);
                       return (
                         <div key={item.item_index} className="pt-4 first:pt-0 space-y-3">
-                          <div className="flex flex-col sm:flex-row justify-between sm:items-baseline gap-1">
-                            <h4 className="text-sm font-bold text-[#2c2a57]">{item.item_index}. {item.product_description}</h4>
-                            <span className="text-xs text-slate-400 font-medium">Site Justification: <span className="italic text-slate-600 font-semibold">{item.purpose}</span></span>
+                          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-slate-100 pb-2">
+                            <div>
+                              <h4 className="text-sm font-bold text-[#2c2a57]">{item.item_index}. {item.product_description}</h4>
+                              <span className="text-[10px] text-slate-400 font-medium block mt-0.5">Site Justification: <span className="italic text-slate-600 font-semibold">{item.purpose}</span></span>
+                            </div>
+                            
+                            {/* 🎯 MANDATORY PM Financial Toggle Switch for each item */}
+                            <div className="flex items-center bg-slate-50 border border-slate-200 p-1.5 rounded-lg">
+                              <span className="text-[10px] font-bold text-slate-500 uppercase mr-3 ml-1">Client Billed Expense?</span>
+                              <label className="flex items-center justify-center cursor-pointer mr-1">
+                                <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${item.is_reimbursable ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                                  <div className={`bg-white w-4 h-4 rounded-full shadow-sm transform transition-transform ${item.is_reimbursable ? 'translate-x-5' : 'translate-x-0'}`} />
+                                </div>
+                                <input 
+                                  type="checkbox" 
+                                  className="hidden" 
+                                  checked={item.is_reimbursable || false} 
+                                  onChange={(e) => handleReimbursableToggle(item.item_index, e.target.checked)} 
+                                />
+                              </label>
+                            </div>
+
                           </div>
                           
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             {itemBids.map((bid, bIdx) => {
-                              // Check if this particular card options has been marked as selected
                               const isChosen = selectedBids[item.item_index] === bid.vendor_name;
                               
                               return (
@@ -206,6 +242,14 @@ export default function ProjectManagerDashboard({ currentUser }) {
                                     </span>
                                     <span className="text-xs font-bold text-slate-800 truncate block">{bid.vendor_name}</span>
                                     {bid.special_terms && <span className="text-[9px] font-medium text-slate-500 italic block mt-1 line-clamp-2">Clauses: {bid.special_terms}</span>}
+                                    
+                                    {bid.quality_remarks && (
+                                      <div className="mt-2 bg-amber-50/50 border border-amber-100 p-1.5 rounded-md">
+                                        <span className="text-[9px] font-bold text-amber-700 block uppercase mb-0.5">Tech Specs / QA:</span>
+                                        <span className="text-[10px] font-medium text-slate-700 italic line-clamp-2 leading-tight">{bid.quality_remarks}</span>
+                                      </div>
+                                    )}
+                                    
                                   </div>
                                   <div className="mt-3 flex justify-between items-baseline border-t border-slate-100 pt-2">
                                     <span className={`text-xs font-black ${isChosen ? 'text-[#0b9c54]' : 'text-[#0b9c54]'}`}>₹{bid.total_amount.toLocaleString('en-IN')}</span>
@@ -223,15 +267,30 @@ export default function ProjectManagerDashboard({ currentUser }) {
                   <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-4">
                     <Input label="PM Directives & Comments" value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Add any site instructions for Sagar's purchase department..." />
                     <div className="flex flex-col sm:flex-row justify-end gap-2 pt-1">
-                      <Button variant="danger" onClick={() => handleAuthorization("Raise Query")} disabled={loading} className="text-xs py-2">
+                      <Button variant="danger" onClick={() => handleCommercialAuthorization("Raise Query")} disabled={loading} className="text-xs py-2">
                         <span>Flag Technical Query</span>
                       </Button>
-                      <Button variant="success" onClick={() => handleAuthorization("Approve")} disabled={loading} className="text-xs py-2 shadow-sm">
+                      <Button variant="success" onClick={() => handleCommercialAuthorization("Approve")} disabled={loading} className="text-xs py-2 shadow-sm">
                         <ThumbsUp size={14} /> <span>Approve Budget Allocation</span>
                       </Button>
                     </div>
                   </div>
                 </Card>
+
+                {historyLogs.length > 0 && (
+                  <Card className="p-4 space-y-4">
+                    <div className="flex items-center space-x-2 text-slate-500 font-bold text-xs uppercase tracking-wider"><MessageSquare size={14} /><span>Negotiation Audit Log</span></div>
+                    <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
+                      {historyLogs.map((log, lIdx) => (
+                        <div key={lIdx} className="p-3 rounded-lg bg-slate-50 border border-slate-100 flex flex-col space-y-1">
+                          <div className="flex justify-between items-center text-[10px] font-bold"><span className="text-[#2c2a57]">{log.user_name}</span><span className="text-slate-400 font-mono">{log.timestamp}</span></div>
+                          <p className="text-[11px] text-slate-400 font-mono italic">Action: {log.action_taken}</p>
+                          {log.remarks && <p className="text-xs text-slate-700 font-medium bg-white p-2 rounded-md border border-slate-200 mt-1">{log.remarks}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
               </div>
             ) : (
               <div className="h-64 border border-dashed border-slate-300 rounded-xl bg-white flex flex-col items-center justify-center text-slate-400 text-sm p-6 text-center">
@@ -265,7 +324,7 @@ export default function ProjectManagerDashboard({ currentUser }) {
                       <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-tight">Cost Center: {ticket.project_code}</span>
                     </div>
                     <p className="text-xs font-bold text-slate-600">{ticket.project_name}</p>
-                    <div className="flex items-center space-x-1.5 mt-2 text-[10px] font-mono text-slate-500 bg-slate-50 inline-block px-2 py-1 rounded w-max border border-slate-100">
+                    <div className="flex items-center space-x-1.5 mt-2 text-[10px] font-mono text-slate-500 bg-slate-50  px-2 py-1 rounded w-max border border-slate-100">
                       <Clock size={10} className="text-[#0b9c54]" />
                       <span>Approved On: <strong className="text-slate-700">{ticket.approval_date || "Date Unavailable"}</strong></span>
                     </div>
@@ -279,7 +338,6 @@ export default function ProjectManagerDashboard({ currentUser }) {
           )}
         </Card>
       )}
-
     </div>
   );
 }
