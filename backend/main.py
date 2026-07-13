@@ -896,6 +896,91 @@ def get_all_vendors(db: Session = Depends(get_db)):
         } for v in vendors
     ]    
 
+# -------------------------------------------------------------------
+# 🔐 AUTHENTICATION & LOGIN LAYER
+# -------------------------------------------------------------------
+class LoginPayload(BaseModel):
+    email: str
+    password: str
+
+@app.post("/api/auth/login")
+def login_user(payload: LoginPayload, db: Session = Depends(get_db)):
+    # 1. Look up the user by email
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    
+    # 2. Verify existence and password 
+    # 🎯 FIXED: Changed to 'user.password_hash' to match your Neon DB structure
+    if not user or user.password_hash != payload.password:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+        
+    # 3. Ensure the account isn't deactivated
+    if getattr(user, 'is_active', True) == False:
+        raise HTTPException(status_code=403, detail="This account has been disabled by IT.")
+        
+    # 4. Return the secure session profile
+    return {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "role": user.role
+    }
+
+# -------------------------------------------------------------------
+# 🛡️ IT ADMIN & USER MANAGEMENT LAYER
+# -------------------------------------------------------------------
+class AdminCreateUserPayload(BaseModel):
+    name: str
+    email: str
+    password: str
+    role: str
+
+class AdminPasswordUpdatePayload(BaseModel):
+    email: str
+    new_password: str
+
+@app.get("/api/admin/users")
+def admin_get_all_users(db: Session = Depends(get_db)):
+    # Fetch all users, sorted by role then name
+    users = db.query(models.User).order_by(models.User.role.asc(), models.User.name.asc()).all()
+    return [
+        {
+            "id": u.id, 
+            "name": u.name, 
+            "email": u.email, 
+            "role": u.role, 
+            "is_active": getattr(u, 'is_active', True)
+        } for u in users
+    ]
+
+@app.post("/api/admin/users", status_code=201)
+def admin_create_user(payload: AdminCreateUserPayload, db: Session = Depends(get_db)):
+    # 1. Check if email already exists
+    if db.query(models.User).filter(models.User.email == payload.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered.")
+    
+    # 2. Create the new user (🎯 Using password_hash to match your DB)
+    new_user = models.User(
+        name=payload.name, 
+        email=payload.email, 
+        password_hash=payload.password, 
+        role=payload.role, 
+        is_active=True
+    )
+    db.add(new_user)
+    db.commit()
+    return {"message": f"User {payload.name} created successfully."}
+
+@app.put("/api/admin/users/password")
+def admin_update_user_password(payload: AdminPasswordUpdatePayload, db: Session = Depends(get_db)):
+    # 1. Find the user
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    # 2. Update their password (🎯 Using password_hash)
+    user.password_hash = payload.new_password
+    db.commit()
+    return {"message": f"Password for {user.name} successfully updated."}
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
 def connection_ping():

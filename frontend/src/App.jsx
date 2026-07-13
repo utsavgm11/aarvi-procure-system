@@ -8,6 +8,8 @@ import PurchaseExecutiveDashboard from './components/PurchaseExecutiveDashboard'
 import ProjectManagerDashboard from './components/ProjectManagerDashboard';
 import DirectorDashboard from './components/DirectorDashboard';
 import VendorMasterDesk from './components/VendorMasterDesk';
+import Login from './components/Login'; // 🎯 Import the new Login component
+import ITAdminDashboard from './components/ITAdminDashboard';
 
 // 🎯 COMPONENTS IMPORT UPGRADES
 import PODistributionDashboard from './components/PODistributionDashboard'; 
@@ -31,19 +33,26 @@ function DashboardViewSelector({ userSession, defaultTab = "commercial" }) {
       return <ProjectManagerDashboard currentUser={userSession} defaultTab={defaultTab} />;
     case 'Director':
       return <DirectorDashboard currentUser={userSession} />;
+    case 'Admin':
+      return <ITAdminDashboard />;  
     default:
       return <div className="text-center py-20 text-slate-500 font-medium mt-10">Aarvi Core ERP Section Initializing...</div>;
   }
 }
 
 function App() {
-  const [userSession, setUserSession] = useState({
-    id: 1,
-    name: 'Amit Sharma',
-    email: 'coordinator@aarviencon.com',
-    role: 'Site Coordinator'
+  // 🎯 NEW: Smart Initializer checks browser memory on refresh
+  const [userSession, setUserSession] = useState(() => {
+    const saved = localStorage.getItem('aarvi_session') || sessionStorage.getItem('aarvi_session');
+    return saved ? JSON.parse(saved) : null;
   });
 
+  // 🎯 GATEKEEPER: If no user is logged in, show the Login Screen
+  if (!userSession) {
+    return <Login onLoginSuccess={(profile) => setUserSession(profile)} />;
+  }
+
+  // Otherwise, load the full app Router
   return (
     <Router>
       <Routes>

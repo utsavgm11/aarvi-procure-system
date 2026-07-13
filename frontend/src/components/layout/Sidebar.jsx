@@ -2,7 +2,7 @@
 import React from 'react';
 import { 
   LayoutDashboard, FileSpreadsheet, FileCheck, ShieldAlert, 
-  LogOut, UserCheck, ShoppingCart, CheckSquare, X, Building2 
+  LogOut, UserCheck, ShoppingCart, CheckSquare, X, Building2,ShieldCheck 
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -12,7 +12,8 @@ const MOCK_PROFILES = [
   { id: 3, name: 'Sagar Mehta', email: 'sagar@aarviencon.com', role: 'Purchase Executive' },
   { id: 4, name: 'Aadarsh Mishra', email: 'aadarsh@aarviencon.com', role: 'Purchase Executive' },
   { id: 5, name: 'Rohan Kapoor', email: 'pm@aarviencon.com', role: 'Project Manager' },
-  { id: 6, name: 'Devendra Shah', email: 'director@aarviencon.com', role: 'Director' }
+  { id: 6, name: 'Devendra Shah', email: 'director@aarviencon.com', role: 'Director' },
+  { id: 7, name: 'System Admin', email: 'admin@aarviencon.com', role: 'Admin' }
 ];
 
 export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, setUserSession }) {
@@ -50,6 +51,10 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
           { name: 'Corporate Approvals', path: '/', icon: CheckSquare },
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileCheck },
         ];
+      case 'Admin':
+        return [
+          { name: 'IT Control Center', path: '/', icon: ShieldCheck }, // 🎯 ADDED THIS
+        ];  
       default:
         return [
           { name: 'Dashboard', path: '/', icon: LayoutDashboard }
