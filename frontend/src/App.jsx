@@ -7,6 +7,7 @@ import SiteManagerDashboard from './components/SiteManagerDashboard';
 import PurchaseExecutiveDashboard from './components/PurchaseExecutiveDashboard';
 import ProjectManagerDashboard from './components/ProjectManagerDashboard';
 import DirectorDashboard from './components/DirectorDashboard';
+import VendorMasterDesk from './components/VendorMasterDesk';
 
 // 🎯 COMPONENTS IMPORT UPGRADES
 import PODistributionDashboard from './components/PODistributionDashboard'; 
@@ -56,6 +57,9 @@ function App() {
           
           {/* 🎯 FIXED: Missing Master PO Ledger Analytics Catch Route */}
           <Route path="po-ledger" element={<MasterPOLedgerDesk currentUser={userSession} />} />
+
+          {/* 🎯 NEW: Vendor Master Directory Route */}
+          <Route path="vendors" element={<VendorMasterDesk />} />
 
           {/* 🎯 FIXED: Project Manager Technical Vetting Sub-Route Mapping */}
           <Route path="vetting" element={<DashboardViewSelector userSession={userSession} defaultTab="vetting" />} />

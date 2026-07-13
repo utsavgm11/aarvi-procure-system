@@ -2,7 +2,7 @@
 import React from 'react';
 import { 
   LayoutDashboard, FileSpreadsheet, FileCheck, ShieldAlert, 
-  LogOut, UserCheck, ShoppingCart, CheckSquare, X 
+  LogOut, UserCheck, ShoppingCart, CheckSquare, X, Building2 
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -34,8 +34,9 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
         return [
           { name: 'Sourcing Hub', path: '/', icon: ShoppingCart },
           { name: 'PO Distribution', path: '/pos', icon: FileCheck },
-          // 🎯 NEW: Master PO Ledger added for Purchase Executives
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileSpreadsheet },
+          // 🎯 NEW: Added Vendor Directory to the sidebar menu
+          { name: 'Vendor Directory', path: '/vendors', icon: Building2 }, 
         ];
       case 'Project Manager':
         // 🎯 SPLIT APP: PM gets both Technical Vetting and Commercial Approvals

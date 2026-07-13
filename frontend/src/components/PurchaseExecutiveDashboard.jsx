@@ -28,6 +28,16 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
+  // 🎯 NEW: Vendor Master State
+  const [vendors, setVendors] = useState([]);
+
+  const fetchVendors = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/vendors`);
+      setVendors(res.data);
+    } catch (err) { console.error("Failed to load vendor directory", err); }
+  }, []);
+
   // 🎯 PDF ENGINE INJECTION
   const [pdfEngineReady, setPdfEngineReady] = useState(() => typeof window !== 'undefined' && !!window.html2pdf);
 
@@ -61,10 +71,12 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
 
   useEffect(() => {
     let isMounted = true;
-    if (activeTab === 'sourcing') setTimeout(() => { if (isMounted) fetchPendingSourcing(); }, 0);
+    if (activeTab === 'sourcing') setTimeout(() => { 
+      if (isMounted) { fetchPendingSourcing(); fetchVendors(); } 
+    }, 0);
     if (activeTab === 'history') setTimeout(() => { if (isMounted) fetchHistory(); }, 0);
     return () => { isMounted = false; };
-  }, [activeTab, fetchPendingSourcing, fetchHistory]);
+  }, [activeTab, fetchPendingSourcing, fetchHistory, fetchVendors]);
 
   // --- TAB NAVIGATION HANDLERS ---
   const switchTab = (tab) => {
@@ -188,6 +200,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             site_contact_phone: q.site_contact_phone || "",
             special_terms: q.special_terms || "",
             quality_remarks: q.quality_remarks || "",
+            file_url: q.file_url || "", // 🎯 ADD THIS EXACT LINE HERE
             
             product_description: matchingLineItem.product_description || "",
             make_brand: matchingLineItem.make_brand || "",
@@ -416,9 +429,33 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               <div className="space-y-3">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
-                                    <input type="text" value={quote.vendor_name} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_name', e.target.value)} placeholder="e.g. SHREEJI ENTERPRISE" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
-                                  </div>
+    <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
+    <input 
+      list={`vendor-list-${item.item_index}-${qIdx}`}
+      type="text" 
+      value={quote.vendor_name} 
+      onChange={(e) => {
+        const selectedName = e.target.value;
+        handleQuoteChange(item.item_index, qIdx, 'vendor_name', selectedName);
+        
+        // 🎯 THE AUTO-FILL ENGINE
+        const matchedVendor = vendors.find(v => v.name === selectedName);
+        if (matchedVendor) {
+          handleQuoteChange(item.item_index, qIdx, 'vendor_address', matchedVendor.address || '');
+          handleQuoteChange(item.item_index, qIdx, 'vendor_contact', matchedVendor.contact_number || '');
+          handleQuoteChange(item.item_index, qIdx, 'vendor_email', matchedVendor.email || '');
+        }
+      }} 
+      placeholder="Type to search or enter new..." 
+      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all" 
+    />
+    {/* 🎯 DATALIST DROPDOWN */}
+    <datalist id={`vendor-list-${item.item_index}-${qIdx}`}>
+      {vendors.map(v => (
+        <option key={v.id} value={v.name} />
+      ))}
+    </datalist>
+  </div>
                                   <div>
                                     <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Office Address</label>
                                     <input type="text" value={quote.vendor_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_address', e.target.value)} placeholder="Full operating address..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
@@ -492,6 +529,50 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   <div>
                                     <label className="block text-[10px] font-bold text-amber-600 uppercase mb-1">Quality / Technical Remarks</label>
                                     <input type="text" value={quote.quality_remarks || ''} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'quality_remarks', e.target.value)} placeholder="e.g. Test Certificates provided, OEM 1-yr warranty active..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                  </div>
+                                </div>
+                                {/* 🎯 NEW: OPTIONAL ATTACHMENT CONTROLLER LAYER */}
+                                <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-indigo-600 uppercase mb-1">
+                                      Attach Supplier Quotation Document (Optional)
+                                    </label>
+                                    <div className="flex items-center space-x-3 bg-white p-2 border border-slate-300 rounded-lg">
+                                      <input 
+                                        type="file" 
+                                        accept=".pdf,.doc,.docx"
+                                        className="text-xs font-medium text-slate-600 outline-none file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer w-full"
+                                        onChange={async (e) => {
+                                          const selectedFile = e.target.files[0];
+                                          if (!selectedFile) return;
+
+                                          const formData = new FormData();
+                                          formData.append("file", selectedFile);
+
+                                          try {
+                                            setAlert({ type: 'success', message: `Uploading document to secure repository...` });
+                                            
+                                            // Dispatch multipart form stream to backend API endpoint
+                                            const res = await axios.post(
+                                              `${API_BASE_URL}/upload/quotation?ticket_number=${selectedTicket.ticket_number}&item_index=${item.item_index}&option_index=${qIdx + 1}`, 
+                                              formData, 
+                                              { headers: { 'Content-Type': 'multipart/form-data' } }
+                                            );
+                                            
+                                            // Assign the static reference URL into the corresponding quote option state cell
+                                            handleQuoteChange(item.item_index, qIdx, 'file_url', res.data.file_url);
+                                            setAlert({ type: 'success', message: `Document verified and attached successfully: ${selectedFile.name}` });
+                                          } catch (err) {
+                                            setAlert({ type: 'error', message: err.response?.data?.detail || "Document upload execution failure." });
+                                          }
+                                        }}
+                                      />
+                                      {quote.file_url && (
+                                        <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md shrink-0 animate-pulse">
+                                          ✓ ATTACHED
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               </div>

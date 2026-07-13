@@ -1,22 +1,30 @@
 import random
 import logging
+import os
+import shutil
+import io
 from typing import List, Optional
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_  
 from database import get_db
-from fastapi.responses import StreamingResponse
 from docxtpl import DocxTemplate
 import models
-import io
 
 # 1. System Logging Configurations
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AarviProcure")
 app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.0.0")
+
+# 🎯 NEW: Create and Mount Storage Directory for Uploaded Documents
+UPLOAD_DIR = "storage/quotation_files"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
 # 2. Complete CORS Cross-Origin Resource Sharing Rules
 app.add_middleware(
@@ -118,7 +126,6 @@ def get_active_users_by_role(role: str, db: Session = Depends(get_db)):
 @app.post("/api/requisitions", status_code=201)
 def raise_material_requisition(payload: CreateRequisitionPayload, db: Session = Depends(get_db)):
     ticket_number = f"REQ-2026-{random.randint(100000, 999999)}"
-    
     initial_status = "Vetting Active" if payload.assigned_site_manager_id else "Pending PM Vetting"
     
     master_ticket = models.MaterialTicket(
@@ -235,6 +242,31 @@ def dual_sign_approve(ticket_number: str, payload: DualApprovalPayload, db: Sess
 # -------------------------------------------------------------------
 # STAGE 3: PURCHASING DESK QUOTATION ATTACHMENT
 # -------------------------------------------------------------------
+@app.post("/api/upload/quotation")
+async def upload_quotation_document(
+    ticket_number: str,
+    item_index: int,
+    option_index: int,
+    file: UploadFile = File(...)
+):
+    # Extension validation isolation check
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in [".pdf", ".doc", ".docx"]:
+        raise HTTPException(status_code=400, detail="Unsupported format. Only PDF, DOC, and DOCX are allowed.")
+    
+    # 🎯 SYSTEMATIC NAMING ASSIGNMENT: Tracking strings structure
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    systematic_name = f"QUOTE_{ticket_number}_ROW{item_index}_OPT{option_index}_{timestamp}{ext}"
+    target_destination = os.path.join(UPLOAD_DIR, systematic_name)
+    
+    try:
+        with open(target_destination, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Disk write failure: {str(e)}")
+        
+    return {"file_url": f"/storage/quotation_files/{systematic_name}"}
+
 @app.post("/api/requisitions/{ticket_number}/quotations")
 def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayload, db: Session = Depends(get_db)):
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
@@ -242,6 +274,7 @@ def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayloa
         
     highest_landed_total = 0.0
     for quote in payload.quotations:
+        # 1. Save the actual quotation to the ticket
         db_quote = models.Quotation(
             ticket_number=ticket_number,
             item_index=quote.item_index,
@@ -271,6 +304,22 @@ def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayloa
         )
         db.add(db_quote)
         
+        # 🎯 NEW: SILENT AUTO-LEARN VENDOR DIRECTORY ENGINE
+        if quote.vendor_name:
+            clean_name = quote.vendor_name.strip()
+            existing_vendor = db.query(models.Vendor).filter(models.Vendor.name == clean_name).first()
+            if not existing_vendor:
+                # Never seen this vendor before? Save it to the master list automatically!
+                new_vendor = models.Vendor(
+                    name=clean_name,
+                    address=quote.vendor_address or "",
+                    contact_number=quote.vendor_contact or "",
+                    email=quote.vendor_email or "",
+                    is_active=True
+                )
+                db.add(new_vendor)
+        
+        # 3. Calculate routing logic
         if quote.total_amount > highest_landed_total:
             highest_landed_total = quote.total_amount
             
@@ -289,7 +338,6 @@ def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayloa
     ))
     db.commit()
     return {"ticket_number": ticket_number, "status": ticket.status}
-
 # -------------------------------------------------------------------
 # STAGE 4 & 5: MANAGEMENT SIGN-OFF & AUTOMATED DOCUMENT COMPILATION
 # -------------------------------------------------------------------
@@ -356,7 +404,6 @@ def sign_and_finalize_purchase_order(po_number: str, payload: DualApprovalPayloa
     if ticket:
         ticket.status = "Approved"
         
-    # 🎯 FIXED: Changed action_taken so timeline history cards filter and capture it live
     db.add(models.TicketHistory(
         ticket_number=po.ticket_number,
         user_name=payload.user_name,
@@ -379,7 +426,6 @@ def get_pending_vetting_tickets(manager_id: int, db: Session = Depends(get_db)):
             (models.MaterialTicket.assigned_project_manager_id == manager_id) & 
             (models.MaterialTicket.status == "Pending PM Vetting"),
             
-            # 🎯 Backwards compatibility for old database testing tickets
             (models.MaterialTicket.assigned_site_manager_id == None) & 
             (models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"]))
         )
@@ -574,7 +620,6 @@ def get_director_history(db: Session = Depends(get_db)):
 @app.get("/api/requisitions/{ticket_number}/quotations", response_model=List[dict])
 def get_ticket_vendor_quotations(ticket_number: str, db: Session = Depends(get_db)):
     quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == ticket_number).all()
-    # 🎯 RESTORED: The missing loop to fetch raw items as a fallback data source
     items_map = {
         i.item_index: i for i in db.query(models.TicketItem).filter(models.TicketItem.ticket_number == ticket_number).all()
     }
@@ -618,7 +663,6 @@ def get_purchase_orders_awaiting_signature(db: Session = Depends(get_db)):
         ).all()
         
         grand_total = sum(q.total_amount for q in winning_quotes)
-        
         vendor_names = list(set(q.vendor_name for q in winning_quotes))
         primary_vendor = vendor_names[0] if vendor_names else "Pending Vendor Linking"
         if len(vendor_names) > 1:
@@ -656,6 +700,7 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     primary_quote = winning_quotes[0]
     base_grand_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
     net_grand_total = sum(float(q.net_amount_payable or 0) for q in winning_quotes)
+    
     def number_to_words(num):
         if num == 0: return 'Zero'
         ones = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen ']
@@ -675,6 +720,7 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
         if thousand > 0: str_val += convert_less_thousand(thousand) + 'Thousand '
         if num > 0: str_val += convert_less_thousand(num)
         return str_val.strip() + ' Only'
+        
     items_data = []
     for idx, item in enumerate(winning_quotes, start=1):
         qty = item.quantity or 1
@@ -808,6 +854,47 @@ def update_po_invoice_details(po_number: str, payload: InvoiceUpdatePayload, db:
     
     db.commit()
     return {"message": "Invoice logging verified and saved successfully."}
+
+# -------------------------------------------------------------------
+# 🏢 VENDOR MASTER DIRECTORY LAYER
+# -------------------------------------------------------------------
+class VendorCreatePayload(BaseModel):
+    name: str
+    address: Optional[str] = ""
+    contact_number: Optional[str] = ""
+    email: Optional[str] = ""
+
+@app.post("/api/vendors", status_code=201)
+def add_new_vendor(payload: VendorCreatePayload, db: Session = Depends(get_db)):
+    # Prevent duplicate vendors by checking the exact name
+    existing_vendor = db.query(models.Vendor).filter(models.Vendor.name == payload.name).first()
+    if existing_vendor:
+        raise HTTPException(status_code=400, detail="A vendor with this exact company name already exists in the master directory.")
+        
+    new_vendor = models.Vendor(
+        name=payload.name,
+        address=payload.address,
+        contact_number=payload.contact_number,
+        email=payload.email,
+        is_active=True
+    )
+    db.add(new_vendor)
+    db.commit()
+    db.refresh(new_vendor)
+    return {"message": f"Vendor {payload.name} successfully added to Master Directory."}
+
+@app.get("/api/vendors", response_model=List[dict])
+def get_all_vendors(db: Session = Depends(get_db)):
+    vendors = db.query(models.Vendor).filter(models.Vendor.is_active == True).order_by(models.Vendor.name.asc()).all()
+    return [
+        {
+            "id": v.id,
+            "name": v.name,
+            "address": v.address,
+            "contact_number": v.contact_number,
+            "email": v.email
+        } for v in vendors
+    ]    
 
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")

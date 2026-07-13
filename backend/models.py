@@ -100,3 +100,13 @@ class PurchaseOrder(Base):
     invoice_no = Column(String, nullable=True)
     invoice_date = Column(String, nullable=True)
     invoice_remark = Column(String, nullable=True)
+
+class Vendor(Base):
+    __tablename__ = "vendors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    address = Column(String)
+    contact_number = Column(String)
+    email = Column(String)
+    is_active = Column(Boolean, default=True)    
