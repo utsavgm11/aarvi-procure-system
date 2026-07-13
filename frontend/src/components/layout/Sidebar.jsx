@@ -2,19 +2,9 @@
 import React from 'react';
 import { 
   LayoutDashboard, FileSpreadsheet, FileCheck, ShieldAlert, 
-  LogOut, UserCheck, ShoppingCart, CheckSquare, X, Building2,ShieldCheck 
+  LogOut, ShoppingCart, CheckSquare, ShieldCheck, Building2 
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
-
-const MOCK_PROFILES = [
-  { id: 1, name: 'Amit Sharma', email: 'coordinator@aarviencon.com', role: 'Site Coordinator' },
-  { id: 2, name: 'Vikram Rathore', email: 'manager@aarviencon.com', role: 'Site Manager' },
-  { id: 3, name: 'Sagar Mehta', email: 'sagar@aarviencon.com', role: 'Purchase Executive' },
-  { id: 4, name: 'Aadarsh Mishra', email: 'aadarsh@aarviencon.com', role: 'Purchase Executive' },
-  { id: 5, name: 'Rohan Kapoor', email: 'pm@aarviencon.com', role: 'Project Manager' },
-  { id: 6, name: 'Devendra Shah', email: 'director@aarviencon.com', role: 'Director' },
-  { id: 7, name: 'System Admin', email: 'admin@aarviencon.com', role: 'Admin' }
-];
 
 export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, setUserSession }) {
   const location = useLocation();
@@ -36,11 +26,10 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
           { name: 'Sourcing Hub', path: '/', icon: ShoppingCart },
           { name: 'PO Distribution', path: '/pos', icon: FileCheck },
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileSpreadsheet },
-          // 🎯 NEW: Added Vendor Directory to the sidebar menu
           { name: 'Vendor Directory', path: '/vendors', icon: Building2 }, 
+          { name: 'IT Control Center', path: '/admin', icon: ShieldCheck }
         ];
       case 'Project Manager':
-        // 🎯 SPLIT APP: PM gets both Technical Vetting and Commercial Approvals
         return [
           { name: 'Commercial Approvals', path: '/', icon: CheckSquare },
           { name: 'Technical Vetting', path: '/vetting', icon: ShieldAlert },
@@ -53,7 +42,7 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
         ];
       case 'Admin':
         return [
-          { name: 'IT Control Center', path: '/', icon: ShieldCheck }, // 🎯 ADDED THIS
+          { name: 'IT Control Center', path: '/admin', icon: ShieldCheck },
         ];  
       default:
         return [
@@ -72,6 +61,7 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
     >
       <div className="flex flex-col flex-1 min-h-0 overflow-y-auto custom-scrollbar justify-between">
         
+        {/* TOP SECTION: MAIN NAVIGATION */}
         <div className="py-6 px-3 space-y-1">
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-3 mb-3 select-none">
             Main Navigation
@@ -108,29 +98,33 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
           </nav>
         </div>
 
+        {/* BOTTOM SECTION: PROFILE FOOTER & CLEAR DISPATCH LOGOUT */}
         <div className="p-4 border-t border-slate-100 bg-slate-50/60 flex-shrink-0">
-          <div className="mb-3">
-            <div className="flex items-center space-x-1.5 text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1.5 px-1">
-              <UserCheck size={12} className="text-[#0b9c54]" />
-              <span>Identity Swapper</span>
-            </div>
-            <select 
-              value={userSession?.id || 1}
-              onChange={(e) => {
-                const selected = MOCK_PROFILES.find(p => p.id === parseInt(e.target.value));
-                if (selected) setUserSession(selected);
-              }}
-              className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#2c2a57] focus:ring-1 focus:ring-[#2c2a57] cursor-pointer shadow-xs transition-all"
-            >
-              {MOCK_PROFILES.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.role.split(' ')[1] || p.role})
-                </option>
-              ))}
-            </select>
+          
+          {/* Real-time Current User Context Display */}
+          <div className="mb-4 bg-white p-3 rounded-xl border border-slate-200">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 select-none">
+              Active Session
+            </p>
+            <p className="text-sm font-extrabold text-[#2c2a57] truncate">
+              {userSession?.name || 'Aarvi Operator'}
+            </p>
+            <p className="text-xs text-[#0b9c54] font-bold truncate mt-0.5">
+              {userSession?.role || 'System Profile'}
+            </p>
           </div>
 
-          <button className="w-full flex items-center justify-center space-x-2 px-3 py-2.5 text-slate-500 hover:text-rose-600 bg-white border border-slate-200 hover:border-rose-200 hover:bg-rose-50/50 rounded-lg text-sm font-semibold transition-all shadow-xs">
+          {/* Fully Functional Logout Action Button */}
+          <button 
+            onClick={() => {
+              // Wipe persistent browser tokens safely
+              localStorage.removeItem('aarvi_session');
+              sessionStorage.removeItem('aarvi_session');
+              // Trigger state boundary collapse back to landing page
+              setUserSession(null);
+            }}
+            className="w-full flex items-center justify-center space-x-2 px-3 py-2.5 text-slate-500 hover:text-rose-600 bg-white border border-slate-200 hover:border-rose-200 hover:bg-rose-50/50 rounded-lg text-sm font-semibold transition-all shadow-xs duration-150"
+          >
             <LogOut size={16} className="flex-shrink-0" />
             <span>Secure Logout</span>
           </button>

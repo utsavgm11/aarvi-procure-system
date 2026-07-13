@@ -70,9 +70,20 @@ export default function ITAdminDashboard() {
   };
 
   // Visual placeholder for Delete action mapping
-  const handleDeleteTrigger = (userEmail, userName) => {
-    if (window.confirm(`Are you sure you want to revoke system privileges for ${userName}?`)) {
-      setAlert({ type: 'error', message: `Delete command triggered for ${userEmail}. Backend delete routing required.` });
+ // 🎯 FIXED: Fully wired to call the new backend delete routing engine
+  const handleDeleteTrigger = async (userEmail, userName) => {
+    if (window.confirm(`Are you completely sure you want to revoke system privileges for ${userName}?`)) {
+      setLoading(true);
+      setAlert(null);
+      try {
+        const res = await axios.delete(`${API_BASE_URL}/admin/users/${userEmail}`);
+        setAlert({ type: 'success', message: res.data.message });
+        fetchUsers(); // Refresh the list automatically
+      } catch (err) {
+        setAlert({ type: 'error', message: err.response?.data?.detail || 'Failed to delete user.' });
+      } finally {
+        setLoading(false);
+      }
     }
   };
 

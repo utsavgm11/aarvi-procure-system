@@ -981,6 +981,25 @@ def admin_update_user_password(payload: AdminPasswordUpdatePayload, db: Session 
     user.password_hash = payload.new_password
     db.commit()
     return {"message": f"Password for {user.name} successfully updated."}
+
+@app.delete("/api/admin/users/{email}")
+def admin_delete_user(email: str, db: Session = Depends(get_db)):
+    # 1. Locate the target user profile by email
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User account not found.")
+        
+    # 2. Prevent the system from deleting the main system admin account accidentally
+    if user.email == "admin@aarviencon.com":
+        raise HTTPException(status_code=400, detail="Root System Admin account cannot be deleted.")
+
+    # 3. Purge the account from the directory
+    db.delete(user)
+    db.commit()
+    
+    return {"message": f"Privileges revoked. Account {email} successfully deleted."}
+
+
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
 def connection_ping():

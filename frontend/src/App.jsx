@@ -8,12 +8,12 @@ import PurchaseExecutiveDashboard from './components/PurchaseExecutiveDashboard'
 import ProjectManagerDashboard from './components/ProjectManagerDashboard';
 import DirectorDashboard from './components/DirectorDashboard';
 import VendorMasterDesk from './components/VendorMasterDesk';
-import Login from './components/Login'; // 🎯 Import the new Login component
-import ITAdminDashboard from './components/ITAdminDashboard';
+import Login from './components/Login'; 
+import ITAdminDashboard from './components/ITAdminDashboard'; // 🛡️ Admin interface link
 
 // 🎯 COMPONENTS IMPORT UPGRADES
 import PODistributionDashboard from './components/PODistributionDashboard'; 
-import MasterPOLedgerDesk from './components/MasterPOLedgerDesk'; // 🎯 NEW: Linked missing Master Ledger component
+import MasterPOLedgerDesk from './components/MasterPOLedgerDesk'; 
 
 // Role Dashboard Router Component
 function DashboardViewSelector({ userSession, defaultTab = "commercial" }) {
@@ -29,7 +29,6 @@ function DashboardViewSelector({ userSession, defaultTab = "commercial" }) {
     case 'Purchase Executive':
       return <PurchaseExecutiveDashboard currentUser={userSession} />;
     case 'Project Manager':
-      // 🎯 SPLIT-APP PASSING: Feeds an initial perspective filter to the Project Manager's dual workspace
       return <ProjectManagerDashboard currentUser={userSession} defaultTab={defaultTab} />;
     case 'Director':
       return <DirectorDashboard currentUser={userSession} />;
@@ -41,7 +40,7 @@ function DashboardViewSelector({ userSession, defaultTab = "commercial" }) {
 }
 
 function App() {
-  // 🎯 NEW: Smart Initializer checks browser memory on refresh
+  // 🎯 Smart Initializer checks browser memory on refresh
   const [userSession, setUserSession] = useState(() => {
     const saved = localStorage.getItem('aarvi_session') || sessionStorage.getItem('aarvi_session');
     return saved ? JSON.parse(saved) : null;
@@ -52,7 +51,6 @@ function App() {
     return <Login onLoginSuccess={(profile) => setUserSession(profile)} />;
   }
 
-  // Otherwise, load the full app Router
   return (
     <Router>
       <Routes>
@@ -61,16 +59,20 @@ function App() {
           {/* Base Layout Main Entry View */}
           <Route index element={<DashboardViewSelector userSession={userSession} />} />
           
-          {/* 🎯 FIXED: PO Distribution Workspace Catch Route */}
+          {/* PO Distribution Workspace Catch Route */}
           <Route path="pos" element={<PODistributionDashboard currentUser={userSession} />} />
           
-          {/* 🎯 FIXED: Missing Master PO Ledger Analytics Catch Route */}
+          {/* Master PO Ledger Analytics Catch Route */}
           <Route path="po-ledger" element={<MasterPOLedgerDesk currentUser={userSession} />} />
 
-          {/* 🎯 NEW: Vendor Master Directory Route */}
+          {/* Vendor Master Directory Route */}
           <Route path="vendors" element={<VendorMasterDesk />} />
 
-          {/* 🎯 FIXED: Project Manager Technical Vetting Sub-Route Mapping */}
+          {/* 🎯 FIXED: IT Admin Control Center Path Mapping */}
+          {/* This hooks perfectly into the custom '/admin' link used by both pure Admins and Sourcing Executives */}
+          <Route path="admin" element={<ITAdminDashboard />} />
+
+          {/* Project Manager Technical Vetting Sub-Route Mapping */}
           <Route path="vetting" element={<DashboardViewSelector userSession={userSession} defaultTab="vetting" />} />
           
           {/* Future workflow placeholders */}
