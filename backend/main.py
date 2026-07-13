@@ -499,7 +499,8 @@ def get_purchase_history(db: Session = Depends(get_db)):
             "project_code": t.project_code,
             "project_name": t.project_name,
             "status": t.status,
-            "action_date": str(log.timestamp.strftime('%d-%m-%Y %H:%M')) if log else "Date Unavailable"
+            "action_date": str(log.timestamp.strftime('%d-%m-%Y %H:%M')) if log else "Date Unavailable",
+            "category": t.category
         })
     return response
 
@@ -573,6 +574,10 @@ def get_director_history(db: Session = Depends(get_db)):
 @app.get("/api/requisitions/{ticket_number}/quotations", response_model=List[dict])
 def get_ticket_vendor_quotations(ticket_number: str, db: Session = Depends(get_db)):
     quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == ticket_number).all()
+    # 🎯 RESTORED: The missing loop to fetch raw items as a fallback data source
+    items_map = {
+        i.item_index: i for i in db.query(models.TicketItem).filter(models.TicketItem.ticket_number == ticket_number).all()
+    }
     return [
         {
             "item_index": q.item_index,
