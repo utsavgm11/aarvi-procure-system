@@ -6,7 +6,7 @@ import { Menu, Bell, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 // 🎯 IMPORTING THE LOGO ENGINES FROM YOUR NEW COMPACT ASSETS FOLDER
 import aarviLogo from '../../assets/logo.png';
 
-const API_BASE_URL = "http://127.0.0.1:8000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api";
 
 export default function Navbar({ toggleSidebar, userSession }) {
   // 🎯 NEW: Notification State Management

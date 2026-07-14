@@ -6,7 +6,7 @@ import { Card, Button } from './ui/SharedUI';
 import aarviLogo from '../assets/logo.png';
 import Letterhead from '../assets/letter_head.jpg';
 
-const API_BASE_URL = "http://127.0.0.1:8000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api";
 
 export default function PODistributionDashboard({ currentUser }) {
   const [poList, setPoList] = useState([]);

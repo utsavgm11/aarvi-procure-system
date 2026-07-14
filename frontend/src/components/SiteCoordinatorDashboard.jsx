@@ -4,7 +4,7 @@ import axiosInstance from 'axios';
 import { Plus, Trash2, Send, Clock, FileSpreadsheet, CheckCircle2, MessageSquare, Check, AlertTriangle, FileText, CheckCircle } from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI'; 
 
-const API_BASE_URL = "http://127.0.0.1:8000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api";
 const MOCK_USER_ID = 1;
 const MOCK_USER_NAME = "Amit Sharma";
 const MOCK_USER_ROLE = "Site Coordinator";

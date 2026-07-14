@@ -4,7 +4,7 @@ import axios from 'axios';
 import { Building2, PlusCircle, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Card, Input, Button } from './ui/SharedUI';
 
-const API_BASE_URL = "http://127.0.0.1:8000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api";
 
 export default function VendorMasterDesk() {
   const [vendors, setVendors] = useState([]);
