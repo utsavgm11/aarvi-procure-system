@@ -4,7 +4,7 @@ import axios from 'axios';
 import { ShieldCheck, Lock, Mail, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
 import aarviLogo from '../assets/logo.png';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api";
+const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
 export default function Login({ onLoginSuccess }) {
   const [email, setEmail] = useState('');

@@ -4,7 +4,7 @@ import axios from 'axios';
 import { CheckSquare, ShieldCheck, ThumbsUp, DollarSign, Inbox, Archive, Clock, Award, AlertCircle } from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api";
+const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
 export default function DirectorDashboard({ currentUser }) {
   const [activeTab, setActiveTab] = useState('queue');
