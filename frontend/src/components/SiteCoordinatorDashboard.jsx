@@ -1,5 +1,5 @@
 // src/components/SiteCoordinatorDashboard.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect ,useCallback} from 'react';
 import axiosInstance from 'axios'; 
 import { Plus, Trash2, Send, Clock, FileSpreadsheet, CheckCircle2, MessageSquare, Check, AlertTriangle, FileText, CheckCircle } from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI'; 
@@ -57,7 +57,7 @@ export default function SiteCoordinatorDashboard() {
     fetchManagers();
   }, []);
 
-  const fetchProposals = async () => {
+ const fetchProposals = useCallback(async () => {
     if (!currentUserId) return;
     setLoading(true);
     try {
@@ -65,9 +65,9 @@ export default function SiteCoordinatorDashboard() {
       setProposals(response.data);
     } catch (err) { console.error("Error fetching proposals", err); } 
     finally { setLoading(false); }
-  };
+  }, [currentUserId]); // 🎯 Added dependency array here
 
-  const fetchPipelineHistory = async () => {
+  const fetchPipelineHistory = useCallback(async () => {
     if (!currentUserId) return;
     setLoading(true);
     try {
@@ -78,7 +78,7 @@ export default function SiteCoordinatorDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUserId]); // 🎯 Added dependency array here
 
   useEffect(() => { 
     let isMounted = true;
@@ -86,7 +86,7 @@ export default function SiteCoordinatorDashboard() {
       setTimeout(() => { if (isMounted) fetchProposals(); }, 0);
     }
     return () => { isMounted = false; };
-  }, [activeTab]);
+  }, [activeTab, fetchProposals]); // 🎯 Added fetchProposals here
 
   useEffect(() => {
     let isMounted = true;
@@ -94,7 +94,7 @@ export default function SiteCoordinatorDashboard() {
       setTimeout(() => { if (isMounted) fetchPipelineHistory(); }, 0);
     }
     return () => { isMounted = false; };
-  }, [activeTab]);
+  }, [activeTab, fetchPipelineHistory]); // 🎯 Added fetchPipelineHistory here
 
   const openProposal = async (ticket) => {
     setSelectedProposal(ticket);
