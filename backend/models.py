@@ -5,12 +5,19 @@ from database import Base
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
+    
+    # 🔢 System Serial Number (Keeps row count, tracks relationships behind the scenes)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    
+    # 🆔 Real Functional Employee Code (AEL-SM-01, etc.)
+    empcode = Column(String(50), unique=True, nullable=False, index=True)
+    
     name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False)
-    # 🎯 NEW: Added to support fetching active users for the dropdowns
+    
+    # 🎯 Used for Soft Deletion (Blocking access without crashing data)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

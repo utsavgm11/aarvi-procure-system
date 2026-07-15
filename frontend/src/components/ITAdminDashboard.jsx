@@ -1,7 +1,7 @@
 // src/components/ITAdminDashboard.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { ShieldCheck, UserPlus, Key, Users, CheckCircle2, AlertCircle, Edit3, Trash2, X, Lock } from 'lucide-react';
+import { ShieldCheck, UserPlus, Key, Users, CheckCircle2, AlertCircle, Edit3, Power, X, Lock } from 'lucide-react';
 import { Card, Input, Button } from './ui/SharedUI';
 
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
@@ -71,22 +71,23 @@ export default function ITAdminDashboard() {
 
   // Visual placeholder for Delete action mapping
  // 🎯 FIXED: Fully wired to call the new backend delete routing engine
-  const handleDeleteTrigger = async (userEmail, userName) => {
-    if (window.confirm(`Are you completely sure you want to revoke system privileges for ${userName}?`)) {
+  // 🎯 FIXED: Fully wired to call the new backend toggle routing engine
+  const handleToggleStatus = async (userEmail, userName, isActive) => {
+    const actionText = isActive ? "DEACTIVATE (Lock Out)" : "ACTIVATE (Restore Access)";
+    if (window.confirm(`Are you sure you want to ${actionText} the account for ${userName}?`)) {
       setLoading(true);
       setAlert(null);
       try {
-        const res = await axios.delete(`${API_BASE_URL}/admin/users/${userEmail}`);
+        const res = await axios.put(`${API_BASE_URL}/admin/users/${userEmail}/toggle-status`);
         setAlert({ type: 'success', message: res.data.message });
-        fetchUsers(); // Refresh the list automatically
+        fetchUsers(); // Refresh the list automatically to show the new status
       } catch (err) {
-        setAlert({ type: 'error', message: err.response?.data?.detail || 'Failed to delete user.' });
+        setAlert({ type: 'error', message: err.response?.data?.detail || 'Failed to toggle status.' });
       } finally {
         setLoading(false);
       }
     }
   };
-
   const triggerEditModal = (user) => {
     setSelectedEmail(user.email);
     setNewPassword('');
@@ -162,17 +163,23 @@ export default function ITAdminDashboard() {
           <table className="w-full text-left border-collapse min-w-[700px]">
             <thead>
               <tr className="text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/50 border-b border-slate-200 select-none">
-                <th className="py-3 px-6">Assigned System Operator</th>
-                <th className="py-3 px-6">Communication Endpoint</th>
-                <th className="py-3 px-6">Role Assignment</th>
-                <th className="py-3 px-6 text-center w-36">Management Context</th>
-              </tr>
+              <th className="py-3 px-6">Assigned System Operator</th>
+              <th className="py-3 px-6">Emp Code</th>
+              <th className="py-3 px-6">Communication Endpoint</th>
+              <th className="py-3 px-6">Role Assignment</th>
+              <th className="py-3 px-6 text-center">Status</th>
+              <th className="py-3 px-6 text-center w-36">Management Context</th>
+            </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
               {users.map(u => (
-                <tr key={u.id} className="hover:bg-slate-50/40 transition-colors">
+
+                <tr key={u.id} className={`transition-colors ${u.is_active ? 'hover:bg-slate-50/40' : 'bg-slate-50/80 opacity-75'}`}>
                   <td className="py-3.5 px-6 font-extrabold text-[#2c2a57]">
                     {u.name}
+                  </td>
+                  <td className="py-3.5 px-6 font-mono font-bold text-slate-700">
+                    {u.empcode || 'Pending'}
                   </td>
                   <td className="py-3.5 px-6 font-mono text-xs text-slate-600">
                     {u.email}
@@ -183,25 +190,31 @@ export default function ITAdminDashboard() {
                     </span>
                   </td>
                   <td className="py-3.5 px-6 text-center">
+                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide border ${u.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                      {u.is_active ? 'Active' : 'Locked'}
+                    </span>
+                  </td>
+                  <td className="py-3.5 px-6 text-center">
                     <div className="flex items-center justify-center space-x-2">
-                      <button 
+                      <button
                         onClick={() => triggerEditModal(u)}
                         className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
                         title="Override Target Credentials"
                       >
                         <Edit3 size={15} />
                       </button>
-                      <button 
-                        onClick={() => handleDeleteTrigger(u.email, u.name)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
-                        title="Revoke System Privileges"
+                      <button
+                        onClick={() => handleToggleStatus(u.email, u.name, u.is_active)}
+                        className={`p-1.5 rounded-lg transition-all ${u.is_active ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}`}
+                        title={u.is_active ? "Revoke System Privileges" : "Restore System Privileges"}
                       >
-                        <Trash2 size={15} />
+                        <Power size={15} />
                       </button>
                     </div>
                   </td>
                 </tr>
-              ))}
+              )
+              )}
             </tbody>
           </table>
         </div>

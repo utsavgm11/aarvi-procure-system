@@ -5,40 +5,35 @@ import { Plus, Trash2, Send, Clock, FileSpreadsheet, CheckCircle2, MessageSquare
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI'; 
 
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
-const MOCK_USER_ID = 1;
-const MOCK_USER_NAME = "Amit Sharma";
-const MOCK_USER_ROLE = "Site Coordinator";
-
-// 🎯 STATIC MOCK DIRECTORY (Will be replaced by a live /users API later)
-const MOCK_SITE_MANAGERS = [
-  { id: '', name: '-- None (Route Direct to PM) --' },
-  { id: 2, name: 'Vikram Rathore' },
-  { id: 7, name: 'Rahul Desai' }
-];
-
-const MOCK_PROJECT_MANAGERS = [
-  { id: '', name: '-- Select Project Manager --' },
-  { id: 5, name: 'Rohan Kapoor' },
-  { id: 8, name: 'Priya Singh' }
-];
 
 export default function SiteCoordinatorDashboard() {
+  // 🎯 Dynamically grab the REAL logged-in user from local storage
+ // 🎯 Looks in both local AND session storage for your specific key
+  const storedSession = localStorage.getItem('aarvi_session') || sessionStorage.getItem('aarvi_session');
+  const activeUser = storedSession ? JSON.parse(storedSession) : {};
+  const currentUserId = activeUser.id;
+  const currentUserName = activeUser.name;
+  const currentUserRole = activeUser.role;
+
   const [activeTab, setActiveTab] = useState('new_request'); 
   const [projectCode, setProjectCode] = useState('');
   const [projectName, setProjectName] = useState('');
   const [category, setCategory] = useState('GOODS'); 
   
-  // 🎯 Routing Assignment States
+  // 🎯 Dynamic API States for Dropdowns (Fetched from DB)
+  const [siteManagers, setSiteManagers] = useState([]);
+  const [projectManagers, setProjectManagers] = useState([]);
+
+  // Routing Assignment States
   const [siteManagerId, setSiteManagerId] = useState('');
   const [projectManagerId, setProjectManagerId] = useState('');
-
   const [items, setItems] = useState([{ product_description: '', make_brand: '', quantity: 1, purpose: '' }]);
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
   
   // Pipeline History
   const [history, setHistory] = useState([]);
-
+  
   // Negotiation Loop States
   const [proposals, setProposals] = useState([]);
   const [selectedProposal, setSelectedProposal] = useState(null);
@@ -46,19 +41,37 @@ export default function SiteCoordinatorDashboard() {
   const [historyLogs, setHistoryLogs] = useState([]);
   const [coordinatorRemarks, setCoordinatorRemarks] = useState('');
 
+  // 🎯 Fetch strictly by Role from the backend DB
+  useEffect(() => {
+    const fetchManagers = async () => {
+      try {
+        const smRes = await axiosInstance.get(`${API_BASE_URL}/users/by-role?role=Site Manager`);
+        setSiteManagers(smRes.data);
+        
+        const pmRes = await axiosInstance.get(`${API_BASE_URL}/users/by-role?role=Project Manager`);
+        setProjectManagers(pmRes.data);
+      } catch (err) {
+        console.error("Failed to load managers from DB", err);
+      }
+    };
+    fetchManagers();
+  }, []);
+
   const fetchProposals = async () => {
+    if (!currentUserId) return;
     setLoading(true);
     try {
-      const response = await axiosInstance.get(`${API_BASE_URL}/requisitions/pending-handshake/${MOCK_USER_ID}`);
+      const response = await axiosInstance.get(`${API_BASE_URL}/requisitions/pending-handshake/${currentUserId}`);
       setProposals(response.data);
     } catch (err) { console.error("Error fetching proposals", err); } 
     finally { setLoading(false); }
   };
 
   const fetchPipelineHistory = async () => {
+    if (!currentUserId) return;
     setLoading(true);
     try {
-      const response = await axiosInstance.get(`${API_BASE_URL}/requisitions/coordinator-history/${MOCK_USER_ID}`);
+      const response = await axiosInstance.get(`${API_BASE_URL}/requisitions/coordinator-history/${currentUserId}`);
       setHistory(response.data);
     } catch (err) {
       console.error("Error loading history tracker from database", err);
@@ -120,7 +133,7 @@ export default function SiteCoordinatorDashboard() {
     setLoading(true);
     try {
       await axiosInstance.put(`${API_BASE_URL}/requisitions/${selectedProposal.ticket_number}/propose-edits`, {
-        user_name: MOCK_USER_NAME, user_role: MOCK_USER_ROLE, remarks: coordinatorRemarks, items: proposalItems
+        user_name: currentUserName, user_role: currentUserRole, remarks: coordinatorRemarks, items: proposalItems
       });
       setAlert({ type: 'success', message: "Counter-edits dispatched. Returned to Manager's inbox." });
       setSelectedProposal(null);
@@ -133,7 +146,7 @@ export default function SiteCoordinatorDashboard() {
     setLoading(true);
     try {
       const res = await axiosInstance.put(`${API_BASE_URL}/requisitions/${selectedProposal.ticket_number}/approve`, {
-        user_name: MOCK_USER_NAME, user_role: MOCK_USER_ROLE
+        user_name: currentUserName, user_role: currentUserRole
       });
       setAlert({ type: 'success', message: res.data.status === "Pending Sourcing" ? "Dual-Agreement Locked! Dispatched to Procurement." : "Your signature applied successfully! Waiting on Manager." });
       setSelectedProposal(null);
@@ -156,13 +169,12 @@ export default function SiteCoordinatorDashboard() {
       setAlert({ type: 'error', message: 'You must assign a Project Manager for this pipeline.' });
       return;
     }
-
     setLoading(true); setAlert(null);
     try {
       const response = await axiosInstance.post(`${API_BASE_URL}/requisitions`, {
         project_code: projectCode, 
         project_name: projectName, 
-        coordinator_id: MOCK_USER_ID,
+        coordinator_id: currentUserId,
         category: category,
         assigned_site_manager_id: siteManagerId ? parseInt(siteManagerId) : null,
         assigned_project_manager_id: parseInt(projectManagerId),
@@ -181,7 +193,7 @@ export default function SiteCoordinatorDashboard() {
     finally { setLoading(false); }
   };
 
-  // 🎯 FIXED & STREAMLINED STATUS MAP
+  // FIXED & STREAMLINED STATUS MAP
   const getStepStatus = (currentStatus, stepIndex) => {
     const statusMap = {
       'Vetting Active': 1,
@@ -194,10 +206,9 @@ export default function SiteCoordinatorDashboard() {
       'Pending Project Manager': 3,
       'Pending Director': 3,
       'Query Raised': 3,
-      'Awaiting Digital Signature': 4, // 🟡 Step 4 Active (Draft generated, waiting for seal)
-      'Approved': 5                    // 🟢 Step 4 Completed (Fully complete!)
+      'Awaiting Digital Signature': 4, // Step 4 Active
+      'Approved': 5                    // Step 4 Completed
     };
-
     const currentStep = statusMap[currentStatus] || 1;
     if (currentStep > stepIndex) return 'completed';
     if (currentStep === stepIndex) return 'active';
@@ -249,7 +260,7 @@ export default function SiteCoordinatorDashboard() {
                   <option value="FOOD">Food & Canteen Services</option>
                 </select>
               </div>
-
+              
               <div className="flex flex-col space-y-1.5">
                 <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Site Manager (Vetting)</label>
                 <select 
@@ -257,12 +268,14 @@ export default function SiteCoordinatorDashboard() {
                   onChange={e => setSiteManagerId(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 focus:bg-white focus:border-indigo-400 outline-none transition-all"
                 >
-                  {MOCK_SITE_MANAGERS.map(sm => (
-                    <option key={sm.id} value={sm.id}>{sm.name}</option>
+                  <option value="">-- None (Route Direct to PM) --</option>
+                  {/* 🎯 Loads live directly from the DB! */}
+                  {siteManagers.map(sm => (
+                    <option key={sm.id} value={sm.id}>{sm.name} ({sm.empcode})</option>
                   ))}
                 </select>
               </div>
-
+              
               <div className="flex flex-col space-y-1.5">
                 <label className="text-[11px] font-bold text-rose-500 uppercase tracking-wider">Project Manager (Required)</label>
                 <select 
@@ -271,8 +284,10 @@ export default function SiteCoordinatorDashboard() {
                   onChange={e => setProjectManagerId(e.target.value)}
                   className="w-full bg-rose-50/30 border border-rose-200 rounded-xl px-4 py-2 text-sm font-semibold text-slate-700 focus:bg-white focus:border-rose-400 outline-none transition-all"
                 >
-                  {MOCK_PROJECT_MANAGERS.map(pm => (
-                    <option key={pm.id} value={pm.id}>{pm.name}</option>
+                  <option value="">-- Select Project Manager --</option>
+                  {/* 🎯 Loads live directly from the DB! */}
+                  {projectManagers.map(pm => (
+                    <option key={pm.id} value={pm.id}>{pm.name} ({pm.empcode})</option>
                   ))}
                 </select>
               </div>
@@ -313,7 +328,7 @@ export default function SiteCoordinatorDashboard() {
                 </tbody>
               </table>
             </div>
-
+            
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-3">
               <Button type="button" variant="secondary" onClick={addRow} className="w-full sm:w-auto text-xs py-2"><Plus size={14} /> <span>Add Row Item</span></Button>
               <Button type="submit" variant="success" disabled={loading} className="w-full sm:w-auto text-xs py-2 shadow-sm"><Send size={14} /> <span>Submit to Routing Engine</span></Button>
@@ -338,7 +353,7 @@ export default function SiteCoordinatorDashboard() {
               ))
             )}
           </div>
-
+          
           <div className="xl:col-span-8">
             {selectedProposal ? (
               <div className="space-y-6">
@@ -347,7 +362,6 @@ export default function SiteCoordinatorDashboard() {
                     <AlertTriangle className="text-amber-500" size={16} />
                     <span className="font-bold text-[#2c2a57] text-sm uppercase tracking-wider">Active Worksheet Modification Counter</span>
                   </div>
-
                   <div className="overflow-x-auto p-2">
                     <table className="w-full text-left min-w-[700px]">
                       <thead>
@@ -377,7 +391,7 @@ export default function SiteCoordinatorDashboard() {
                       <button type="button" onClick={addProposalRow} className="flex items-center text-xs text-[#0b9c54] hover:text-[#098246] font-bold uppercase tracking-wider"><Plus size={14} className="mr-1" /> Append Row</button>
                     </div>
                   </div>
-
+                  
                   <div className="p-4 border-t border-slate-100 bg-slate-50 space-y-4">
                     <Input label="Your Counter Remarks (Required to push adjustments)" value={coordinatorRemarks} onChange={e => setCoordinatorRemarks(e.target.value)} placeholder="Provide reasoning if adjustments or re-additions were made..." />
                     <div className="flex flex-col sm:flex-row justify-end gap-2 pt-1">
@@ -386,7 +400,7 @@ export default function SiteCoordinatorDashboard() {
                     </div>
                   </div>
                 </Card>
-
+                
                 <Card className="p-4 space-y-4">
                   <div className="flex items-center space-x-2 text-slate-500 font-bold text-xs uppercase tracking-wider"><MessageSquare size={14} /><span>Negotiation Audit Ledger</span></div>
                   <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
@@ -520,7 +534,6 @@ export default function SiteCoordinatorDashboard() {
 
                   </div>
                 </div>
-
               </Card>
             ))
           )}

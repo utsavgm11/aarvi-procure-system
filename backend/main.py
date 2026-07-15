@@ -29,7 +29,9 @@ app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 # 2. Complete CORS Cross-Origin Resource Sharing Rules
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["http://localhost:5173",
+        "https://aarvi-procure-system.vercel.app",
+        "https://procure.aarviencon.com"], 
     allow_credentials=True,
     allow_methods=["*"], 
     allow_headers=["*"], 
@@ -118,7 +120,8 @@ def get_active_users_by_role(role: str, db: Session = Depends(get_db)):
         models.User.role == role,
         models.User.is_active == True
     ).order_by(models.User.name.asc()).all()
-    return [{"id": u.id, "name": u.name, "email": u.email} for u in users]
+    # 🎯 NEW: Added 'empcode' to the return dictionary
+    return [{"id": u.id, "name": u.name, "email": u.email, "empcode": u.empcode} for u in users]
 
 # -------------------------------------------------------------------
 # STAGE 1: SITE COORDINATOR ENTRY GATEWAY
@@ -922,7 +925,8 @@ def login_user(payload: LoginPayload, db: Session = Depends(get_db)):
         "id": user.id,
         "name": user.name,
         "email": user.email,
-        "role": user.role
+        "role": user.role,
+        "empcode": getattr(user, 'empcode', 'N/A') # 🎯 NEW: Safely extracts empcode
     }
 
 # -------------------------------------------------------------------
@@ -938,13 +942,23 @@ class AdminPasswordUpdatePayload(BaseModel):
     email: str
     new_password: str
 
+# 🎯 Mapping dictionary for automatic employee code generation
+ROLE_PREFIXES = {
+    "Site Manager": "SM",
+    "Purchase Executive": "PE",
+    "Project Manager": "PM",
+    "Director": "DR",
+    "Admin": "AD",
+    "Site Coordinator": "SC"
+}
+
 @app.get("/api/admin/users")
 def admin_get_all_users(db: Session = Depends(get_db)):
-    # Fetch all users, sorted by role then name
     users = db.query(models.User).order_by(models.User.role.asc(), models.User.name.asc()).all()
     return [
         {
             "id": u.id, 
+            "empcode": u.empcode, # 🎯 NEW
             "name": u.name, 
             "email": u.email, 
             "role": u.role, 
@@ -954,12 +968,18 @@ def admin_get_all_users(db: Session = Depends(get_db)):
 
 @app.post("/api/admin/users", status_code=201)
 def admin_create_user(payload: AdminCreateUserPayload, db: Session = Depends(get_db)):
-    # 1. Check if email already exists
     if db.query(models.User).filter(models.User.email == payload.email).first():
         raise HTTPException(status_code=400, detail="Email already registered.")
     
-    # 2. Create the new user (🎯 Using password_hash to match your DB)
+    # 🎯 1. Generate the Auto-Incrementing Prefix String
+    prefix = ROLE_PREFIXES.get(payload.role, "EMP")
+    current_count = db.query(models.User).filter(models.User.role == payload.role).count()
+    next_serial = current_count + 1
+    generated_empcode = f"AEL-{prefix}-{next_serial:02d}"
+    
+    # 🎯 2. Save the User
     new_user = models.User(
+        empcode=generated_empcode,
         name=payload.name, 
         email=payload.email, 
         password_hash=payload.password, 
@@ -968,7 +988,7 @@ def admin_create_user(payload: AdminCreateUserPayload, db: Session = Depends(get
     )
     db.add(new_user)
     db.commit()
-    return {"message": f"User {payload.name} created successfully."}
+    return {"message": f"User {payload.name} created successfully with code {generated_empcode}."}
 
 @app.put("/api/admin/users/password")
 def admin_update_user_password(payload: AdminPasswordUpdatePayload, db: Session = Depends(get_db)):
@@ -982,23 +1002,29 @@ def admin_update_user_password(payload: AdminPasswordUpdatePayload, db: Session 
     db.commit()
     return {"message": f"Password for {user.name} successfully updated."}
 
-@app.delete("/api/admin/users/{email}")
-def admin_delete_user(email: str, db: Session = Depends(get_db)):
+@app.put("/api/admin/users/{email}/toggle-status")
+def admin_toggle_user_status(email: str, db: Session = Depends(get_db)):
     # 1. Locate the target user profile by email
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User account not found.")
         
-    # 2. Prevent the system from deleting the main system admin account accidentally
+    # 2. Protect the main system admin from being locked out
     if user.email == "admin@aarviencon.com":
-        raise HTTPException(status_code=400, detail="Root System Admin account cannot be deleted.")
+        raise HTTPException(status_code=400, detail="Root System Admin account cannot be disabled.")
 
-    # 3. Purge the account from the directory
-    db.delete(user)
+    # 🎯 3. THE TOGGLE SWITCH: Flips True to False, or False to True
+    user.is_active = not user.is_active
     db.commit()
     
-    return {"message": f"Privileges revoked. Account {email} successfully deleted."}
+    # 4. Return a clear message so the frontend knows what happened
+    status_text = "Activated" if user.is_active else "Deactivated (Locked Out)"
+    return {"message": f"Account {email} status changed to: {status_text}."}
 
+
+@app.get("/api/users/{user_id}/notifications")
+def get_user_notifications(user_id: int):
+    return []
 
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
