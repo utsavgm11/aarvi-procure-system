@@ -1,7 +1,10 @@
 // src/components/ITAdminDashboard.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { ShieldCheck, UserPlus, Key, Users, CheckCircle2, AlertCircle, Edit3, Power, X, Lock } from 'lucide-react';
+import { 
+  ShieldCheck, UserPlus, Key, Users, CheckCircle2, 
+  AlertCircle, Edit3, Power, X, Lock, Eye, EyeOff, User, Hash 
+} from 'lucide-react';
 import { Card, Input, Button } from './ui/SharedUI';
 
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
@@ -12,15 +15,20 @@ export default function ITAdminDashboard() {
   const [alert, setAlert] = useState(null);
 
   // Create User States
+  const [empcode, setEmpcode] = useState(''); // 🎯 NEW: Manual Emp Code State
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('Site Coordinator');
 
-  // Password Override Control Modal States
+  // Full Edit User Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedEmail, setSelectedEmail] = useState('');
-  const [newPassword, setNewPassword] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editEmpcode, setEditEmpcode] = useState('');
+  const [editRole, setEditRole] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false); // Controls password visibility
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -46,32 +54,35 @@ export default function ITAdminDashboard() {
     e.preventDefault();
     setLoading(true); setAlert(null);
     try {
-      await axios.post(`${API_BASE_URL}/admin/users`, { name, email, password, role });
+      // 🎯 Sends the manual empcode to the backend
+      await axios.post(`${API_BASE_URL}/admin/users`, { empcode, name, email, password, role });
       setAlert({ type: 'success', message: `User ${name} provisioned as ${role}.` });
-      setName(''); setEmail(''); setPassword('');
+      setEmpcode(''); setName(''); setEmail(''); setPassword('');
       fetchUsers();
     } catch (err) {
       setAlert({ type: 'error', message: err.response?.data?.detail || 'Creation failed.' });
     } finally { setLoading(false); }
   };
 
-  const handlePasswordReset = async (e) => {
+  const handleUpdateUser = async (e) => {
     e.preventDefault();
     if (!selectedEmail) return setAlert({ type: 'error', message: 'Select a valid user email account.' });
     setLoading(true); setAlert(null);
     try {
-      await axios.put(`${API_BASE_URL}/admin/users/password`, { email: selectedEmail, new_password: newPassword });
-      setAlert({ type: 'success', message: `Credentials successfully updated for ${selectedEmail}.` });
+      await axios.put(`${API_BASE_URL}/admin/users/${selectedEmail}`, { 
+        name: editName,
+        empcode: editEmpcode,
+        role: editRole,
+        password: editPassword 
+      });
+      setAlert({ type: 'success', message: `Profile successfully updated for ${selectedEmail}.` });
       setIsModalOpen(false);
-      setSelectedEmail(''); setNewPassword('');
+      fetchUsers();
     } catch (err) {
-      setAlert({ type: 'error', message: err.response?.data?.detail || 'Reset operation failed.' });
+      setAlert({ type: 'error', message: err.response?.data?.detail || 'Update operation failed.' });
     } finally { setLoading(false); }
   };
 
-  // Visual placeholder for Delete action mapping
- // 🎯 FIXED: Fully wired to call the new backend delete routing engine
-  // 🎯 FIXED: Fully wired to call the new backend toggle routing engine
   const handleToggleStatus = async (userEmail, userName, isActive) => {
     const actionText = isActive ? "DEACTIVATE (Lock Out)" : "ACTIVATE (Restore Access)";
     if (window.confirm(`Are you sure you want to ${actionText} the account for ${userName}?`)) {
@@ -80,7 +91,7 @@ export default function ITAdminDashboard() {
       try {
         const res = await axios.put(`${API_BASE_URL}/admin/users/${userEmail}/toggle-status`);
         setAlert({ type: 'success', message: res.data.message });
-        fetchUsers(); // Refresh the list automatically to show the new status
+        fetchUsers(); 
       } catch (err) {
         setAlert({ type: 'error', message: err.response?.data?.detail || 'Failed to toggle status.' });
       } finally {
@@ -88,9 +99,14 @@ export default function ITAdminDashboard() {
       }
     }
   };
+
   const triggerEditModal = (user) => {
     setSelectedEmail(user.email);
-    setNewPassword('');
+    setEditName(user.name || '');
+    setEditEmpcode(user.empcode || '');
+    setEditRole(user.role || 'Site Coordinator');
+    setEditPassword('');
+    setShowPassword(false);
     setIsModalOpen(true);
   };
 
@@ -120,14 +136,18 @@ export default function ITAdminDashboard() {
         <h2 className="text-xs font-bold text-[#2c2a57] uppercase tracking-widest flex items-center gap-2 mb-5 border-b border-slate-100 pb-3">
           <UserPlus size={15} className="text-[#0b9c54]" /> Register & Provision System Operator
         </h2>
+        {/* 🎯 Adjusted Grid to fit 5 inputs perfectly */}
         <form onSubmit={handleCreateUser} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4 items-end">
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-2">
+            <Input label="Emp Code" required value={empcode} onChange={e => setEmpcode(e.target.value)} placeholder="e.g. HO09" />
+          </div>
+          <div className="lg:col-span-2">
             <Input label="Full Name" required value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Rahul Verma" />
           </div>
           <div className="lg:col-span-3">
             <Input label="Company Email" type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="name@aarviencon.com" />
           </div>
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-2">
             <Input label="Access Passcode" type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
           </div>
           <div className="lg:col-span-2">
@@ -173,7 +193,6 @@ export default function ITAdminDashboard() {
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
               {users.map(u => (
-
                 <tr key={u.id} className={`transition-colors ${u.is_active ? 'hover:bg-slate-50/40' : 'bg-slate-50/80 opacity-75'}`}>
                   <td className="py-3.5 px-6 font-extrabold text-[#2c2a57]">
                     {u.name}
@@ -198,8 +217,8 @@ export default function ITAdminDashboard() {
                     <div className="flex items-center justify-center space-x-2">
                       <button
                         onClick={() => triggerEditModal(u)}
-                        className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
-                        title="Override Target Credentials"
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                        title="Edit Operator Profile"
                       >
                         <Edit3 size={15} />
                       </button>
@@ -213,69 +232,108 @@ export default function ITAdminDashboard() {
                     </div>
                   </td>
                 </tr>
-              )
-              )}
+              ))}
             </tbody>
           </table>
         </div>
       </Card>
 
-      {/* MODAL WINDOW: OVERRIDE PASSCODE ENGINE */}
+      {/* 🎯 MODAL WINDOW: FULL USER EDIT CONTROLS */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-md overflow-hidden transform scale-100 animate-in zoom-in-95 duration-200 m-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-200 p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden transform scale-100 animate-in zoom-in-95 duration-200">
             <div className="bg-[#2c2a57] text-white px-5 py-4 flex justify-between items-center">
               <div className="flex items-center space-x-2">
-                <Key size={16} className="text-amber-400" />
-                <h3 className="font-bold text-sm uppercase tracking-wider">Credential Modification Tool</h3>
+                <Edit3 size={16} className="text-amber-400" />
+                <h3 className="font-bold text-sm uppercase tracking-wider">Edit Operator Profile</h3>
               </div>
               <button 
                 onClick={() => setIsModalOpen(false)}
-                className="text-indigo-200 hover:text-white transition-colors"
+                className="text-indigo-200 hover:text-white transition-colors p-1"
               >
                 <X size={18} />
               </button>
             </div>
             
-            <form onSubmit={handlePasswordReset} className="p-5 space-y-4">
-              <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Selected Target Profile</p>
-                <p className="text-xs font-mono font-bold text-slate-700 mt-0.5 truncate">{selectedEmail}</p>
+            <form onSubmit={handleUpdateUser} className="p-5 space-y-4">
+              <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5 mb-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Target Account</p>
+                <p className="text-xs font-mono font-bold text-[#2c2a57] mt-0.5 truncate">{selectedEmail}</p>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">New Target Password</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Lock className="h-4 w-4 text-slate-400" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Name Field */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Full Name</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><User className="h-4 w-4 text-slate-400" /></div>
+                    <input
+                      type="text" required value={editName} onChange={e => setEditName(e.target.value)}
+                      className="block w-full pl-9 pr-3 py-2 border border-slate-300 rounded-xl text-sm font-medium focus:ring-[#2c2a57] focus:border-[#2c2a57] bg-slate-50 focus:bg-white transition-all outline-none"
+                    />
                   </div>
-                  <input
-                    type="password"
-                    required
-                    value={newPassword}
-                    onChange={e => setNewPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="block w-full pl-9 pr-3 py-2 border border-slate-300 rounded-xl text-sm font-medium focus:ring-indigo-500 focus:border-indigo-500 bg-slate-50 focus:bg-white transition-all outline-none"
-                  />
+                </div>
+
+                {/* Emp Code Field */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Employee Code</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Hash className="h-4 w-4 text-slate-400" /></div>
+                    <input
+                      type="text" required value={editEmpcode} onChange={e => setEditEmpcode(e.target.value)}
+                      className="block w-full pl-9 pr-3 py-2 border border-slate-300 rounded-xl text-sm font-medium focus:ring-[#2c2a57] focus:border-[#2c2a57] bg-slate-50 focus:bg-white transition-all outline-none"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="flex justify-end space-x-2 pt-2">
-                <Button 
-                  type="button" 
-                  variant="ghost" 
-                  onClick={() => setIsModalOpen(false)}
-                  className="text-xs font-semibold py-2 px-4"
-                >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Role Field */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">System Designation</label>
+                  <select 
+                    value={editRole} onChange={e => setEditRole(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium text-[#2c2a57] focus:bg-white focus:border-[#2c2a57] outline-none transition-all cursor-pointer"
+                  >
+                    <option value="Site Coordinator">Site Coordinator</option>
+                    <option value="Site Manager">Site Manager</option>
+                    <option value="Purchase Executive">Purchase Executive</option>
+                    <option value="Project Manager">Project Manager</option>
+                    <option value="Director">Director</option>
+                    <option value="Admin">IT Admin</option>
+                  </select>
+                </div>
+
+                {/* Password Field with Eye Toggle */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Set New Password</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-4 w-4 text-slate-400" /></div>
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={editPassword}
+                      onChange={e => setEditPassword(e.target.value)}
+                      placeholder="(Leave blank to keep current)"
+                      className="block w-full pl-9 pr-10 py-2 border border-slate-300 rounded-xl text-sm font-medium focus:ring-amber-500 focus:border-amber-500 bg-slate-50 focus:bg-white transition-all outline-none placeholder:text-[10px]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-[#2c2a57] transition-colors"
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-4 mt-2 border-t border-slate-100">
+                <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} className="text-xs font-semibold py-2 px-4">
                   Cancel
                 </Button>
-                <Button 
-                  type="submit" 
-                  variant="danger" 
-                  disabled={loading}
-                  className="text-xs font-bold py-2 px-5 shadow-xs"
-                >
-                  Override Passcode
+                <Button type="submit" variant="primary" disabled={loading} className="text-xs font-bold py-2 px-6 shadow-xs bg-[#2c2a57] hover:bg-indigo-950">
+                  Save Changes
                 </Button>
               </div>
             </form>

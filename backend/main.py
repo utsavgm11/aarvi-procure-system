@@ -19,6 +19,7 @@ import models
 # 1. System Logging Configurations
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AarviProcure")
+
 app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.0.0")
 
 # 🎯 NEW: Create and Mount Storage Directory for Uploaded Documents
@@ -341,6 +342,7 @@ def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayloa
     ))
     db.commit()
     return {"ticket_number": ticket_number, "status": ticket.status}
+
 # -------------------------------------------------------------------
 # STAGE 4 & 5: MANAGEMENT SIGN-OFF & AUTOMATED DOCUMENT COMPILATION
 # -------------------------------------------------------------------
@@ -933,24 +935,18 @@ def login_user(payload: LoginPayload, db: Session = Depends(get_db)):
 # 🛡️ IT ADMIN & USER MANAGEMENT LAYER
 # -------------------------------------------------------------------
 class AdminCreateUserPayload(BaseModel):
+    empcode: str # 🎯 NEW: Now explicitly required from the frontend form
     name: str
     email: str
     password: str
     role: str
 
-class AdminPasswordUpdatePayload(BaseModel):
-    email: str
-    new_password: str
-
-# 🎯 Mapping dictionary for automatic employee code generation
-ROLE_PREFIXES = {
-    "Site Manager": "SM",
-    "Purchase Executive": "PE",
-    "Project Manager": "PM",
-    "Director": "DR",
-    "Admin": "AD",
-    "Site Coordinator": "SC"
-}
+# 🎯 NEW: The Schema required to handle the Full Update Payload
+class AdminUserUpdatePayload(BaseModel):
+    name: str
+    empcode: str
+    role: str
+    password: Optional[str] = None  # Optional because the admin might leave it blank
 
 @app.get("/api/admin/users")
 def admin_get_all_users(db: Session = Depends(get_db)):
@@ -971,15 +967,13 @@ def admin_create_user(payload: AdminCreateUserPayload, db: Session = Depends(get
     if db.query(models.User).filter(models.User.email == payload.email).first():
         raise HTTPException(status_code=400, detail="Email already registered.")
     
-    # 🎯 1. Generate the Auto-Incrementing Prefix String
-    prefix = ROLE_PREFIXES.get(payload.role, "EMP")
-    current_count = db.query(models.User).filter(models.User.role == payload.role).count()
-    next_serial = current_count + 1
-    generated_empcode = f"AEL-{prefix}-{next_serial:02d}"
+    # 🎯 NEW: Prevent Emp Code collisions during new account creation
+    if db.query(models.User).filter(models.User.empcode == payload.empcode).first():
+        raise HTTPException(status_code=400, detail=f"Employee Code {payload.empcode} is already in use!")
     
-    # 🎯 2. Save the User
+    # 🎯 NEW: Save the User using the manually entered empcode
     new_user = models.User(
-        empcode=generated_empcode,
+        empcode=payload.empcode,
         name=payload.name, 
         email=payload.email, 
         password_hash=payload.password, 
@@ -988,19 +982,34 @@ def admin_create_user(payload: AdminCreateUserPayload, db: Session = Depends(get
     )
     db.add(new_user)
     db.commit()
-    return {"message": f"User {payload.name} created successfully with code {generated_empcode}."}
+    return {"message": f"User {payload.name} created successfully with code {payload.empcode}."}
 
-@app.put("/api/admin/users/password")
-def admin_update_user_password(payload: AdminPasswordUpdatePayload, db: Session = Depends(get_db)):
-    # 1. Find the user
-    user = db.query(models.User).filter(models.User.email == payload.email).first()
+# 🎯 NEW: Completely REPLACED the old password update endpoint with a full profile updater
+@app.put("/api/admin/users/{email}")
+def admin_update_user_profile(email: str, payload: AdminUserUpdatePayload, db: Session = Depends(get_db)):
+    # 1. Find the target user
+    user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-    
-    # 2. Update their password (🎯 Using password_hash)
-    user.password_hash = payload.new_password
+        raise HTTPException(status_code=404, detail="Target user not found.")
+
+    # 2. Prevent Emp Code collisions (if they changed the code)
+    if payload.empcode != user.empcode:
+        code_exists = db.query(models.User).filter(models.User.empcode == payload.empcode).first()
+        if code_exists:
+            raise HTTPException(status_code=400, detail=f"Employee Code {payload.empcode} is already in use!")
+
+    # 3. Update standard fields
+    user.name = payload.name
+    user.empcode = payload.empcode
+    user.role = payload.role
+
+    # 4. Handle Password Override (ONLY if a new password was provided in the frontend)
+    if payload.password and payload.password.strip():
+        user.password_hash = payload.password.strip()
+
+    # 5. Save changes
     db.commit()
-    return {"message": f"Password for {user.name} successfully updated."}
+    return {"message": f"Profile for {user.name} successfully updated."}
 
 @app.put("/api/admin/users/{email}/toggle-status")
 def admin_toggle_user_status(email: str, db: Session = Depends(get_db)):
@@ -1020,7 +1029,6 @@ def admin_toggle_user_status(email: str, db: Session = Depends(get_db)):
     # 4. Return a clear message so the frontend knows what happened
     status_text = "Activated" if user.is_active else "Deactivated (Locked Out)"
     return {"message": f"Account {email} status changed to: {status_text}."}
-
 
 @app.get("/api/users/{user_id}/notifications")
 def get_user_notifications(user_id: int):
