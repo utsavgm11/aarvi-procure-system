@@ -1030,9 +1030,72 @@ def admin_toggle_user_status(email: str, db: Session = Depends(get_db)):
     status_text = "Activated" if user.is_active else "Deactivated (Locked Out)"
     return {"message": f"Account {email} status changed to: {status_text}."}
 
-@app.get("/api/users/{user_id}/notifications")
-def get_user_notifications(user_id: int):
-    return []
+@app.get("/api/users/{user_id}/notifications", response_model=List[dict])
+def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
+    # 1. Identify the user and their role
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        return []
+        
+    notifications = []
+    
+    # 2. Site Coordinator Notifications (Check for counter queries from managers)
+    if user.role == "Site Coordinator":
+        queried_tickets = db.query(models.MaterialTicket).filter(
+            models.MaterialTicket.coordinator_id == user_id,
+            models.MaterialTicket.status == "Awaiting Coordinator Sign-Off"
+        ).all()
+        for t in queried_tickets:
+            notifications.append({
+                "id": f"query-{t.ticket_number}",
+                "type": "alert",
+                "message": f"Ticket {t.ticket_number} has a pending query/counter-edit from management.",
+                "link": f"/dashboard/handshake"
+            })
+
+    # 3. Project Manager / Site Manager Notifications (Check for pending technical vetting)
+    elif user.role in ["Site Manager", "Project Manager"]:
+        pending_vetting = db.query(models.MaterialTicket).filter(
+            or_(
+                (models.MaterialTicket.assigned_site_manager_id == user_id) & (models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"])),
+                (models.MaterialTicket.assigned_project_manager_id == user_id) & (models.MaterialTicket.status == "Pending PM Vetting")
+            )
+        ).all()
+        for t in pending_vetting:
+            notifications.append({
+                "id": f"vetting-{t.ticket_number}",
+                "type": "action",
+                "message": f"New requisition {t.ticket_number} requires your technical vetting signature.",
+                "link": f"/dashboard/vetting"
+            })
+
+    # 4. Purchase Executive Notifications (Check for approved lists ready for quotes)
+    elif user.role == "Purchase Executive":
+        pending_sourcing = db.query(models.MaterialTicket).filter(
+            models.MaterialTicket.status == "Pending Sourcing"
+        ).all()
+        for t in pending_sourcing:
+            notifications.append({
+                "id": f"sourcing-{t.ticket_number}",
+                "type": "info",
+                "message": f"Requisition {t.ticket_number} approved. Please attach vendor quotation sheets.",
+                "link": f"/dashboard/sourcing"
+            })
+
+    # 5. Director Notifications (Check for high-value orders > 10L needing budget clearance)
+    elif user.role == "Director":
+        pending_director = db.query(models.MaterialTicket).filter(
+            models.MaterialTicket.status == "Pending Director"
+        ).all()
+        for t in pending_director:
+            notifications.append({
+                "id": f"director-{t.ticket_number}",
+                "type": "critical",
+                "message": f"High-Value Requisition {t.ticket_number} requires absolute executive board sign-off.",
+                "link": f"/dashboard/management"
+            })
+
+    return notifications
 
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")

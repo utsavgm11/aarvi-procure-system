@@ -1,7 +1,8 @@
 // src/components/layout/Navbar.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Menu, Bell, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom'; // 🎯 NEW: Import React Router navigation
+import { Menu, Bell, CheckCircle, Clock, AlertCircle, AlertTriangle } from 'lucide-react';
 
 // 🎯 IMPORTING THE LOGO ENGINES FROM YOUR NEW COMPACT ASSETS FOLDER
 import aarviLogo from '../../assets/logo.png';
@@ -9,10 +10,11 @@ import aarviLogo from '../../assets/logo.png';
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
 export default function Navbar({ toggleSidebar, userSession }) {
-  // 🎯 NEW: Notification State Management
   const [notifications, setNotifications] = useState([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
+  
+  const navigate = useNavigate(); // 🎯 NEW: Initialize the navigation engine
 
   // Close dropdown if clicked outside
   useEffect(() => {
@@ -25,13 +27,12 @@ export default function Navbar({ toggleSidebar, userSession }) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // 🎯 NEW: Polling Engine to fetch alerts every 30 seconds
+  // 🎯 Computed Polling Engine (Checks every 60 seconds)
   useEffect(() => {
     if (!userSession?.id) return;
 
     const fetchNotifications = async () => {
       try {
-        // We will build this endpoint in the backend next!
         const res = await axios.get(`${API_BASE_URL}/users/${userSession.id}/notifications`);
         setNotifications(res.data);
       } catch (err) {
@@ -39,20 +40,30 @@ export default function Navbar({ toggleSidebar, userSession }) {
       }
     };
 
-    fetchNotifications(); // Initial fetch
-    const intervalId = setInterval(fetchNotifications, 30000); // Check every 30 seconds
+    fetchNotifications(); // Initial fetch on load
+    const intervalId = setInterval(fetchNotifications, 60000); // Check every 60 seconds
 
     return () => clearInterval(intervalId);
   }, [userSession?.id]);
 
-  const unreadCount = notifications.filter(n => !n.is_read).length;
+  const unreadCount = notifications.length;
 
-  const markAsRead = async (notificationId) => {
-    try {
-      await axios.put(`${API_BASE_URL}/notifications/${notificationId}/read`);
-      setNotifications(prev => prev.map(n => n.id === notificationId ? { ...n, is_read: true } : n));
-    } catch (err) {
-      console.error(err);
+  const handleNotificationClick = (link) => {
+    setIsDropdownOpen(false);
+    // 🎯 FIXED: Use React Router to navigate smoothly without a hard page reload!
+    if (link) {
+      navigate(link); 
+    }
+  };
+
+  // Maps the backend notification types to the correct UI icons and colors
+  const getIconForType = (type) => {
+    switch (type) {
+      case 'critical': return <AlertTriangle size={16} className="text-rose-500" />;
+      case 'action': return <Clock size={16} className="text-amber-500" />;
+      case 'alert': return <AlertCircle size={16} className="text-indigo-500" />;
+      case 'info': return <CheckCircle size={16} className="text-emerald-500" />;
+      default: return <Bell size={16} className="text-slate-500" />;
     }
   };
 
@@ -80,7 +91,7 @@ export default function Navbar({ toggleSidebar, userSession }) {
       {/* RIGHT AREA: BADGE ALERTS & DYNAMIC PROFILE INDICATORS */}
       <div className="flex items-center space-x-4">
         
-        {/* 🎯 NEW: Interactive Notification Dropdown */}
+        {/* Interactive Notification Dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button 
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -98,34 +109,34 @@ export default function Navbar({ toggleSidebar, userSession }) {
           {isDropdownOpen && (
             <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 shadow-xl rounded-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
               <div className="bg-slate-50 border-b border-slate-100 px-4 py-3 flex justify-between items-center">
-                <span className="text-xs font-bold uppercase tracking-widest text-[#2c2a57]">Activity Hub</span>
-                <span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200">{unreadCount} New</span>
+                <span className="text-xs font-bold uppercase tracking-widest text-[#2c2a57]">Action Items</span>
+                <span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200">{unreadCount} Pending</span>
               </div>
               
               <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
                 {notifications.length === 0 ? (
                   <div className="p-6 text-center text-xs text-slate-400 font-medium">
                     <CheckCircle size={24} className="mx-auto mb-2 text-slate-300" />
-                    You're all caught up!
+                    Queue is completely clear!
                   </div>
                 ) : (
                   notifications.map((notif) => (
                     <div 
                       key={notif.id} 
-                      onClick={() => markAsRead(notif.id)}
-                      className={`p-3 transition-colors cursor-pointer hover:bg-slate-50 ${notif.is_read ? 'opacity-60' : 'bg-indigo-50/30'}`}
+                      onClick={() => handleNotificationClick(notif.link)}
+                      className="p-3 transition-colors cursor-pointer hover:bg-slate-50 bg-indigo-50/20"
                     >
                       <div className="flex space-x-3">
                         <div className="mt-0.5">
-                          {notif.type === 'APPROVAL' ? <CheckCircle size={16} className="text-emerald-500" /> : 
-                           notif.type === 'NEW_TICKET' ? <AlertCircle size={16} className="text-indigo-500" /> : 
-                           <Clock size={16} className="text-amber-500" />}
+                          {getIconForType(notif.type)}
                         </div>
                         <div>
-                          <p className={`text-xs ${notif.is_read ? 'text-slate-600 font-medium' : 'text-[#2c2a57] font-bold'}`}>
+                          <p className="text-xs text-[#2c2a57] font-bold leading-tight">
                             {notif.message}
                           </p>
-                          <p className="text-[10px] font-mono text-slate-400 mt-1">{notif.timestamp}</p>
+                          <p className="text-[10px] font-mono text-slate-400 mt-1 uppercase tracking-wider">
+                            Requires Action
+                          </p>
                         </div>
                       </div>
                     </div>
