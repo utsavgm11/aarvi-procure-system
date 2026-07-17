@@ -231,12 +231,23 @@ export default function SiteManagerDashboard({ currentUser }) {
               <Card className="p-6 text-center text-slate-400 border-dashed border-2 text-sm bg-white">Your action vetting queue is completely clear.</Card>
             ) : (
               tickets.map((t) => (
-                <div key={t.ticket_number} onClick={() => openTicket(t)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedTicket?.ticket_number === t.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
-                  <div className="flex justify-between items-center mb-2"><span className="font-mono text-[#2c2a57] font-black text-sm">{t.ticket_number}</span><StatusBadge status={t.status} /></div>
-                  <p className="text-xs font-semibold text-slate-600 truncate">{t.project_name}</p>
-                  <div className="text-[10px] font-bold text-slate-400 mt-2 font-mono">Cost Center: {t.project_code}</div>
-                </div>
-              ))
+  <div key={t.ticket_number} onClick={() => openTicket(t)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedTicket?.ticket_number === t.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+    <div className="flex justify-between items-center mb-2">
+      <span className="font-mono text-[#2c2a57] font-black text-sm">{t.ticket_number}</span>
+      <StatusBadge status={t.status} />
+    </div>
+    <p className="text-xs font-semibold text-slate-600 truncate">{t.project_name}</p>
+    
+    {/* 🎯 NEW: Added Raised By badge next to the Cost Center */}
+    <div className="flex justify-between items-center mt-2.5">
+      <div className="text-[10px] font-bold text-slate-400 font-mono">CC: {t.project_code}</div>
+      <div className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100 uppercase tracking-wider truncate max-w-[120px]" title={t.raised_by}>
+        By: {t.raised_by || 'Unknown'}
+      </div>
+    </div>
+  </div>
+))
+
             )}
           </div>
 
