@@ -63,7 +63,12 @@ export default function ProjectManagerDashboard({ currentUser }) {
     setAlert(null);
     try {
       const itemsRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
-      setItems(itemsRes.data.map(item => ({ ...item, is_reimbursable: item.is_reimbursable || false })));
+      // 🎯 FIXED: Mapped item_type so the PM can see and edit the Asset/Consumable flag
+      setItems(itemsRes.data.map(item => ({ 
+        ...item, 
+        is_reimbursable: item.is_reimbursable || false,
+        item_type: item.item_type || 'Consumable'
+      })));
       
       const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/quotations`);
       setVendorQuotes(quotesRes.data);
@@ -80,6 +85,13 @@ export default function ProjectManagerDashboard({ currentUser }) {
   const handleReimbursableToggle = (itemIndex, newValue) => {
     setItems(prevItems => prevItems.map(item => 
       item.item_index === itemIndex ? { ...item, is_reimbursable: newValue } : item
+    ));
+  };
+
+  // 🎯 NEW: Handler to update the item classification (Asset vs Consumable)
+  const handleItemTypeChange = (itemIndex, newValue) => {
+    setItems(prevItems => prevItems.map(item => 
+      item.item_index === itemIndex ? { ...item, item_type: newValue } : item
     ));
   };
 
@@ -200,19 +212,34 @@ export default function ProjectManagerDashboard({ currentUser }) {
                             </div>
                             
                             {/* 🎯 MANDATORY PM Financial Toggle Switch for each item */}
-                            <div className="flex items-center bg-slate-50 border border-slate-200 p-1.5 rounded-lg">
-                              <span className="text-[10px] font-bold text-slate-500 uppercase mr-3 ml-1">Client Billed Expense?</span>
-                              <label className="flex items-center justify-center cursor-pointer mr-1">
-                                <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${item.is_reimbursable ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                                  <div className={`bg-white w-4 h-4 rounded-full shadow-sm transform transition-transform ${item.is_reimbursable ? 'translate-x-5' : 'translate-x-0'}`} />
-                                </div>
-                                <input 
-                                  type="checkbox" 
-                                  className="hidden" 
-                                  checked={item.is_reimbursable || false} 
-                                  onChange={(e) => handleReimbursableToggle(item.item_index, e.target.checked)} 
-                                />
-                              </label>
+                            <div className="flex flex-wrap items-center bg-slate-50 border border-slate-200 p-1.5 rounded-lg gap-2">
+                              {/* 🎯 NEW: Asset vs Consumable Dropdown */}
+                              <div className="flex items-center border-r border-slate-200 pr-2">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase mr-2 ml-1">Type:</span>
+                                <select
+                                  value={item.item_type || 'Consumable'}
+                                  onChange={(e) => handleItemTypeChange(item.item_index, e.target.value)}
+                                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border outline-none cursor-pointer bg-white text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors"
+                                >
+                                  <option value="Consumable">📦 Consumable</option>
+                                  <option value="Asset">🖥️ Asset</option>
+                                </select>
+                              </div>
+
+                              <div className="flex items-center">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase mr-3 ml-1">Client Billed Expense?</span>
+                                <label className="flex items-center justify-center cursor-pointer mr-1">
+                                  <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${item.is_reimbursable ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                                    <div className={`bg-white w-4 h-4 rounded-full shadow-sm transform transition-transform ${item.is_reimbursable ? 'translate-x-5' : 'translate-x-0'}`} />
+                                  </div>
+                                  <input 
+                                    type="checkbox" 
+                                    className="hidden" 
+                                    checked={item.is_reimbursable || false} 
+                                    onChange={(e) => handleReimbursableToggle(item.item_index, e.target.checked)} 
+                                  />
+                                </label>
+                              </div>
                             </div>
 
                           </div>

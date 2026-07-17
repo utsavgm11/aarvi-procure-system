@@ -46,6 +46,7 @@ class RequisitionRowItem(BaseModel):
     make_brand: Optional[str] = None
     quantity: int
     purpose: str
+    item_type: Optional[str] = "Consumable"  # 🎯 NEW: Classified as 'Asset' or 'Consumable'
 
 class CreateRequisitionPayload(BaseModel):
     project_code: str
@@ -62,7 +63,8 @@ class UpdateRequisitionItem(BaseModel):
     make_brand: Optional[str] = None
     quantity: int
     purpose: str
-    is_reimbursable: Optional[bool] = False 
+    is_reimbursable: Optional[bool] = False
+    item_type: Optional[str] = "Consumable"  # 🎯 NEW: Classified as 'Asset' or 'Consumable' 
 
 class ProposeEditsPayload(BaseModel):
     user_name: str
@@ -104,6 +106,7 @@ class QuotationRowItem(BaseModel):
 
 class SubmitQuotationsPayload(BaseModel):
     quotations: List[QuotationRowItem]
+    items: Optional[List[UpdateRequisitionItem]] = None  # 🎯 STEP 3: Added to let Purchase modify items
 
 class FinanceApprovalPayload(BaseModel):
     user_name: str
@@ -151,7 +154,8 @@ def raise_material_requisition(payload: CreateRequisitionPayload, db: Session = 
             product_description=row.product_description,
             make_brand=row.make_brand,
             quantity=row.quantity,
-            purpose=row.purpose
+            purpose=row.purpose,
+            item_type=row.item_type  # 🎯 NEW: Captures the initial field value
         )
         db.add(db_item)
         
@@ -184,7 +188,8 @@ def propose_ticket_edits(ticket_number: str, payload: ProposeEditsPayload, db: S
             make_brand=row.make_brand,
             quantity=row.quantity,
             purpose=row.purpose,
-            is_reimbursable=row.is_reimbursable
+            is_reimbursable=row.is_reimbursable,
+            item_type=row.item_type  # 🎯 NEW: Retained during manager adjustments
         ))
         
     if payload.user_role in ["Site Manager", "Project Manager"]:
@@ -217,7 +222,8 @@ def dual_sign_approve(ticket_number: str, payload: DualApprovalPayload, db: Sess
                 make_brand=row.make_brand,
                 quantity=row.quantity,
                 purpose=row.purpose,
-                is_reimbursable=row.is_reimbursable
+                is_reimbursable=row.is_reimbursable,
+                item_type=row.item_type
             ))
             
     remarks_text = f"List Approved & Locked by {payload.user_role}."
@@ -275,6 +281,14 @@ async def upload_quotation_document(
 def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayload, db: Session = Depends(get_db)):
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
     if not ticket: raise HTTPException(status_code=404, detail="Active requisition sheet not found.")
+        
+    # 🎯 NEW: Process item types reclassifications updated by the Purchase Desk
+    if payload.items:
+        for row in payload.items:
+            db.query(models.TicketItem).filter(
+                models.TicketItem.ticket_number == ticket_number,
+                models.TicketItem.item_index == row.item_index
+            ).update({"item_type": row.item_type})
         
     highest_landed_total = 0.0
     for quote in payload.quotations:
@@ -360,7 +374,8 @@ def process_financial_signoff(ticket_number: str, payload: FinanceApprovalPayloa
                 db.query(models.TicketItem).filter(
                     models.TicketItem.ticket_number == ticket_number,
                     models.TicketItem.item_index == row.item_index
-                ).update({"is_reimbursable": row.is_reimbursable})
+                ).update({"is_reimbursable": row.is_reimbursable,
+                          "item_type": row.item_type})
                 
         for item_idx_str, winning_vendor in payload.selected_bids.items():
             item_idx = int(item_idx_str)
@@ -465,7 +480,7 @@ def get_coordinator_handshake_queue(coordinator_id: int, db: Session = Depends(g
 @app.get("/api/requisitions/{ticket_number}/items", response_model=List[dict])
 def get_ticket_line_items(ticket_number: str, db: Session = Depends(get_db)):
     items = db.query(models.TicketItem).filter(models.TicketItem.ticket_number == ticket_number).order_by(models.TicketItem.item_index.asc()).all()
-    return [{"item_index": i.item_index, "product_description": i.product_description, "make_brand": i.make_brand, "quantity": i.quantity, "purpose": i.purpose, "is_reimbursable": i.is_reimbursable} for i in items]
+    return [{"item_index": i.item_index, "product_description": i.product_description, "make_brand": i.make_brand, "quantity": i.quantity, "purpose": i.purpose, "is_reimbursable": i.is_reimbursable,"item_type": getattr(i, 'item_type', 'Consumable')} for i in items]
 
 @app.get("/api/requisitions/{ticket_number}/history", response_model=List[dict])
 def get_ticket_history_logs(ticket_number: str, db: Session = Depends(get_db)):

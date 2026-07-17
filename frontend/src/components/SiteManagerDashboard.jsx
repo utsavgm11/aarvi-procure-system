@@ -74,7 +74,12 @@ export default function SiteManagerDashboard({ currentUser }) {
     setAlert(null);
     try {
       const itemRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
-      setGridItems(itemRes.data.map(item => ({ ...item, is_reimbursable: item.is_reimbursable || false })));
+      // 🎯 FIXED: Mapped item_type so it remembers previously selected values
+      setGridItems(itemRes.data.map(item => ({ 
+        ...item, 
+        is_reimbursable: item.is_reimbursable || false,
+        item_type: item.item_type || 'Consumable' 
+      })));
       
       const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
       setHistoryLogs(histRes.data);
@@ -108,7 +113,8 @@ export default function SiteManagerDashboard({ currentUser }) {
   const addNewRow = () => {
     setGridItems([
       ...gridItems, 
-      { item_index: gridItems.length + 1, product_description: '', make_brand: '', quantity: 1, purpose: '', is_reimbursable: false }
+      // 🎯 FIXED: New rows appended by manager now default to Consumable
+      { item_index: gridItems.length + 1, product_description: '', make_brand: '', quantity: 1, purpose: '', is_reimbursable: false, item_type: 'Consumable' }
     ]);
   };
 
@@ -231,23 +237,21 @@ export default function SiteManagerDashboard({ currentUser }) {
               <Card className="p-6 text-center text-slate-400 border-dashed border-2 text-sm bg-white">Your action vetting queue is completely clear.</Card>
             ) : (
               tickets.map((t) => (
-  <div key={t.ticket_number} onClick={() => openTicket(t)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedTicket?.ticket_number === t.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
-    <div className="flex justify-between items-center mb-2">
-      <span className="font-mono text-[#2c2a57] font-black text-sm">{t.ticket_number}</span>
-      <StatusBadge status={t.status} />
-    </div>
-    <p className="text-xs font-semibold text-slate-600 truncate">{t.project_name}</p>
-    
-    {/* 🎯 NEW: Added Raised By badge next to the Cost Center */}
-    <div className="flex justify-between items-center mt-2.5">
-      <div className="text-[10px] font-bold text-slate-400 font-mono">CC: {t.project_code}</div>
-      <div className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100 uppercase tracking-wider truncate max-w-[120px]" title={t.raised_by}>
-        By: {t.raised_by || 'Unknown'}
-      </div>
-    </div>
-  </div>
-))
-
+                <div key={t.ticket_number} onClick={() => openTicket(t)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedTicket?.ticket_number === t.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-mono text-[#2c2a57] font-black text-sm">{t.ticket_number}</span>
+                    <StatusBadge status={t.status} />
+                  </div>
+                  <p className="text-xs font-semibold text-slate-600 truncate">{t.project_name}</p>
+                  
+                  <div className="flex justify-between items-center mt-2.5">
+                    <div className="text-[10px] font-bold text-slate-400 font-mono">CC: {t.project_code}</div>
+                    <div className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100 uppercase tracking-wider truncate max-w-[120px]" title={t.raised_by}>
+                      By: {t.raised_by || 'Unknown'}
+                    </div>
+                  </div>
+                </div>
+              ))
             )}
           </div>
 
@@ -262,8 +266,9 @@ export default function SiteManagerDashboard({ currentUser }) {
                     </div>
                   </div>
                   
+                  {/* 🎯 FIXED: Increased min-w-[1050px] to keep the new column responsive */}
                   <div className="overflow-x-auto p-2">
-                    <table className="w-full text-left min-w-[900px]">
+                    <table className="w-full text-left min-w-[1050px]">
                       <thead>
                         <tr className="text-[11px] text-slate-400 border-b border-slate-100 uppercase font-bold tracking-wider bg-slate-50/50">
                           <th className="py-2.5 w-12 text-center">Row</th>
@@ -271,6 +276,8 @@ export default function SiteManagerDashboard({ currentUser }) {
                           <th className="py-2.5 px-2 w-28">Brand / Make</th>
                           <th className="py-2.5 px-2 w-16 text-center">Qty</th>
                           <th className="py-2.5 px-2 w-48">Purpose Justification</th>
+                          {/* 🎯 NEW COLUMN: Material Type */}
+                          <th className="py-2.5 px-2 w-32 text-center text-indigo-500">Material Type</th>
                           <th className="py-2.5 px-2 w-28 text-center text-indigo-500">Client Billed? <br/><span className="text-[9px] font-normal text-slate-400">(Optional)</span></th>
                           <th className="py-2.5 w-10 text-center"></th>
                         </tr>
@@ -284,6 +291,18 @@ export default function SiteManagerDashboard({ currentUser }) {
                             <td className="py-1 px-1"><input type="number" min="1" value={item.quantity} onChange={(e) => handleCellChange(idx, 'quantity', parseInt(e.target.value) || 1)} className="w-full bg-slate-50 border border-slate-200 rounded text-center text-sm font-bold text-indigo-700 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             <td className="py-1 px-1"><input type="text" value={item.purpose || ''} onChange={(e) => handleCellChange(idx, 'purpose', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-600 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             
+                            {/* 🎯 NEW DROPDOWN CONTROL: Asset vs Consumable */}
+                            <td className="py-1 px-1">
+                              <select 
+                                value={item.item_type || 'Consumable'} 
+                                onChange={e => handleCellChange(idx, 'item_type', e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm font-semibold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none cursor-pointer"
+                              >
+                                <option value="Consumable">📦 Consumable</option>
+                                <option value="Asset">🖥️ Asset</option>
+                              </select>
+                            </td>
+
                             <td className="py-1 px-1 text-center">
                               <label className="flex items-center justify-center cursor-pointer">
                                 <div className={`w-9 h-5 rounded-full p-0.5 transition-colors ${item.is_reimbursable ? 'bg-emerald-500' : 'bg-slate-300'}`}>
@@ -292,7 +311,6 @@ export default function SiteManagerDashboard({ currentUser }) {
                                 <input type="checkbox" className="hidden" checked={item.is_reimbursable || false} onChange={(e) => handleCellChange(idx, 'is_reimbursable', e.target.checked)} />
                               </label>
                             </td>
-
                             <td className="py-1 text-center"><button type="button" onClick={() => deleteRow(idx)} className="text-slate-400 hover:text-rose-600 transition-colors"><Trash2 size={14} /></button></td>
                           </tr>
                         ))}
@@ -376,36 +394,49 @@ export default function SiteManagerDashboard({ currentUser }) {
                 {expandedTickets[ticket.ticket_number] && (
                   <div className="border border-slate-100 rounded-xl overflow-hidden bg-slate-50/50 p-2 animate-in fade-in slide-in-from-top-3 duration-200">
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 mb-1">Authorized Resource Array</div>
-                    <table className="w-full text-left border-collapse bg-white rounded-lg overflow-hidden shadow-xs">
-                      <thead>
-                        <tr className="text-[10px] uppercase font-bold text-slate-400 bg-slate-50 border-b border-slate-100">
-                          <th className="p-2 w-12 text-center">Row</th>
-                          <th className="p-2">Material Description</th>
-                          <th className="p-2 w-32">Brand / Make</th>
-                          <th className="p-2 w-16 text-center">Qty</th>
-                          <th className="p-2">Technical Justification</th>
-                          <th className="p-2 w-28 text-center text-indigo-500">Reimbursable?</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-xs">
-                        {archiveItemsCache[ticket.ticket_number]?.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50/50">
-                            <td className="p-2 text-center font-mono font-bold text-slate-400 bg-slate-50/30">{item.item_index}</td>
-                            <td className="p-2 text-slate-800 font-medium">{item.product_description}</td>
-                            <td className="p-2 text-slate-600 font-semibold">{item.make_brand || '—'}</td>
-                            <td className="p-2 text-center font-bold text-indigo-900 bg-indigo-50/10">{item.quantity}</td>
-                            <td className="p-2 text-slate-500 italic">{item.purpose}</td>
-                            <td className="p-2 text-center font-bold">
-                              {item.is_reimbursable ? (
-                                <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px]">YES</span>
-                              ) : (
-                                <span className="text-slate-400 text-[10px]">NO</span>
-                              )}
-                            </td>
+                    {/* 🎯 FIXED: min-w added here to prevent cramped columns on mobile devices */}
+                    <div className="overflow-x-auto w-full">
+                      <table className="w-full min-w-[800px] text-left border-collapse bg-white rounded-lg overflow-hidden shadow-xs">
+                        <thead>
+                          <tr className="text-[10px] uppercase font-bold text-slate-400 bg-slate-50 border-b border-slate-100">
+                            <th className="p-2 w-12 text-center">Row</th>
+                            <th className="p-2">Material Description</th>
+                            <th className="p-2 w-32">Brand / Make</th>
+                            <th className="p-2 w-16 text-center">Qty</th>
+                            <th className="p-2">Technical Justification</th>
+                            {/* 🎯 NEW ARCHIVE COLUMN: Item Type */}
+                            <th className="p-2 w-28 text-center">Type</th>
+                            <th className="p-2 w-28 text-center text-indigo-500">Reimbursable?</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-xs">
+                          {archiveItemsCache[ticket.ticket_number]?.map((item, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50/50">
+                              <td className="p-2 text-center font-mono font-bold text-slate-400 bg-slate-50/30">{item.item_index}</td>
+                              <td className="p-2 text-slate-800 font-medium">{item.product_description}</td>
+                              <td className="p-2 text-slate-600 font-semibold">{item.make_brand || '—'}</td>
+                              <td className="p-2 text-center font-bold text-indigo-900 bg-indigo-50/10">{item.quantity}</td>
+                              <td className="p-2 text-slate-500 italic">{item.purpose}</td>
+                              
+                              {/* 🎯 NEW ARCHIVE BADGE: Visual indicator for Assest vs Consumable */}
+                              <td className="p-2 text-center font-bold">
+                                <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-wide border ${item.item_type === 'Asset' ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                                  {item.item_type || 'Consumable'}
+                                </span>
+                              </td>
+
+                              <td className="p-2 text-center font-bold">
+                                {item.is_reimbursable ? (
+                                  <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px]">YES</span>
+                                ) : (
+                                  <span className="text-slate-400 text-[10px]">NO</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
 

@@ -17,7 +17,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const [sourcingTickets, setSourcingTickets] = useState([]);
   const [quotes, setQuotes] = useState({}); 
   
-  // Ledger / History Document State (🎯 NEW: Adapted for Document Rendering)
+  // Ledger / History Document State
   const [history, setHistory] = useState([]);
   const [selectedHistoryTicket, setSelectedHistoryTicket] = useState(null);
   const [historyPoItems, setHistoryPoItems] = useState([]); 
@@ -28,7 +28,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
-  // 🎯 NEW: Vendor Master State
+  // Vendor Master State
   const [vendors, setVendors] = useState([]);
 
   const fetchVendors = useCallback(async () => {
@@ -38,7 +38,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     } catch (err) { console.error("Failed to load vendor directory", err); }
   }, []);
 
-  // 🎯 PDF ENGINE INJECTION
+  // PDF ENGINE INJECTION
   const [pdfEngineReady, setPdfEngineReady] = useState(() => typeof window !== 'undefined' && !!window.html2pdf);
 
   useEffect(() => {
@@ -124,12 +124,10 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     setHistoryPoItems([]);
     setLoading(true);
     try {
-      // Fetch only the winning quotations to render the Document Canvas
       const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/quotations`);
       const winningLines = quotesRes.data.filter(q => q.is_selected === true);
       setHistoryPoItems(winningLines);
       
-      // Calculate dynamic Grand Total for the template rendering
       const calcTotal = winningLines.reduce((acc, curr) => acc + (curr.net_amount_payable || curr.base_total_value || 0), 0);
       setSelectedHistoryTicket(prev => ({ ...prev, grand_total: calcTotal }));
 
@@ -147,6 +145,13 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       updatedItemQuotes[quoteIndex][field] = value;
       return { ...prev, [itemIndex]: updatedItemQuotes };
     });
+  };
+
+  // 🎯 NEW: Handler to update the item classification (Asset vs Consumable)
+  const handleItemClassificationChange = (indexToUpdate, newType) => {
+    setItems(prevItems => prevItems.map(item =>
+      item.item_index === indexToUpdate ? { ...item, item_type: newType } : item
+    ));
   };
 
   const addQuoteBox = (itemIndex) => {
@@ -200,7 +205,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             site_contact_phone: q.site_contact_phone || "",
             special_terms: q.special_terms || "",
             quality_remarks: q.quality_remarks || "",
-            file_url: q.file_url || "", // 🎯 ADD THIS EXACT LINE HERE
+            file_url: q.file_url || "", 
             
             product_description: matchingLineItem.product_description || "",
             make_brand: matchingLineItem.make_brand || "",
@@ -217,7 +222,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
 
     setLoading(true);
     try {
-      const res = await axios.post(`${API_BASE_URL}/requisitions/${selectedTicket.ticket_number}/quotations`, { quotations: flatQuotations });
+      // 🎯 UPDATED: Passing the items array along with quotations to push classification changes
+      const res = await axios.post(`${API_BASE_URL}/requisitions/${selectedTicket.ticket_number}/quotations`, { 
+        quotations: flatQuotations,
+        items: items
+      });
       setAlert({ type: 'success', message: `Matrix Submitted! System routing triggered: ${res.data.status}.` });
       setSelectedTicket(null);
       fetchPendingSourcing();
@@ -414,6 +423,15 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           <div className="flex items-center space-x-2 mb-1">
                             <span className="bg-[#2c2a57] text-white text-[10px] font-black px-2 py-0.5 rounded font-mono">Row {item.item_index}</span>
                             <span className="text-xs text-[#0b9c54] font-bold uppercase tracking-wider bg-[#0b9c54]/10 px-2 py-0.5 rounded border border-[#0b9c54]/10">Units Requested: {item.quantity}</span>
+                            {/* 🎯 NEW: Asset vs Consumable Dropdown */}
+                            <select
+                              value={item.item_type || 'Consumable'}
+                              onChange={(e) => handleItemClassificationChange(item.item_index, e.target.value)}
+                              className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border outline-none cursor-pointer bg-slate-100 text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors"
+                            >
+                              <option value="Consumable">📦 Consumable</option>
+                              <option value="Asset">🖥️ Asset</option>
+                            </select>
                           </div>
                           <h3 className="text-sm font-bold text-[#2c2a57] leading-tight mt-1">{item.product_description}</h3>
                         </div>
@@ -438,7 +456,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         const selectedName = e.target.value;
         handleQuoteChange(item.item_index, qIdx, 'vendor_name', selectedName);
         
-        // 🎯 THE AUTO-FILL ENGINE
+        // THE AUTO-FILL ENGINE
         const matchedVendor = vendors.find(v => v.name === selectedName);
         if (matchedVendor) {
           handleQuoteChange(item.item_index, qIdx, 'vendor_address', matchedVendor.address || '');
@@ -449,7 +467,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       placeholder="Type to search or enter new..." 
       className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all" 
     />
-    {/* 🎯 DATALIST DROPDOWN */}
     <datalist id={`vendor-list-${item.item_index}-${qIdx}`}>
       {vendors.map(v => (
         <option key={v.id} value={v.name} />
@@ -531,7 +548,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                     <input type="text" value={quote.quality_remarks || ''} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'quality_remarks', e.target.value)} placeholder="e.g. Test Certificates provided, OEM 1-yr warranty active..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
                                   </div>
                                 </div>
-                                {/* 🎯 NEW: OPTIONAL ATTACHMENT CONTROLLER LAYER */}
+                                {/* OPTIONAL ATTACHMENT CONTROLLER LAYER */}
                                 <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
                                   <div>
                                     <label className="block text-[10px] font-bold text-indigo-600 uppercase mb-1">
@@ -618,7 +635,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                   <div className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-tight w-max mb-2">Cost Center: {ticket.project_code}</div>
                   <p className="text-xs font-bold text-slate-600 truncate">{ticket.project_name}</p>
                   
-                  {/* 🎯 EXACT SEALING TIMESTAMP */}
+                  {/* EXACT SEALING TIMESTAMP */}
                   <div className="flex items-center space-x-1.5 mt-3 text-[10px] font-mono text-slate-600 bg-emerald-50/50 px-2 py-1.5 rounded-lg w-max border border-emerald-100">
                     <Clock size={12} className="text-[#0b9c54]" />
                     <span>Processed On: <strong className="text-slate-900">{ticket.action_date || "Date Unavailable"}</strong></span>

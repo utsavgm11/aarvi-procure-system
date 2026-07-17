@@ -27,7 +27,7 @@ export default function SiteCoordinatorDashboard() {
   // Routing Assignment States
   const [siteManagerId, setSiteManagerId] = useState('');
   const [projectManagerId, setProjectManagerId] = useState('');
-  const [items, setItems] = useState([{ product_description: '', make_brand: '', quantity: 1, purpose: '' }]);
+  const [items, setItems] = useState([{ product_description: '', make_brand: '', quantity: 1, purpose: '' ,item_type: 'Consumable'}]);
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
   
@@ -117,7 +117,7 @@ export default function SiteCoordinatorDashboard() {
   const addProposalRow = () => {
     setProposalItems([
       ...proposalItems, 
-      { item_index: proposalItems.length + 1, product_description: '', make_brand: '', quantity: 1, purpose: '' }
+      { item_index: proposalItems.length + 1, product_description: '', make_brand: '', quantity: 1, purpose: '' , item_type: 'Consumable'}
     ]);
   };
 
@@ -146,7 +146,7 @@ export default function SiteCoordinatorDashboard() {
     setLoading(true);
     try {
       const res = await axiosInstance.put(`${API_BASE_URL}/requisitions/${selectedProposal.ticket_number}/approve`, {
-        user_name: currentUserName, user_role: currentUserRole
+        user_name: currentUserName, user_role: currentUserRole ,items: proposalItems
       });
       setAlert({ type: 'success', message: res.data.status === "Pending Sourcing" ? "Dual-Agreement Locked! Dispatched to Procurement." : "Your signature applied successfully! Waiting on Manager." });
       setSelectedProposal(null);
@@ -155,7 +155,7 @@ export default function SiteCoordinatorDashboard() {
     finally { setLoading(false); }
   };
 
-  const addRow = () => setItems([...items, { product_description: '', make_brand: '', quantity: 1, purpose: '' }]);
+  const addRow = () => setItems([...items, { product_description: '', make_brand: '', quantity: 1, purpose: '', item_type: 'Consumable' }]);
   const removeRow = (index) => items.length > 1 && setItems(items.filter((_, i) => i !== index));
   const handleItemChange = (index, field, value) => {
     const newItems = [...items];
@@ -188,7 +188,7 @@ export default function SiteCoordinatorDashboard() {
       setCategory('GOODS');
       setSiteManagerId('');
       setProjectManagerId('');
-      setItems([{ product_description: '', make_brand: '', quantity: 1, purpose: '' }]);
+      setItems([{ product_description: '', make_brand: '', quantity: 1, purpose: '' ,item_type: 'Consumable' }]);
     } catch (error) { setAlert({ type: 'error', message: 'Failed to submit requisition.' }); } 
     finally { setLoading(false); }
   };
@@ -308,6 +308,7 @@ export default function SiteCoordinatorDashboard() {
                     <th className="py-3 px-3 font-bold">Requirement Description</th>
                     <th className="py-3 px-3 w-48 font-bold">Preferred Specification</th>
                     <th className="py-3 px-3 w-24 font-bold text-center">Quantity</th>
+                    <th className="py-3 px-3 w-36 font-bold text-center">Material Type</th>
                     <th className="py-3 px-3 font-bold">Technical Justification</th>
                     <th className="py-3 w-12 text-center"></th>
                   </tr>
@@ -319,6 +320,16 @@ export default function SiteCoordinatorDashboard() {
                       <td className="py-2 px-2"><input required value={item.product_description} onChange={e => handleItemChange(index, 'product_description', e.target.value)} placeholder="Enter details..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none transition-all" /></td>
                       <td className="py-2 px-2"><input value={item.make_brand} onChange={e => handleItemChange(index, 'make_brand', e.target.value)} placeholder="e.g. Tata, Finolex" className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none transition-all" /></td>
                       <td className="py-2 px-2"><input type="number" min="1" required value={item.quantity} onChange={e => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-bold text-center text-slate-800 focus:bg-white focus:border-[#2c2a57] outline-none transition-all" /></td>
+                      <td className="py-2 px-2">
+  <select 
+    value={item.item_type || 'Consumable'} 
+    onChange={e => handleItemChange(index, 'item_type', e.target.value)}
+    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-semibold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none transition-all cursor-pointer"
+  >
+    <option value="Consumable">📦 Consumable</option>
+    <option value="Asset">🖥️ Asset</option>
+  </select>
+</td>
                       <td className="py-2 px-2"><input required value={item.purpose} onChange={e => handleItemChange(index, 'purpose', e.target.value)} placeholder="Specify use case details..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none transition-all" /></td>
                       <td className="py-2 text-center">
                         <button type="button" onClick={() => removeRow(index)} disabled={items.length === 1} className="text-slate-400 hover:text-rose-600 disabled:opacity-20 transition-colors"><Trash2 size={16} /></button>
@@ -370,6 +381,7 @@ export default function SiteCoordinatorDashboard() {
                           <th className="py-2.5 px-2">Material Specification</th>
                           <th className="py-2.5 px-2 w-32">Brand</th>
                           <th className="py-2.5 px-2 w-24 text-center">Quantity</th>
+                          <th className="py-2.5 px-2 w-32 text-center">Material Type</th>
                           <th className="py-2.5 px-2">Purpose Justification</th>
                           <th className="py-2.5 w-10 text-center"></th>
                         </tr>
@@ -381,6 +393,18 @@ export default function SiteCoordinatorDashboard() {
                             <td className="py-1 px-1"><input type="text" value={item.product_description} onChange={(e) => handleProposalCellChange(idx, 'product_description', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-sm text-slate-800 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             <td className="py-1 px-1"><input type="text" value={item.make_brand || ''} onChange={(e) => handleProposalCellChange(idx, 'make_brand', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-sm text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             <td className="py-1 px-1"><input type="number" value={item.quantity} onChange={(e) => handleProposalCellChange(idx, 'quantity', parseInt(e.target.value) || 1)} className="w-full bg-slate-50 border border-slate-200 rounded text-center text-sm font-bold text-amber-700 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
+
+<td className="py-1 px-1">
+  <select 
+    value={item.item_type || 'Consumable'} 
+    onChange={(e) => handleProposalCellChange(idx, 'item_type', e.target.value)}
+    className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-sm font-semibold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none cursor-pointer"
+  >
+    <option value="Consumable">📦 Consumable</option>
+    <option value="Asset">🖥️ Asset</option>
+  </select>
+</td>
+
                             <td className="py-1 px-1"><input type="text" value={item.purpose || ''} onChange={(e) => handleProposalCellChange(idx, 'purpose', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-sm text-slate-600 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             <td className="py-1 text-center"><button type="button" onClick={() => removeProposalRow(idx)} className="text-slate-400 hover:text-rose-600"><Trash2 size={14} /></button></td>
                           </tr>
