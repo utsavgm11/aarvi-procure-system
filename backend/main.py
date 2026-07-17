@@ -206,6 +206,7 @@ def dual_sign_approve(ticket_number: str, payload: DualApprovalPayload, db: Sess
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
     if not ticket: raise HTTPException(status_code=404, detail="Requisition not found.")
     
+    # 1. Save any final modifications to the items list
     if payload.items:
         db.query(models.TicketItem).filter(models.TicketItem.ticket_number == ticket_number).delete()
         for row in payload.items:
@@ -220,20 +221,19 @@ def dual_sign_approve(ticket_number: str, payload: DualApprovalPayload, db: Sess
             ))
             
     remarks_text = f"List Approved & Locked by {payload.user_role}."
+    
+    # 🎯 2. THE SMART BYPASS LOGIC
     if payload.user_role in ["Site Manager", "Project Manager"]:
-        if ticket.status == "Approved by Coordinator" or ticket.status == "Pending PM Vetting":
-            ticket.status = "Pending Sourcing"
-            remarks_text += " Technical Vetting complete. Dispatched to Purchasing Desk."
-        else:
-            ticket.status = "Approved by Manager"
+        # Direct approval by Management bypasses the coordinator and goes straight to Purchasing
+        ticket.status = "Pending Sourcing"
+        remarks_text += " Technical Vetting complete. Dispatched directly to Purchasing Desk."
             
     elif payload.user_role == "Site Coordinator":
-        if ticket.status == "Approved by Manager":
-            ticket.status = "Pending Sourcing"
-            remarks_text += " Technical Vetting complete. Dispatched to Purchasing Desk."
-        else:
-            ticket.status = "Approved by Coordinator"
+        # If the manager proposed edits, and the coordinator accepts them
+        ticket.status = "Pending Sourcing"
+        remarks_text += " Coordinator accepted Manager's counter-edits. Dispatched directly to Purchasing Desk."
             
+    # 3. Log the history and save
     db.add(models.TicketHistory(
         ticket_number=ticket_number,
         user_name=payload.user_name,
@@ -241,8 +241,8 @@ def dual_sign_approve(ticket_number: str, payload: DualApprovalPayload, db: Sess
         remarks=remarks_text
     ))
     db.commit()
+    
     return {"ticket_number": ticket_number, "status": ticket.status}
-
 # -------------------------------------------------------------------
 # STAGE 3: PURCHASING DESK QUOTATION ATTACHMENT
 # -------------------------------------------------------------------
@@ -436,15 +436,22 @@ def get_pending_vetting_tickets(manager_id: int, db: Session = Depends(get_db)):
         )
     ).order_by(models.MaterialTicket.created_at.desc()).all()
     
-    return [
-        {
+    response = []
+    for t in tickets:
+        # 🎯 NEW: Look up the actual name of the Site Coordinator who raised it
+        coordinator = db.query(models.User).filter(models.User.id == t.coordinator_id).first()
+        coordinator_name = coordinator.name if coordinator else "Unknown Coordinator"
+        
+        response.append({
             "ticket_number": t.ticket_number, 
             "project_code": t.project_code, 
             "project_name": t.project_name, 
             "status": t.status,
-            "category": t.category
-        } for t in tickets
-    ]
+            "category": t.category,
+            "raised_by": coordinator_name  # 🎯 NEW: Added to the output payload
+        })
+        
+    return response
 
 @app.get("/api/requisitions/pending-handshake/{coordinator_id}", response_model=List[dict])
 def get_coordinator_handshake_queue(coordinator_id: int, db: Session = Depends(get_db)):
