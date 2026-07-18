@@ -1,7 +1,7 @@
 // src/components/ManagerRequestPortal.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Plus, Trash2, Send, FileSpreadsheet, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, ShoppingCart } from 'lucide-react';
+import { Plus, Trash2, Send, FileSpreadsheet, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight, ShoppingCart, UserCheck, Users } from 'lucide-react';
 import { Card, Input, Button } from './ui/SharedUI';
 
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
@@ -10,29 +10,44 @@ export default function ManagerRequestPortal({ currentUser }) {
   const [projectCode, setProjectCode] = useState('');
   const [projectName, setProjectName] = useState('');
   const [category, setCategory] = useState('GOODS');
-  const [isSelfSourced, setIsSelfSourced] = useState(false); // 🎯 THE DUAL-TRACK TOGGLE SWITCH
+  
+  // 🎯 ROUTING TOGGLES
+  const [isSelfSourced, setIsSelfSourced] = useState(false); // THE DUAL-TRACK TOGGLE SWITCH
+  const [approvalNeeded, setApprovalNeeded] = useState(false); // 🎯 NEW: Self-Approved vs Needs PM Approval
+
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
-  // 🎯 Vendor Master State for Auto-Fill Engine
- // 🎯 Vendor Master State for Auto-Fill Engine
+  // 🎯 DATA FETCHING STATES
   const [vendors, setVendors] = useState([]);
+  const [projectManagers, setProjectManagers] = useState([]); // 🎯 NEW: State to hold PMs
+  const [selectedPM, setSelectedPM] = useState(''); // 🎯 NEW: State for selected PM
 
   useEffect(() => {
     let isMounted = true;
 
-    const loadVendors = async () => {
+    const fetchInitialData = async () => {
       try {
-        const res = await axios.get(`${API_BASE_URL}/vendors`);
+        // Fetch both Vendors and Project Managers simultaneously
+        const [vendorsRes, pmsRes] = await Promise.all([
+          axios.get(`${API_BASE_URL}/vendors`),
+          axios.get(`${API_BASE_URL}/users/by-role?role=Project Manager`)
+        ]);
+
         if (isMounted) {
-          setVendors(res.data);
+          setVendors(vendorsRes.data);
+          setProjectManagers(pmsRes.data);
+          // Auto-select the first PM in the list if available
+          if (pmsRes.data.length > 0) {
+            setSelectedPM(pmsRes.data[0].id);
+          }
         }
       } catch (err) { 
-        console.error("Failed to load vendor directory", err); 
+        console.error("Failed to load initial setup data", err); 
       }
     };
 
-    loadVendors();
+    fetchInitialData();
 
     // Cleanup function prevents state updates if the component unmounts early
     return () => {
@@ -115,6 +130,16 @@ export default function ManagerRequestPortal({ currentUser }) {
     setLoading(true);
     setAlert(null);
 
+    // 🎯 VALIDATION: Ensure a PM is selected if Approval is needed
+    if (approvalNeeded && !selectedPM) {
+      setAlert({ type: 'error', message: 'You must select a Project Manager from the dropdown to route for approval.' });
+      setLoading(false);
+      return;
+    }
+
+    // Determine the active PM ID to send to the backend
+    const activeAssignedPMId = approvalNeeded ? parseInt(selectedPM) : (currentUser?.id || 5);
+
     try {
       if (isSelfSourced) {
         // ⚡ PATH A: Fast-track Direct PO Pipeline execution
@@ -164,7 +189,7 @@ export default function ManagerRequestPortal({ currentUser }) {
           coordinator_id: currentUser?.id || 5,
           category: category,
           assigned_site_manager_id: null,
-          assigned_project_manager_id: currentUser?.id || 5,
+          assigned_project_manager_id: activeAssignedPMId, // 🎯 Routed to chosen PM or Self
           items: formattedItems,
           is_manager_direct_route: true 
         });
@@ -217,14 +242,53 @@ export default function ManagerRequestPortal({ currentUser }) {
           <Input label="Project / Site Name Description" required value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. Jamnagar Plant Block C" />
         </div>
         
-        <div className="flex flex-col space-y-1.5 pt-1 max-w-xs">
-          <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Procurement Category</label>
-          <select value={category} onChange={e => setCategory(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm font-semibold text-[#2c2a57] outline-none">
-            <option value="GOODS">Standard Goods & Materials</option>
-            <option value="VEHICLE">Vehicle & Transport Rental</option>
-            <option value="ACCOMMODATION">Guest House & Accommodation</option>
-            <option value="FOOD">Food & Canteen Services</option>
-          </select>
+        {/* 🎯 3-COLUMN ROUTING CONFIGURATION ROW */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4 mt-2">
+          
+          <div className="flex flex-col space-y-1.5 pt-1">
+            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Procurement Category</label>
+            <select value={category} onChange={e => setCategory(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-semibold text-[#2c2a57] outline-none">
+              <option value="GOODS">Standard Goods & Materials</option>
+              <option value="VEHICLE">Vehicle & Transport Rental</option>
+              <option value="ACCOMMODATION">Guest House & Accommodation</option>
+              <option value="FOOD">Food & Canteen Services</option>
+            </select>
+          </div>
+
+          {/* 🎯 APPROVAL NEEDED TOGGLE */}
+          <div className="flex flex-col space-y-1.5 pt-1">
+            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Approval Routing</label>
+            <div 
+              onClick={() => setApprovalNeeded(!approvalNeeded)}
+              className={`flex items-center justify-center space-x-2.5 px-4 py-2 rounded-xl border cursor-pointer select-none transition-all shadow-sm h-[42px] ${
+                approvalNeeded ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+              }`}
+            >
+              {approvalNeeded ? <Users size={18} className="text-amber-600" /> : <UserCheck size={18} className="text-emerald-600" />}
+              <span className="text-xs font-bold uppercase tracking-wider">
+                {approvalNeeded ? "Needs PM Approval" : "Self-Approved"}
+              </span>
+            </div>
+          </div>
+
+          {/* 🎯 DYNAMIC PROJECT MANAGER DROPDOWN */}
+          {approvalNeeded && (
+            <div className="flex flex-col space-y-1.5 pt-1 animate-in fade-in slide-in-from-left-2 duration-200">
+              <label className="text-[11px] font-bold text-amber-600 uppercase tracking-wider">Assign to Project Manager <span className="text-rose-500">*</span></label>
+              <select 
+                value={selectedPM} 
+                onChange={e => setSelectedPM(e.target.value)} 
+                className="w-full bg-amber-50/30 border border-amber-200 rounded-xl px-4 py-2.5 text-sm font-semibold text-amber-900 outline-none focus:border-amber-400"
+                required={approvalNeeded}
+              >
+                {projectManagers.length === 0 && <option value="">Loading PMs...</option>}
+                {projectManagers.map(pm => (
+                  <option key={pm.id} value={pm.id}>{pm.name} ({pm.empcode})</option>
+                ))}
+              </select>
+            </div>
+          )}
+
         </div>
       </Card>
 
@@ -344,7 +408,7 @@ export default function ManagerRequestPortal({ currentUser }) {
                 </div>
               </div>
 
-              {/* LOWER SECTION: VENDOR & COMMERCIAL DETAILS (MAPPED FROM PURCHASE DESK) */}
+              {/* LOWER SECTION: VENDOR & COMMERCIAL DETAILS */}
               <div className="p-4 bg-white space-y-4">
                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Final Negotiated Quotation Details</h4>
                 
@@ -360,7 +424,7 @@ export default function ManagerRequestPortal({ currentUser }) {
                         const selectedName = e.target.value;
                         handleCellChange(index, 'vendor_name', selectedName);
                         
-                        // 🎯 THE AUTO-FILL ENGINE[cite: 5]
+                        // 🎯 THE AUTO-FILL ENGINE
                         const matchedVendor = vendors.find(v => v.name === selectedName);
                         if (matchedVendor) {
                           handleCellChange(index, 'vendor_address', matchedVendor.address || '');
@@ -441,7 +505,7 @@ export default function ManagerRequestPortal({ currentUser }) {
                   </div>
                 </div>
 
-                {/* 🎯 EXACT PDF UPLOADER REPLICATED FROM PURCHASE DASHBOARD[cite: 5] */}
+                {/* 🎯 EXACT PDF UPLOADER REPLICATED FROM PURCHASE DASHBOARD */}
                 <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
                   <div>
                     <label className="block text-[10px] font-bold text-indigo-600 uppercase mb-1">
