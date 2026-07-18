@@ -2,7 +2,7 @@
 import React from 'react';
 import { 
   LayoutDashboard, FileSpreadsheet, FileCheck, ShieldAlert, 
-  LogOut, ShoppingCart, CheckSquare, ShieldCheck, Building2 
+  LogOut, ShoppingCart, CheckSquare, ShieldCheck, Building2, Zap
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -10,20 +10,20 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
   const location = useLocation();
   const currentPath = location.pathname;
 
-  // 🎯 DYNAMIC ROLE-BASED NAVIGATION ENGINE
+  // 🎯 DYNAMIC ROLE-BASED NAVIGATION ENGINE (Named Path Overhaul)
   const getNavItems = (role) => {
     switch (role) {
       case 'Site Coordinator':
         return [
-          { name: 'Field Workspace', path: '/', icon: FileSpreadsheet },
+          { name: 'Field Workspace', path: '/field-workspace', icon: FileSpreadsheet },
         ];
       case 'Site Manager':
         return [
-          { name: 'Vetting Gateway', path: '/', icon: ShieldAlert },
+          { name: 'Vetting Gateway', path: '/vetting-gateway', icon: ShieldAlert },
         ];
       case 'Purchase Executive':
         return [
-          { name: 'Sourcing Hub', path: '/', icon: ShoppingCart },
+          { name: 'Sourcing Hub', path: '/sourcing-hub', icon: ShoppingCart },
           { name: 'PO Distribution', path: '/pos', icon: FileCheck },
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileSpreadsheet },
           { name: 'Vendor Directory', path: '/vendors', icon: Building2 }, 
@@ -31,13 +31,19 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
         ];
       case 'Project Manager':
         return [
-          { name: 'Commercial Approvals', path: '/', icon: CheckSquare },
+          { name: 'Commercial Approvals', path: '/commercial-approvals', icon: CheckSquare },
           { name: 'Technical Vetting', path: '/vetting', icon: ShieldAlert },
+          { name: 'Direct Procurement', path: '/direct-request', icon: Zap },
+          { name: 'Master PO Ledger', path: '/po-ledger', icon: FileCheck },
+        ];
+      case 'IT Manager':
+        return [
+          { name: 'Direct Procurement', path: '/direct-procurement', icon: Zap },
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileCheck },
         ];
       case 'Director':
         return [
-          { name: 'Corporate Approvals', path: '/', icon: CheckSquare },
+          { name: 'Corporate Approvals', path: '/corporate-approvals', icon: CheckSquare },
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileCheck },
         ];
       case 'Admin':
@@ -46,7 +52,7 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
         ];  
       default:
         return [
-          { name: 'Dashboard', path: '/', icon: LayoutDashboard }
+          { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard }
         ];
     }
   };

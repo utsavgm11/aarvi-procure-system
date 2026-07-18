@@ -56,6 +56,38 @@ class CreateRequisitionPayload(BaseModel):
     assigned_site_manager_id: Optional[int] = None
     assigned_project_manager_id: int
     items: List[RequisitionRowItem]
+    is_manager_direct_route: Optional[bool] = False # 🎯 NEW: Catches Path B Bypass
+
+
+# 🎯 NEW SCHEMAS FOR PATH A (Fast-Track)
+class DirectPOItemRow(BaseModel):
+    product_description: str
+    make_brand: Optional[str] = None
+    quantity: int
+    purpose: str
+    item_type: Optional[str] = "Consumable"
+    vendor_name: str
+    base_total_value: float
+    gst_percentage: Optional[float] = 18.0
+    net_amount_payable: float
+    vendor_address: Optional[str] = ""
+    vendor_contact: Optional[str] = ""
+    vendor_email: Optional[str] = ""
+    time_of_delivery: Optional[str] = "7 Days"
+    delivery_address: Optional[str] = ""
+    site_contact_person: Optional[str] = ""
+    site_contact_phone: Optional[str] = ""
+    special_terms: Optional[str] = ""
+    quality_remarks: Optional[str] = ""
+    file_url: Optional[str] = ""
+
+class DirectPOPayload(BaseModel):
+    project_code: str
+    project_name: str
+    creator_id: int
+    creator_name: str
+    category: str
+    items: List[DirectPOItemRow]    
 
 class UpdateRequisitionItem(BaseModel):
     item_index: int
@@ -133,7 +165,12 @@ def get_active_users_by_role(role: str, db: Session = Depends(get_db)):
 @app.post("/api/requisitions", status_code=201)
 def raise_material_requisition(payload: CreateRequisitionPayload, db: Session = Depends(get_db)):
     ticket_number = f"REQ-2026-{random.randint(100000, 999999)}"
-    initial_status = "Vetting Active" if payload.assigned_site_manager_id else "Pending PM Vetting"
+    
+    # 🎯 UPDATED ROUTING LOGIC: If a manager raises it directly to be sourced, skip vetting!
+    if payload.is_manager_direct_route:
+        initial_status = "Pending Sourcing"
+    else:
+        initial_status = "Vetting Active" if payload.assigned_site_manager_id else "Pending PM Vetting"
     
     master_ticket = models.MaterialTicket(
         ticket_number=ticket_number,
@@ -159,17 +196,103 @@ def raise_material_requisition(payload: CreateRequisitionPayload, db: Session = 
         )
         db.add(db_item)
         
+    # 🎯 DYNAMIC REMARKS LOGIC
+    if payload.is_manager_direct_route:
+        remarks_text = "Manager Direct Sourcing Request. Routed directly to Purchasing Desk."
+    else:
+        remarks_text = f"Material Sheet uploaded. Routed to {'Site Manager' if payload.assigned_site_manager_id else 'Project Manager'}."
+
     history = models.TicketHistory(
         ticket_number=ticket_number,
         user_name=f"User ID: {payload.coordinator_id}",
         action_taken="Ticket Raised",
-        remarks=f"Material Sheet uploaded. Routed to {'Site Manager' if payload.assigned_site_manager_id else 'Project Manager'}."
+        remarks=remarks_text
     )
     db.add(history)
     db.commit()
     
     logger.info(f"💾 [GRID SAVED] -> Requisition {ticket_number} pushed to {initial_status}.")
     return {"ticket_number": ticket_number, "status": initial_status}
+
+
+@app.post("/api/requisitions/direct-fast-track", status_code=201)
+def raise_direct_manager_purchase_order(payload: DirectPOPayload, db: Session = Depends(get_db)):
+    """
+    🎯 DIRECT PATH A: Bypasses dual vetting and budget clearance loops entirely.
+    Instantly advances status to Awaiting Digital Signature and generates a draft PO.
+    """
+    ticket_number = f"REQ-2026-{random.randint(100000, 999999)}"
+    po_number = f"PO-2026-{random.randint(100000, 999999)}"
+    
+    # 1. Instantiate the Master Ticket directly at the Signature milestone
+    master_ticket = models.MaterialTicket(
+        ticket_number=ticket_number,
+        project_code=payload.project_code,
+        project_name=payload.project_name,
+        coordinator_id=payload.creator_id,  
+        category=payload.category,
+        assigned_project_manager_id=payload.creator_id,
+        status="Awaiting Digital Signature"  # ⚡ Fast-track milestone state
+    )
+    db.add(master_ticket)
+    
+    # 2. Iterate and commit rows to both Ticket Items and Winning Quotation arrays simultaneously
+    for idx, row in enumerate(payload.items, start=1):
+        db_item = models.TicketItem(
+            ticket_number=ticket_number,
+            item_index=idx,
+            product_description=row.product_description,
+            make_brand=row.make_brand,
+            quantity=row.quantity,
+            purpose=row.purpose,
+            item_type=row.item_type
+        )
+        db.add(db_item)
+        
+        db_quote = models.Quotation(
+            ticket_number=ticket_number,
+            item_index=idx,
+            vendor_name=row.vendor_name,
+            total_amount=row.net_amount_payable,
+            product_description=row.product_description,
+            make_brand=row.make_brand,
+            quantity=row.quantity,
+            unit_price=round(row.base_total_value / row.quantity, 2) if row.quantity else row.base_total_value,
+            gst_percentage=row.gst_percentage,
+            base_total_value=row.base_total_value,
+            net_amount_payable=row.net_amount_payable,
+            time_of_delivery=row.time_of_delivery,
+            vendor_address=row.vendor_address,
+            vendor_contact=row.vendor_contact,
+            vendor_email=row.vendor_email,
+            delivery_address=row.delivery_address,
+            site_contact_person=row.site_contact_person,
+            site_contact_phone=row.site_contact_phone,
+            special_terms=row.special_terms,
+            quality_remarks=row.quality_remarks,
+            file_url=row.file_url,
+            is_selected=True  # ⚡ Pre-locked winner flag
+        )
+        db.add(db_quote)
+        
+    # 3. Create the ready-to-sign Purchase Order entity
+    new_po = models.PurchaseOrder(
+        po_number=po_number,
+        ticket_number=ticket_number,
+        pdf_url=f"/storage/aarvi_pos/{po_number}.pdf"
+    )
+    db.add(new_po)
+    
+    # 4. Save history trail
+    db.add(models.TicketHistory(
+        ticket_number=ticket_number,
+        user_name=payload.creator_name,
+        action_taken="Direct Fast-Track Execution",
+        remarks=f"Manager Direct Request. Auto-compiled technical biddings and issued Draft PO {po_number} without intermediary clearance steps."
+    ))
+    
+    db.commit()
+    return {"ticket_number": ticket_number, "po_number": po_number, "status": "Awaiting Digital Signature"}    
 
 # -------------------------------------------------------------------
 # STAGE 2: DUAL-SIGNATURE NEGOTIATION LOOP 
