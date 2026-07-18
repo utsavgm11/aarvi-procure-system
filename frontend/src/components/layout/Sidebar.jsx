@@ -49,6 +49,8 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
       case 'Admin':
         return [
           { name: 'IT Control Center', path: '/admin', icon: ShieldCheck },
+          { name: 'Direct Procurement', path: '/direct-procurement', icon: Zap }
+          
         ];  
       default:
         return [
