@@ -6,14 +6,19 @@ import urllib.request
 import urllib.error
 from datetime import date
 
+# Attempt to load local .env file if python-dotenv is installed
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 logger = logging.getLogger("AarviProcure")
 
 # -------------------------------------------------------------------
-# RESEND HTTP API CONFIGURATION (Bypasses Render SMTP Port Blocking)
+# RESEND HTTP API CONFIGURATION (Loaded securely from Environment)
 # -------------------------------------------------------------------
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "re_U6fhyFuw_53Foe6AamgpdcUhpHPc9FHWq")
-
-# NOTE: Since you are on the free Resend tier, you MUST send from onboarding@resend.dev
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL", "Aarvi Procure <onboarding@resend.dev>")
 
 # -------------------------------------------------------------------
@@ -33,6 +38,11 @@ def send_workflow_email(
     action_link: str = "https://procure.aarviencon.com"
 ):
     global email_counter, last_reset_date
+
+    # Safeguard: Verify API key is present
+    if not RESEND_API_KEY:
+        logger.error("❌ [EMAIL FAILED] -> RESEND_API_KEY environment variable is not set in backend environment!")
+        return
 
     # Auto-reset counter at midnight
     today = date.today()
@@ -104,7 +114,8 @@ def send_workflow_email(
             data=data, 
             headers={
                 "Authorization": f"Bearer {RESEND_API_KEY}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             },
             method="POST"
         )
