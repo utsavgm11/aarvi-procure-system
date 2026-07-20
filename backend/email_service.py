@@ -2,11 +2,24 @@
 import smtplib
 import os
 import logging
+import socket
 from datetime import date
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 logger = logging.getLogger("AarviProcure")
+
+# -------------------------------------------------------------------
+# 🎯 FORCE IPv4 RESOLUTION (Fixes Render/Cloud "[Errno 101] Network is unreachable")
+# -------------------------------------------------------------------
+def force_ipv4():
+    old_getaddrinfo = socket.getaddrinfo
+    def new_getaddrinfo(*args, **kwargs):
+        responses = old_getaddrinfo(*args, **kwargs)
+        return [r for r in responses if r[0] == socket.AF_INET]
+    socket.getaddrinfo = new_getaddrinfo
+
+force_ipv4()
 
 # -------------------------------------------------------------------
 # SMTP CONFIGURATION (GMAIL SETUP)
@@ -103,8 +116,8 @@ def send_workflow_email(
 
         msg.attach(MIMEText(html_body, "html"))
 
-        # Connect to Gmail SMTP
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        # Connect to Gmail SMTP using explicit IPv4 socket and a 15s timeout
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
         server.starttls()
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
