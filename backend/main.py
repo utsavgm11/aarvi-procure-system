@@ -16,13 +16,16 @@ from database import get_db
 from docxtpl import DocxTemplate
 import models
 
+# 🎯 NEW: Import the email service
+from email_service import send_workflow_email
+
 # 1. System Logging Configurations
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AarviProcure")
 
-app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.0.0")
+app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.1.0")
 
-# 🎯 NEW: Create and Mount Storage Directory for Uploaded Documents
+# Create and Mount Storage Directory for Uploaded Documents
 UPLOAD_DIR = "storage/quotation_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
@@ -46,7 +49,7 @@ class RequisitionRowItem(BaseModel):
     make_brand: Optional[str] = None
     quantity: int
     purpose: str
-    item_type: Optional[str] = "Consumable"  # 🎯 NEW: Classified as 'Asset' or 'Consumable'
+    item_type: Optional[str] = "Consumable"  
 
 class CreateRequisitionPayload(BaseModel):
     project_code: str
@@ -56,10 +59,8 @@ class CreateRequisitionPayload(BaseModel):
     assigned_site_manager_id: Optional[int] = None
     assigned_project_manager_id: int
     items: List[RequisitionRowItem]
-    is_manager_direct_route: Optional[bool] = False # 🎯 NEW: Catches Path B Bypass
+    is_manager_direct_route: Optional[bool] = False 
 
-
-# 🎯 NEW SCHEMAS FOR PATH A (Fast-Track)
 class DirectPOItemRow(BaseModel):
     product_description: str
     make_brand: Optional[str] = None
@@ -96,7 +97,7 @@ class UpdateRequisitionItem(BaseModel):
     quantity: int
     purpose: str
     is_reimbursable: Optional[bool] = False
-    item_type: Optional[str] = "Consumable"  # 🎯 NEW: Classified as 'Asset' or 'Consumable' 
+    item_type: Optional[str] = "Consumable"  
 
 class ProposeEditsPayload(BaseModel):
     user_name: str
@@ -138,7 +139,7 @@ class QuotationRowItem(BaseModel):
 
 class SubmitQuotationsPayload(BaseModel):
     quotations: List[QuotationRowItem]
-    items: Optional[List[UpdateRequisitionItem]] = None  # 🎯 STEP 3: Added to let Purchase modify items
+    items: Optional[List[UpdateRequisitionItem]] = None 
 
 class FinanceApprovalPayload(BaseModel):
     user_name: str
@@ -156,17 +157,19 @@ def get_active_users_by_role(role: str, db: Session = Depends(get_db)):
         models.User.role == role,
         models.User.is_active == True
     ).order_by(models.User.name.asc()).all()
-    # 🎯 NEW: Added 'empcode' to the return dictionary
     return [{"id": u.id, "name": u.name, "email": u.email, "empcode": u.empcode} for u in users]
 
 # -------------------------------------------------------------------
 # STAGE 1: SITE COORDINATOR ENTRY GATEWAY
 # -------------------------------------------------------------------
 @app.post("/api/requisitions", status_code=201)
-def raise_material_requisition(payload: CreateRequisitionPayload, db: Session = Depends(get_db)):
+def raise_material_requisition(
+    payload: CreateRequisitionPayload, 
+    background_tasks: BackgroundTasks, # 🎯 EMAIL INJECTED 1
+    db: Session = Depends(get_db)
+):
     ticket_number = f"REQ-2026-{random.randint(100000, 999999)}"
     
-    # 🎯 UPDATED ROUTING LOGIC: If a manager raises it directly to be sourced, skip vetting!
     if payload.is_manager_direct_route:
         initial_status = "Pending Sourcing"
     else:
@@ -192,11 +195,10 @@ def raise_material_requisition(payload: CreateRequisitionPayload, db: Session = 
             make_brand=row.make_brand,
             quantity=row.quantity,
             purpose=row.purpose,
-            item_type=row.item_type  # 🎯 NEW: Captures the initial field value
+            item_type=row.item_type
         )
         db.add(db_item)
         
-    # 🎯 DYNAMIC REMARKS LOGIC
     if payload.is_manager_direct_route:
         remarks_text = "Manager Direct Sourcing Request. Routed directly to Purchasing Desk."
     else:
@@ -211,20 +213,36 @@ def raise_material_requisition(payload: CreateRequisitionPayload, db: Session = 
     db.add(history)
     db.commit()
     
+    # 🎯 TRIGGER EMAIL 1
+    target_user_id = (
+        payload.assigned_site_manager_id or payload.assigned_project_manager_id
+    ) if not payload.is_manager_direct_route else None
+
+    if target_user_id:
+        target_user = db.query(models.User).filter(models.User.id == target_user_id).first()
+        if target_user and target_user.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=target_user.email,
+                recipient_name=target_user.name,
+                subject="Action Required: New Material Requisition Pending Technical Vetting",
+                ticket_number=ticket_number,
+                project_name=payload.project_name,
+                status=initial_status
+            )
+    
     logger.info(f"💾 [GRID SAVED] -> Requisition {ticket_number} pushed to {initial_status}.")
     return {"ticket_number": ticket_number, "status": initial_status}
 
-
 @app.post("/api/requisitions/direct-fast-track", status_code=201)
-def raise_direct_manager_purchase_order(payload: DirectPOPayload, db: Session = Depends(get_db)):
-    """
-    🎯 DIRECT PATH A: Bypasses dual vetting and budget clearance loops entirely.
-    Instantly advances status to Awaiting Digital Signature and generates a draft PO.
-    """
+def raise_direct_manager_purchase_order(
+    payload: DirectPOPayload, 
+    background_tasks: BackgroundTasks, # 🎯 EMAIL INJECTED 2
+    db: Session = Depends(get_db)
+):
     ticket_number = f"REQ-2026-{random.randint(100000, 999999)}"
     po_number = f"PO-2026-{random.randint(100000, 999999)}"
     
-    # 1. Instantiate the Master Ticket directly at the Signature milestone
     master_ticket = models.MaterialTicket(
         ticket_number=ticket_number,
         project_code=payload.project_code,
@@ -232,11 +250,10 @@ def raise_direct_manager_purchase_order(payload: DirectPOPayload, db: Session = 
         coordinator_id=payload.creator_id,  
         category=payload.category,
         assigned_project_manager_id=payload.creator_id,
-        status="Awaiting Digital Signature"  # ⚡ Fast-track milestone state
+        status="Awaiting Digital Signature"
     )
     db.add(master_ticket)
     
-    # 2. Iterate and commit rows to both Ticket Items and Winning Quotation arrays simultaneously
     for idx, row in enumerate(payload.items, start=1):
         db_item = models.TicketItem(
             ticket_number=ticket_number,
@@ -271,11 +288,10 @@ def raise_direct_manager_purchase_order(payload: DirectPOPayload, db: Session = 
             special_terms=row.special_terms,
             quality_remarks=row.quality_remarks,
             file_url=row.file_url,
-            is_selected=True  # ⚡ Pre-locked winner flag
+            is_selected=True  
         )
         db.add(db_quote)
         
-    # 3. Create the ready-to-sign Purchase Order entity
     new_po = models.PurchaseOrder(
         po_number=po_number,
         ticket_number=ticket_number,
@@ -283,7 +299,6 @@ def raise_direct_manager_purchase_order(payload: DirectPOPayload, db: Session = 
     )
     db.add(new_po)
     
-    # 4. Save history trail
     db.add(models.TicketHistory(
         ticket_number=ticket_number,
         user_name=payload.creator_name,
@@ -292,13 +307,32 @@ def raise_direct_manager_purchase_order(payload: DirectPOPayload, db: Session = 
     ))
     
     db.commit()
+    
+    # 🎯 TRIGGER EMAIL 2
+    creator_user = db.query(models.User).filter(models.User.id == payload.creator_id).first()
+    if creator_user and creator_user.email:
+        background_tasks.add_task(
+            send_workflow_email,
+            recipient_email=creator_user.email,
+            recipient_name=creator_user.name,
+            subject=f"Fast-Track PO {po_number} Issued & Pending Digital Seal",
+            ticket_number=ticket_number,
+            project_name=payload.project_name,
+            status="Awaiting Digital Signature"
+        )
+        
     return {"ticket_number": ticket_number, "po_number": po_number, "status": "Awaiting Digital Signature"}    
 
 # -------------------------------------------------------------------
 # STAGE 2: DUAL-SIGNATURE NEGOTIATION LOOP 
 # -------------------------------------------------------------------
 @app.put("/api/requisitions/{ticket_number}/propose-edits")
-def propose_ticket_edits(ticket_number: str, payload: ProposeEditsPayload, db: Session = Depends(get_db)):
+def propose_ticket_edits(
+    ticket_number: str, 
+    payload: ProposeEditsPayload, 
+    background_tasks: BackgroundTasks, # 🎯 EMAIL INJECTED 3
+    db: Session = Depends(get_db)
+):
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
     if not ticket: raise HTTPException(status_code=404, detail="Requisition not found.")
         
@@ -312,7 +346,7 @@ def propose_ticket_edits(ticket_number: str, payload: ProposeEditsPayload, db: S
             quantity=row.quantity,
             purpose=row.purpose,
             is_reimbursable=row.is_reimbursable,
-            item_type=row.item_type  # 🎯 NEW: Retained during manager adjustments
+            item_type=row.item_type  
         ))
         
     if payload.user_role in ["Site Manager", "Project Manager"]:
@@ -327,14 +361,32 @@ def propose_ticket_edits(ticket_number: str, payload: ProposeEditsPayload, db: S
         remarks=payload.remarks
     ))
     db.commit()
+    
+    # 🎯 TRIGGER EMAIL 3
+    coordinator = db.query(models.User).filter(models.User.id == ticket.coordinator_id).first()
+    if coordinator and coordinator.email:
+        background_tasks.add_task(
+            send_workflow_email,
+            recipient_email=coordinator.email,
+            recipient_name=coordinator.name,
+            subject=f"Action Required: Query / Counter-Edits Flagged on {ticket_number}",
+            ticket_number=ticket_number,
+            project_name=ticket.project_name,
+            status=ticket.status
+        )
+        
     return {"ticket_number": ticket_number, "status": ticket.status}
 
 @app.put("/api/requisitions/{ticket_number}/approve")
-def dual_sign_approve(ticket_number: str, payload: DualApprovalPayload, db: Session = Depends(get_db)):
+def dual_sign_approve(
+    ticket_number: str, 
+    payload: DualApprovalPayload, 
+    background_tasks: BackgroundTasks, # 🎯 EMAIL INJECTED 4
+    db: Session = Depends(get_db)
+):
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
     if not ticket: raise HTTPException(status_code=404, detail="Requisition not found.")
     
-    # 1. Save any final modifications to the items list
     if payload.items:
         db.query(models.TicketItem).filter(models.TicketItem.ticket_number == ticket_number).delete()
         for row in payload.items:
@@ -351,18 +403,14 @@ def dual_sign_approve(ticket_number: str, payload: DualApprovalPayload, db: Sess
             
     remarks_text = f"List Approved & Locked by {payload.user_role}."
     
-    # 🎯 2. THE SMART BYPASS LOGIC
     if payload.user_role in ["Site Manager", "Project Manager"]:
-        # Direct approval by Management bypasses the coordinator and goes straight to Purchasing
         ticket.status = "Pending Sourcing"
         remarks_text += " Technical Vetting complete. Dispatched directly to Purchasing Desk."
             
     elif payload.user_role == "Site Coordinator":
-        # If the manager proposed edits, and the coordinator accepts them
         ticket.status = "Pending Sourcing"
         remarks_text += " Coordinator accepted Manager's counter-edits. Dispatched directly to Purchasing Desk."
             
-    # 3. Log the history and save
     db.add(models.TicketHistory(
         ticket_number=ticket_number,
         user_name=payload.user_name,
@@ -371,7 +419,23 @@ def dual_sign_approve(ticket_number: str, payload: DualApprovalPayload, db: Sess
     ))
     db.commit()
     
+    # 🎯 TRIGGER EMAIL 4
+    if ticket.status == "Pending Sourcing":
+        purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
+        for pe in purchase_execs:
+            if pe.email:
+                background_tasks.add_task(
+                    send_workflow_email,
+                    recipient_email=pe.email,
+                    recipient_name=pe.name,
+                    subject=f"Action Required: Vetting Cleared - Source Bids for {ticket_number}",
+                    ticket_number=ticket_number,
+                    project_name=ticket.project_name,
+                    status="Pending Sourcing"
+                )
+                
     return {"ticket_number": ticket_number, "status": ticket.status}
+
 # -------------------------------------------------------------------
 # STAGE 3: PURCHASING DESK QUOTATION ATTACHMENT
 # -------------------------------------------------------------------
@@ -382,12 +446,10 @@ async def upload_quotation_document(
     option_index: int,
     file: UploadFile = File(...)
 ):
-    # Extension validation isolation check
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in [".pdf", ".doc", ".docx"]:
         raise HTTPException(status_code=400, detail="Unsupported format. Only PDF, DOC, and DOCX are allowed.")
     
-    # 🎯 SYSTEMATIC NAMING ASSIGNMENT: Tracking strings structure
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     systematic_name = f"QUOTE_{ticket_number}_ROW{item_index}_OPT{option_index}_{timestamp}{ext}"
     target_destination = os.path.join(UPLOAD_DIR, systematic_name)
@@ -401,11 +463,15 @@ async def upload_quotation_document(
     return {"file_url": f"/storage/quotation_files/{systematic_name}"}
 
 @app.post("/api/requisitions/{ticket_number}/quotations")
-def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayload, db: Session = Depends(get_db)):
+def attach_vendor_quotations(
+    ticket_number: str, 
+    payload: SubmitQuotationsPayload, 
+    background_tasks: BackgroundTasks, # 🎯 EMAIL INJECTED 5
+    db: Session = Depends(get_db)
+):
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
     if not ticket: raise HTTPException(status_code=404, detail="Active requisition sheet not found.")
         
-    # 🎯 NEW: Process item types reclassifications updated by the Purchase Desk
     if payload.items:
         for row in payload.items:
             db.query(models.TicketItem).filter(
@@ -415,7 +481,6 @@ def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayloa
         
     highest_landed_total = 0.0
     for quote in payload.quotations:
-        # 1. Save the actual quotation to the ticket
         db_quote = models.Quotation(
             ticket_number=ticket_number,
             item_index=quote.item_index,
@@ -445,12 +510,10 @@ def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayloa
         )
         db.add(db_quote)
         
-        # 🎯 NEW: SILENT AUTO-LEARN VENDOR DIRECTORY ENGINE
         if quote.vendor_name:
             clean_name = quote.vendor_name.strip()
             existing_vendor = db.query(models.Vendor).filter(models.Vendor.name == clean_name).first()
             if not existing_vendor:
-                # Never seen this vendor before? Save it to the master list automatically!
                 new_vendor = models.Vendor(
                     name=clean_name,
                     address=quote.vendor_address or "",
@@ -460,17 +523,44 @@ def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayloa
                 )
                 db.add(new_vendor)
         
-        # 3. Calculate routing logic
         if quote.total_amount > highest_landed_total:
             highest_landed_total = quote.total_amount
             
     if highest_landed_total <= 1000000:
         ticket.status = "Pending Project Manager"
         routing_msg = f"Order matrix value (Highest Total: ₹{highest_landed_total:,.2f}) routed directly to Project Manager for mandatory clearance."
+        
+        # 🎯 TRIGGER EMAIL 5 (Project Manager)
+        target_pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
+        if target_pm and target_pm.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=target_pm.email,
+                recipient_name=target_pm.name,
+                subject=f"Commercial Approval Required: Quotations Attached for {ticket_number}",
+                ticket_number=ticket_number,
+                project_name=ticket.project_name,
+                status=ticket.status
+            )
+            
     else: 
         ticket.status = "Pending Director"
         routing_msg = f"High-value corporate order exceeding ₹10L (Highest Total: ₹{highest_landed_total:,.2f}). Routed to Executive Director Board."
         
+        # 🎯 TRIGGER EMAIL 5 (Directors)
+        directors = db.query(models.User).filter(models.User.role == "Director", models.User.is_active == True).all()
+        for director in directors:
+            if director.email:
+                background_tasks.add_task(
+                    send_workflow_email,
+                    recipient_email=director.email,
+                    recipient_name=director.name,
+                    subject=f"High-Value Board Clearance Required (>₹10L) for {ticket_number}",
+                    ticket_number=ticket_number,
+                    project_name=ticket.project_name,
+                    status=ticket.status
+                )
+                
     db.add(models.TicketHistory(
         ticket_number=ticket_number,
         user_name="Procurement Desk Officer",
@@ -484,7 +574,12 @@ def attach_vendor_quotations(ticket_number: str, payload: SubmitQuotationsPayloa
 # STAGE 4 & 5: MANAGEMENT SIGN-OFF & AUTOMATED DOCUMENT COMPILATION
 # -------------------------------------------------------------------
 @app.post("/api/requisitions/{ticket_number}/action")
-def process_financial_signoff(ticket_number: str, payload: FinanceApprovalPayload, db: Session = Depends(get_db)):
+def process_financial_signoff(
+    ticket_number: str, 
+    payload: FinanceApprovalPayload, 
+    background_tasks: BackgroundTasks, # 🎯 EMAIL INJECTED 6
+    db: Session = Depends(get_db)
+):
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
     if not ticket: raise HTTPException(status_code=404, detail="Requisition not found.")
     
@@ -519,9 +614,37 @@ def process_financial_signoff(ticket_number: str, payload: FinanceApprovalPayloa
         db.add(new_po)
         remarks_text = f"Budget cleared by {payload.user_name}. Winning vendor bids locked. Draft PO template {po_number} generated and sent to Purchasing Department."
         
+        # 🎯 TRIGGER EMAIL 6 (Purchase Desk Notification)
+        purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
+        for pe in purchase_execs:
+            if pe.email:
+                background_tasks.add_task(
+                    send_workflow_email,
+                    recipient_email=pe.email,
+                    recipient_name=pe.name,
+                    subject=f"Budget Cleared: Draft PO for {ticket_number} Ready for Digital Signature",
+                    ticket_number=ticket_number,
+                    project_name=ticket.project_name,
+                    status="Awaiting Digital Signature"
+                )
+                
     elif payload.action == "Raise Query":
         ticket.status = "Query Raised"
         remarks_text = f"Query flagged by {payload.user_name}: {payload.remarks}"
+        
+        # 🎯 TRIGGER EMAIL 6 (Query Return Notification)
+        coordinator = db.query(models.User).filter(models.User.id == ticket.coordinator_id).first()
+        if coordinator and coordinator.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=coordinator.email,
+                recipient_name=coordinator.name,
+                subject=f"Action Required: Query Flagged by Management on {ticket_number}",
+                ticket_number=ticket_number,
+                project_name=ticket.project_name,
+                status="Query Raised"
+            )
+            
     else:
         raise HTTPException(status_code=400, detail="Invalid operational action type.")
         
@@ -576,7 +699,6 @@ def get_pending_vetting_tickets(manager_id: int, db: Session = Depends(get_db)):
     
     response = []
     for t in tickets:
-        # 🎯 NEW: Look up the actual name of the Site Coordinator who raised it
         coordinator = db.query(models.User).filter(models.User.id == t.coordinator_id).first()
         coordinator_name = coordinator.name if coordinator else "Unknown Coordinator"
         
@@ -586,7 +708,7 @@ def get_pending_vetting_tickets(manager_id: int, db: Session = Depends(get_db)):
             "project_name": t.project_name, 
             "status": t.status,
             "category": t.category,
-            "raised_by": coordinator_name  # 🎯 NEW: Added to the output payload
+            "raised_by": coordinator_name
         })
         
     return response
@@ -1059,7 +1181,6 @@ def login_user(payload: LoginPayload, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == payload.email).first()
     
     # 2. Verify existence and password 
-    # 🎯 FIXED: Changed to 'user.password_hash' to match your Neon DB structure
     if not user or user.password_hash != payload.password:
         raise HTTPException(status_code=401, detail="Invalid email or password.")
         
@@ -1073,25 +1194,24 @@ def login_user(payload: LoginPayload, db: Session = Depends(get_db)):
         "name": user.name,
         "email": user.email,
         "role": user.role,
-        "empcode": getattr(user, 'empcode', 'N/A') # 🎯 NEW: Safely extracts empcode
+        "empcode": getattr(user, 'empcode', 'N/A')
     }
 
 # -------------------------------------------------------------------
 # 🛡️ IT ADMIN & USER MANAGEMENT LAYER
 # -------------------------------------------------------------------
 class AdminCreateUserPayload(BaseModel):
-    empcode: str # 🎯 NEW: Now explicitly required from the frontend form
+    empcode: str
     name: str
     email: str
     password: str
     role: str
 
-# 🎯 NEW: The Schema required to handle the Full Update Payload
 class AdminUserUpdatePayload(BaseModel):
     name: str
     empcode: str
     role: str
-    password: Optional[str] = None  # Optional because the admin might leave it blank
+    password: Optional[str] = None  
 
 @app.get("/api/admin/users")
 def admin_get_all_users(db: Session = Depends(get_db)):
@@ -1099,7 +1219,7 @@ def admin_get_all_users(db: Session = Depends(get_db)):
     return [
         {
             "id": u.id, 
-            "empcode": u.empcode, # 🎯 NEW
+            "empcode": u.empcode, 
             "name": u.name, 
             "email": u.email, 
             "role": u.role, 
@@ -1112,11 +1232,9 @@ def admin_create_user(payload: AdminCreateUserPayload, db: Session = Depends(get
     if db.query(models.User).filter(models.User.email == payload.email).first():
         raise HTTPException(status_code=400, detail="Email already registered.")
     
-    # 🎯 NEW: Prevent Emp Code collisions during new account creation
     if db.query(models.User).filter(models.User.empcode == payload.empcode).first():
         raise HTTPException(status_code=400, detail=f"Employee Code {payload.empcode} is already in use!")
     
-    # 🎯 NEW: Save the User using the manually entered empcode
     new_user = models.User(
         empcode=payload.empcode,
         name=payload.name, 
@@ -1129,62 +1247,50 @@ def admin_create_user(payload: AdminCreateUserPayload, db: Session = Depends(get
     db.commit()
     return {"message": f"User {payload.name} created successfully with code {payload.empcode}."}
 
-# 🎯 NEW: Completely REPLACED the old password update endpoint with a full profile updater
 @app.put("/api/admin/users/{email}")
 def admin_update_user_profile(email: str, payload: AdminUserUpdatePayload, db: Session = Depends(get_db)):
-    # 1. Find the target user
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
         raise HTTPException(status_code=404, detail="Target user not found.")
 
-    # 2. Prevent Emp Code collisions (if they changed the code)
     if payload.empcode != user.empcode:
         code_exists = db.query(models.User).filter(models.User.empcode == payload.empcode).first()
         if code_exists:
             raise HTTPException(status_code=400, detail=f"Employee Code {payload.empcode} is already in use!")
 
-    # 3. Update standard fields
     user.name = payload.name
     user.empcode = payload.empcode
     user.role = payload.role
 
-    # 4. Handle Password Override (ONLY if a new password was provided in the frontend)
     if payload.password and payload.password.strip():
         user.password_hash = payload.password.strip()
 
-    # 5. Save changes
     db.commit()
     return {"message": f"Profile for {user.name} successfully updated."}
 
 @app.put("/api/admin/users/{email}/toggle-status")
 def admin_toggle_user_status(email: str, db: Session = Depends(get_db)):
-    # 1. Locate the target user profile by email
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User account not found.")
         
-    # 2. Protect the main system admin from being locked out
     if user.email == "admin@aarviencon.com":
         raise HTTPException(status_code=400, detail="Root System Admin account cannot be disabled.")
 
-    # 🎯 3. THE TOGGLE SWITCH: Flips True to False, or False to True
     user.is_active = not user.is_active
     db.commit()
     
-    # 4. Return a clear message so the frontend knows what happened
     status_text = "Activated" if user.is_active else "Deactivated (Locked Out)"
     return {"message": f"Account {email} status changed to: {status_text}."}
 
 @app.get("/api/users/{user_id}/notifications", response_model=List[dict])
 def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
-    # 1. Identify the user and their role
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         return []
         
     notifications = []
     
-    # 2. Site Coordinator Notifications (Check for counter queries from managers)
     if user.role == "Site Coordinator":
         queried_tickets = db.query(models.MaterialTicket).filter(
             models.MaterialTicket.coordinator_id == user_id,
@@ -1198,7 +1304,6 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
                 "link": f"/dashboard/handshake"
             })
 
-    # 3. Project Manager / Site Manager Notifications (Check for pending technical vetting)
     elif user.role in ["Site Manager", "Project Manager"]:
         pending_vetting = db.query(models.MaterialTicket).filter(
             or_(
@@ -1214,7 +1319,6 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
                 "link": f"/dashboard/vetting"
             })
 
-    # 4. Purchase Executive Notifications (Check for approved lists ready for quotes)
     elif user.role == "Purchase Executive":
         pending_sourcing = db.query(models.MaterialTicket).filter(
             models.MaterialTicket.status == "Pending Sourcing"
@@ -1227,7 +1331,6 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
                 "link": f"/dashboard/sourcing"
             })
 
-    # 5. Director Notifications (Check for high-value orders > 10L needing budget clearance)
     elif user.role == "Director":
         pending_director = db.query(models.MaterialTicket).filter(
             models.MaterialTicket.status == "Pending Director"
