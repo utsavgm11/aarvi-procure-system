@@ -1,12 +1,13 @@
 # email_service.py
+import smtplib
 import os
-import json
 import logging
-import urllib.request
-import urllib.error
+import socket
 from datetime import date
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
-# Attempt to load local .env file if python-dotenv is installed
+# Attempt to load local .env file securely (for local testing)
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -15,16 +16,31 @@ except ImportError:
 
 logger = logging.getLogger("AarviProcure")
 
+# 🎯 FORCE IPv4 FOR CLOUD HOSTING (Render / Heroku)
+# Prevents "[Errno 101] Network is unreachable" on Render containers
+def force_ipv4():
+    old_getaddrinfo = socket.getaddrinfo
+    def new_getaddrinfo(*args, **kwargs):
+        responses = old_getaddrinfo(*args, **kwargs)
+        return [r for r in responses if r[0] == socket.AF_INET]
+    socket.getaddrinfo = new_getaddrinfo
+
+force_ipv4()
+
 # -------------------------------------------------------------------
-# RESEND HTTP API CONFIGURATION (Loaded securely from Environment)
+# SMTP CONFIGURATION (GMAIL SETUP)
 # -------------------------------------------------------------------
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-SENDER_EMAIL = os.getenv("SENDER_EMAIL", "Aarvi Procure <onboarding@resend.dev>")
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+
+# 🚨 SECURITY: Loaded securely from Environment Variables in Render / .env
+SENDER_EMAIL = os.getenv("SENDER_EMAIL")
+SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
 
 # -------------------------------------------------------------------
 # 🛡️ DAILY EMAIL SAFETY CAP ENGINE
 # -------------------------------------------------------------------
-DAILY_LIMIT = 400
+DAILY_LIMIT = 400  # Strict daily cap buffer
 email_counter = 0
 last_reset_date = date.today()
 
@@ -37,96 +53,91 @@ def send_workflow_email(
     status: str, 
     action_link: str = "https://procure.aarviencon.com"
 ):
+    """
+    Synchronous SMTP dispatch function executed inside FastAPI BackgroundTasks.
+    """
     global email_counter, last_reset_date
 
-    # Safeguard: Verify API key is present
-    if not RESEND_API_KEY:
-        logger.error("❌ [EMAIL FAILED] -> RESEND_API_KEY environment variable is not set in backend environment!")
+    # 🚨 SAFEGUARD: Ensure credentials exist before trying to connect
+    if not SENDER_EMAIL or not SENDER_PASSWORD:
+        logger.error("❌ [EMAIL FAILED] -> SENDER_EMAIL or SENDER_PASSWORD missing from Environment Variables!")
         return
 
-    # Auto-reset counter at midnight
+    # Auto-reset the email counter at midnight
     today = date.today()
     if today != last_reset_date:
         last_reset_date = today
         email_counter = 0
 
+    # 🛡️ SAFEGUARD CHECK: Stop sending emails if daily cap is reached
     if email_counter >= DAILY_LIMIT:
-        logger.warning(f"⚠️ [SAFETY CAP] Daily limit reached ({DAILY_LIMIT}). Email skipped for {recipient_email}.")
+        logger.warning(
+            f"⚠️ [SAFETY CAP ACTIVATED] Daily limit of {DAILY_LIMIT} emails reached today. "
+            f"Email skipped for {recipient_email}. Recorded in-app only."
+        )
         return
 
     if not recipient_email or "@" not in recipient_email:
         logger.warning(f"⚠️ Email skipped: Invalid recipient address '{recipient_email}'")
         return
 
-    html_body = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <style>
-        body {{ font-family: Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px; }}
-        .container {{ max-width: 600px; background: #ffffff; margin: 0 auto; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }}
-        .header {{ background-color: #2c2a57; color: #ffffff; padding: 20px; text-align: center; }}
-        .header h1 {{ margin: 0; font-size: 18px; text-transform: uppercase; letter-spacing: 1px; }}
-        .content {{ padding: 24px; color: #334155; line-height: 1.6; }}
-        .card {{ background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; margin: 16px 0; }}
-        .button {{ display: block; width: 220px; margin: 20px auto; padding: 12px 20px; background-color: #0b9c54; color: #ffffff !important; text-decoration: none; text-align: center; font-weight: bold; border-radius: 8px; font-size: 13px; }}
-        .footer {{ background-color: #f1f5f9; padding: 14px; text-align: center; font-size: 11px; color: #94a3b8; }}
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>Aarvi Encon Procure Hub</h1>
-        </div>
-        <div class="content">
-          <p>Dear <strong>{recipient_name}</strong>,</p>
-          <p>{subject}</p>
-          
-          <div class="card">
-            <p style="margin: 4px 0;"><strong>Ticket Ref:</strong> {ticket_number}</p>
-            <p style="margin: 4px 0;"><strong>Project:</strong> {project_name}</p>
-            <p style="margin: 4px 0;"><strong>Current Status:</strong> <span style="color: #0b9c54; font-weight: bold;">{status}</span></p>
-          </div>
-
-          <a href="{action_link}" class="button">Access Procurement Portal</a>
-        </div>
-        <div class="footer">
-          Aarvi Encon Limited • SCM Automated Notification Gateway
-        </div>
-      </div>
-    </body>
-    </html>
-    """
-
-    payload = {
-        "from": SENDER_EMAIL,
-        "to": [recipient_email],
-        "subject": f"[{ticket_number}] - {subject}",
-        "html": html_body
-    }
-
     try:
-        url = "https://api.resend.com/emails"
-        data = json.dumps(payload).encode("utf-8")
-        
-        req = urllib.request.Request(
-            url, 
-            data=data, 
-            headers={
-                "Authorization": f"Bearer {RESEND_API_KEY}",
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            },
-            method="POST"
-        )
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"[{ticket_number}] - {subject}"
+        msg["From"] = f"Aarvi Procure Engine <{SENDER_EMAIL}>"
+        msg["To"] = recipient_email
 
-        with urllib.request.urlopen(req, timeout=15) as response:
-            res_body = json.loads(response.read().decode("utf-8"))
-            email_counter += 1
-            logger.info(f"✉️ [EMAIL SENT #{email_counter}/{DAILY_LIMIT}] -> Dispatched via Resend API to {recipient_email} (ID: {res_body.get('id')})")
+        html_body = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body {{ font-family: Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px; }}
+            .container {{ max-width: 600px; background: #ffffff; margin: 0 auto; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }}
+            .header {{ background-color: #2c2a57; color: #ffffff; padding: 20px; text-align: center; }}
+            .header h1 {{ margin: 0; font-size: 18px; text-transform: uppercase; letter-spacing: 1px; }}
+            .content {{ padding: 24px; color: #334155; line-height: 1.6; }}
+            .card {{ background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; margin: 16px 0; }}
+            .button {{ display: block; width: 220px; margin: 20px auto; padding: 12px 20px; background-color: #0b9c54; color: #ffffff !important; text-decoration: none; text-align: center; font-weight: bold; border-radius: 8px; font-size: 13px; }}
+            .footer {{ background-color: #f1f5f9; padding: 14px; text-align: center; font-size: 11px; color: #94a3b8; }}
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Aarvi Encon Procure Hub</h1>
+            </div>
+            <div class="content">
+              <p>Dear <strong>{recipient_name}</strong>,</p>
+              <p>{subject}</p>
+              
+              <div class="card">
+                <p style="margin: 4px 0;"><strong>Ticket Ref:</strong> {ticket_number}</p>
+                <p style="margin: 4px 0;"><strong>Project:</strong> {project_name}</p>
+                <p style="margin: 4px 0;"><strong>Current Status:</strong> <span style="color: #0b9c54; font-weight: bold;">{status}</span></p>
+              </div>
 
-    except urllib.error.HTTPError as e:
-        error_resp = e.read().decode('utf-8')
-        logger.error(f"❌ [EMAIL FAILED HTTP {e.code}] -> Could not send to {recipient_email}. Details: {error_resp}")
+              <a href="{action_link}" class="button">Access Procurement Portal</a>
+            </div>
+            <div class="footer">
+              Aarvi Encon Limited • SCM Automated Notification Gateway
+            </div>
+          </div>
+        </body>
+        </html>
+        """
+
+        msg.attach(MIMEText(html_body, "html"))
+
+        # Connect to Gmail SMTP using explicit IPv4 socket
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=15)
+        server.starttls()
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.sendmail(SENDER_EMAIL, recipient_email, msg.as_string())
+        server.quit()
+
+        email_counter += 1
+        logger.info(f"✉️ [EMAIL SENT #{email_counter}/{DAILY_LIMIT}] -> Dispatched to {recipient_email} for Ticket {ticket_number}")
+
     except Exception as e:
         logger.error(f"❌ [EMAIL FAILED] -> Could not send email to {recipient_email}. Error: {str(e)}")
