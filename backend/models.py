@@ -54,6 +54,7 @@ class TicketItem(Base):
     reimbursement_notes = Column(Text, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow)
+    item_type = Column(String, default="Consumable")
 
 class Quotation(Base):
     __tablename__ = "quotations"
