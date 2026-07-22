@@ -466,7 +466,7 @@ async def upload_quotation_document(
 def attach_vendor_quotations(
     ticket_number: str, 
     payload: SubmitQuotationsPayload, 
-    background_tasks: BackgroundTasks, # 🎯 EMAIL INJECTED 5
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
@@ -480,6 +480,8 @@ def attach_vendor_quotations(
             ).update({"item_type": row.item_type})
         
     highest_landed_total = 0.0
+    any_item_exceeds_2_5l = False  # Track if any single item exceeds 2.5 Lakhs
+    
     for quote in payload.quotations:
         db_quote = models.Quotation(
             ticket_number=ticket_number,
@@ -510,6 +512,11 @@ def attach_vendor_quotations(
         )
         db.add(db_quote)
         
+        # Check if single item/quote total or net payable exceeds ₹2.5 Lakhs (250,000)
+        item_cost = quote.net_amount_payable or quote.total_amount or 0.0
+        if item_cost > 250000:
+            any_item_exceeds_2_5l = True
+
         if quote.vendor_name:
             clean_name = quote.vendor_name.strip()
             existing_vendor = db.query(models.Vendor).filter(models.Vendor.name == clean_name).first()
@@ -526,7 +533,11 @@ def attach_vendor_quotations(
         if quote.total_amount > highest_landed_total:
             highest_landed_total = quote.total_amount
             
-    if highest_landed_total <= 1000000:
+    # Check both conditions: Total > 10L OR Any single item > 2.5L
+    exceeds_10l_total = highest_landed_total > 1000000
+    requires_director_review = exceeds_10l_total or any_item_exceeds_2_5l
+
+    if not requires_director_review:
         ticket.status = "Pending Project Manager"
         routing_msg = f"Order matrix value (Highest Total: ₹{highest_landed_total:,.2f}) routed directly to Project Manager for mandatory clearance."
         
@@ -545,7 +556,13 @@ def attach_vendor_quotations(
             
     else: 
         ticket.status = "Pending Director"
-        routing_msg = f"High-value corporate order exceeding ₹10L (Highest Total: ₹{highest_landed_total:,.2f}). Routed to Executive Director Board."
+        reasons = []
+        if exceeds_10l_total:
+            reasons.append(f"Highest Total (₹{highest_landed_total:,.2f}) > ₹10L")
+        if any_item_exceeds_2_5l:
+            reasons.append("One or more single item values exceed ₹2.5L")
+            
+        routing_msg = f"High-value corporate order routed to Executive Director Board ({', '.join(reasons)})."
         
         # 🎯 TRIGGER EMAIL 5 (Directors)
         directors = db.query(models.User).filter(models.User.role == "Director", models.User.is_active == True).all()
@@ -555,7 +572,7 @@ def attach_vendor_quotations(
                     send_workflow_email,
                     recipient_email=director.email,
                     recipient_name=director.name,
-                    subject=f"High-Value Board Clearance Required (>₹10L) for {ticket_number}",
+                    subject=f"High-Value Board Clearance Required for {ticket_number}",
                     ticket_number=ticket_number,
                     project_name=ticket.project_name,
                     status=ticket.status
@@ -569,7 +586,6 @@ def attach_vendor_quotations(
     ))
     db.commit()
     return {"ticket_number": ticket_number, "status": ticket.status}
-
 # -------------------------------------------------------------------
 # STAGE 4 & 5: MANAGEMENT SIGN-OFF & AUTOMATED DOCUMENT COMPILATION
 # -------------------------------------------------------------------
