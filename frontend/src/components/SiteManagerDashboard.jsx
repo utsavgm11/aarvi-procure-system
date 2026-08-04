@@ -215,10 +215,10 @@ export default function SiteManagerDashboard({ currentUser }) {
         </div>
         <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full md:w-auto">
           <Button variant={activeTab === 'inbox' ? 'primary' : 'ghost'} onClick={() => { setActiveTab('inbox'); setSelectedTicket(null); }} className="text-xs py-1.5 flex-1 md:flex-none">
-            <Inbox size={14} /> <span>Vetting Inbox ({tickets.length})</span>
+            <Inbox size={14} /> <span>Inbox ({tickets.length})</span>
           </Button>
           <Button variant={activeTab === 'archive' ? 'primary' : 'ghost'} onClick={() => { setActiveTab('archive'); setSelectedTicket(null); }} className="text-xs py-1.5 flex-1 md:flex-none">
-            <Archive size={14} /> <span>Vetted History Archive ({archiveTickets.length})</span>
+            <Archive size={14} /> <span>History Archive ({archiveTickets.length})</span>
           </Button>
         </div>
       </div>
@@ -234,7 +234,7 @@ export default function SiteManagerDashboard({ currentUser }) {
           <div className="xl:col-span-3 space-y-3">
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Action Required</h2>
             {tickets.length === 0 ? (
-              <Card className="p-6 text-center text-slate-400 border-dashed border-2 text-sm bg-white">Your action vetting queue is completely clear.</Card>
+              <Card className="p-6 text-center text-slate-400 border-dashed border-2 text-sm bg-white">Your action queue is completely clear.</Card>
             ) : (
               tickets.map((t) => (
                 <div key={t.ticket_number} onClick={() => openTicket(t)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedTicket?.ticket_number === t.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
@@ -278,7 +278,7 @@ export default function SiteManagerDashboard({ currentUser }) {
                           <th className="py-2.5 px-2 w-48">Purpose Justification</th>
                           {/* 🎯 NEW COLUMN: Material Type */}
                           <th className="py-2.5 px-2 w-32 text-center text-indigo-500">Material Type</th>
-                          <th className="py-2.5 px-2 w-28 text-center text-indigo-500">Client Billed? <br/><span className="text-[9px] font-normal text-slate-400">(Optional)</span></th>
+                          <th className="py-2.5 px-2 w-28 text-center text-indigo-500">reimbursed bill? <br/><span className="text-[9px] font-normal text-slate-400">(Optional)</span></th>
                           <th className="py-2.5 w-10 text-center"></th>
                         </tr>
                       </thead>

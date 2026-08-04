@@ -242,8 +242,8 @@ export default function SiteCoordinatorDashboard() {
         <form onSubmit={handleSubmit} className="space-y-6 max-w-6xl">
           <Card className="p-5 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="Project Cost Center Code" required value={projectCode} onChange={e => setProjectCode(e.target.value)} placeholder="e.g. REL-JAM-04" />
-              <Input label="Project / Site Name Description" required value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. Jamnagar Plant Block C" />
+              <Input label="Project Code" required value={projectCode} onChange={e => setProjectCode(e.target.value)} placeholder="e.g. REL-JAM-04" />
+              <Input label="Project Name " required value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. Jamnagar Plant Block C" />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4">
@@ -262,7 +262,7 @@ export default function SiteCoordinatorDashboard() {
               </div>
               
               <div className="flex flex-col space-y-1.5">
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Site Manager (Vetting)</label>
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Site Manager </label>
                 <select 
                   value={siteManagerId} 
                   onChange={e => setSiteManagerId(e.target.value)}
@@ -277,7 +277,7 @@ export default function SiteCoordinatorDashboard() {
               </div>
               
               <div className="flex flex-col space-y-1.5">
-                <label className="text-[11px] font-bold text-rose-500 uppercase tracking-wider">Project Manager (Required)</label>
+                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Project Manager </label>
                 <select 
                   required
                   value={projectManagerId} 
@@ -297,7 +297,7 @@ export default function SiteCoordinatorDashboard() {
           <Card>
             <div className="p-4 border-b border-slate-100 flex items-center space-x-2 bg-slate-50">
               <FileSpreadsheet className="text-[#0b9c54]" size={18} />
-              <h2 className="text-sm font-bold text-[#2c2a57] uppercase tracking-wider">Requirement Allocation Grid</h2>
+              <h2 className="text-sm font-bold text-[#2c2a57] uppercase tracking-wider">Requirements</h2>
             </div>
             
             <div className="overflow-x-auto">
@@ -306,7 +306,7 @@ export default function SiteCoordinatorDashboard() {
                   <tr className="text-xs uppercase tracking-wider text-slate-400 bg-slate-50/50 border-b border-slate-100">
                     <th className="py-3 w-12 text-center font-bold">#</th>
                     <th className="py-3 px-3 font-bold">Requirement Description</th>
-                    <th className="py-3 px-3 w-48 font-bold">Preferred Specification</th>
+                    <th className="py-3 px-3 w-48 font-bold">Specification</th>
                     <th className="py-3 px-3 w-24 font-bold text-center">Quantity</th>
                     <th className="py-3 px-3 w-36 font-bold text-center">Material Type</th>
                     <th className="py-3 px-3 font-bold">Technical Justification</th>
@@ -342,7 +342,7 @@ export default function SiteCoordinatorDashboard() {
             
             <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-3">
               <Button type="button" variant="secondary" onClick={addRow} className="w-full sm:w-auto text-xs py-2"><Plus size={14} /> <span>Add Row Item</span></Button>
-              <Button type="submit" variant="success" disabled={loading} className="w-full sm:w-auto text-xs py-2 shadow-sm"><Send size={14} /> <span>Submit to Routing Engine</span></Button>
+              <Button type="submit" variant="success" disabled={loading} className="w-full sm:w-auto text-xs py-2 shadow-sm"><Send size={14} /> <span>Submit</span></Button>
             </div>
           </Card>
         </form>
