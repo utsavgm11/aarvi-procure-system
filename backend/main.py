@@ -822,7 +822,11 @@ def get_pending_sourcing_tickets(db: Session = Depends(get_db)):
 @app.get("/api/requisitions/purchase-history", response_model=List[dict])
 def get_purchase_history(db: Session = Depends(get_db)):
     tickets = db.query(models.MaterialTicket).filter(
-        models.MaterialTicket.status.in_(["Pending Project Manager", "Pending Director", "Awaiting Digital Signature", "Approved", "Dispatched", "PI Pending PM Approval", "PI Approved - Sent to Accounts"])
+        models.MaterialTicket.status.in_([
+            "Pending Project Manager", "Pending Director", "Awaiting Digital Signature", 
+            "Approved", "Dispatched", "PI Pending PM Approval", "PI Approved - Sent to Accounts",
+            "Partially Delivered", "Material Discrepancy Raised", "Delivered - GRN Logged"
+        ])
     ).order_by(models.MaterialTicket.created_at.desc()).all()
     
     response = []
@@ -870,7 +874,11 @@ def get_pm_history(manager_id: int, db: Session = Depends(get_db)):
             models.MaterialTicket.assigned_project_manager_id == manager_id,
             models.MaterialTicket.assigned_project_manager_id == None
         ),
-        models.MaterialTicket.status.in_(["Pending Director", "Awaiting Digital Signature", "Approved", "Dispatched", "PI Pending PM Approval", "PI Approved - Sent to Accounts"])
+        models.MaterialTicket.status.in_([
+            "Pending Director", "Awaiting Digital Signature", "Approved", 
+            "Dispatched", "PI Pending PM Approval", "PI Approved - Sent to Accounts",
+            "Partially Delivered", "Material Discrepancy Raised", "Delivered - GRN Logged"
+        ])
     ).order_by(models.MaterialTicket.created_at.desc()).all()
     
     response = []
@@ -1552,6 +1560,72 @@ async def process_po_disbursement(
     db.commit()
     return {"message": "Disbursement successfully logged and order marked as Dispatched."}
 
+# -------------------------------------------------------------------
+# 📦 PHASE 5: GRN & MATERIAL DISCREPANCY HANDLING ENDPOINT
+# -------------------------------------------------------------------
+@app.put("/api/requisitions/{ticket_number}/grn")
+async def process_goods_receipt_note(
+    ticket_number: str,
+    user_name: str = Form(...),
+    receipt_type: str = Form("CLEAN"), # "CLEAN" | "PARTIAL" | "DISCREPANCY"
+    discrepancy_category: str = Form(""),
+    remarks: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
+):
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Requisition ticket not found.")
+        
+    grn_url = None
+    if file:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in [".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg"]:
+            raise HTTPException(status_code=400, detail="Allowed file types: PDF, Word Doc, PNG, JPG.")
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"GRN_{receipt_type}_{ticket_number}_{timestamp}"
+        
+        try:
+            upload_result = cloudinary.uploader.upload(
+                file.file, 
+                public_id=filename,
+                folder="aarvi_grn_documents",
+                resource_type="auto"
+            )
+            grn_url = upload_result.get("secure_url")
+        except Exception as e:
+            logger.error(f"Cloudinary Upload Failed for GRN: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to upload GRN/Proof document to cloud storage.")
+            
+    # Update Ticket Status & Audit Log based on Inspection Type
+    if receipt_type == "CLEAN":
+        ticket.status = "Delivered - GRN Logged"
+        action = "Material Delivered & Clean GRN Verified"
+        detail_text = f"100% Goods verified at site by {user_name}. Remarks: {remarks or 'None'}"
+        
+    elif receipt_type == "PARTIAL":
+        ticket.status = "Partially Delivered"
+        action = "Partial Delivery Logged at Site"
+        detail_text = f"Partial quantity received by {user_name}. Remarks: {remarks or 'None'}"
+        
+    else: # "DISCREPANCY"
+        ticket.status = "Material Discrepancy Raised"
+        action = f"CRITICAL ALERT: Material Discrepancy ({discrepancy_category})"
+        detail_text = f"Issue flagged by {user_name} [{discrepancy_category}]: {remarks or 'No remarks provided'}"
+
+    if grn_url:
+        detail_text += f" | Proof File: {grn_url}"
+        
+    db.add(models.TicketHistory(
+        ticket_number=ticket.ticket_number,
+        user_name=user_name,
+        action_taken=action,
+        remarks=detail_text
+    ))
+    
+    db.commit()
+    return {"message": "Receipt status processed successfully.", "status": ticket.status, "grn_url": grn_url}
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
 def connection_ping():
