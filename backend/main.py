@@ -1457,6 +1457,101 @@ def approve_proforma_invoice(
     db.commit()
     return {"ticket_number": ticket_number, "status": ticket.status}
 
+
+# -------------------------------------------------------------------
+# 💳 PHASE 4: ACCOUNTS DESK & PAYMENT DISBURSEMENT ENDPOINTS
+# -------------------------------------------------------------------
+@app.get("/api/accounts/pending-disbursement", response_model=List[dict])
+def get_pending_disbursement_pos(db: Session = Depends(get_db)):
+    orders = db.query(
+        models.PurchaseOrder, 
+        models.MaterialTicket
+    ).join(
+        models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number
+    ).filter(models.MaterialTicket.status.in_(["PI Approved - Sent to Accounts", "Dispatched"])).order_by(models.PurchaseOrder.generated_at.desc()).all()
+    
+    response = []
+    for po_obj, ticket_obj in orders:
+        winning_quotes = db.query(models.Quotation).filter(
+            models.Quotation.ticket_number == po_obj.ticket_number,
+            models.Quotation.is_selected == True
+        ).all()
+        grand_total = sum(q.total_amount for q in winning_quotes)
+        primary_quote = winning_quotes[0] if winning_quotes else None
+        primary_vendor = primary_quote.vendor_name if primary_quote else "N/A"
+        
+        response.append({
+            "po_number": po_obj.po_number,
+            "ticket_number": po_obj.ticket_number,
+            "project_name": ticket_obj.project_name,
+            "project_code": ticket_obj.project_code,
+            "vendor_name": primary_vendor,
+            "vendor_email": getattr(primary_quote, 'vendor_email', 'N/A') if primary_quote else 'N/A',
+            "vendor_contact": getattr(primary_quote, 'vendor_contact', 'N/A') if primary_quote else 'N/A',
+            "grand_total": float(grand_total),
+            "status": ticket_obj.status,
+            "invoice_no": getattr(po_obj, 'invoice_no', '') or '',
+            "invoice_date": getattr(po_obj, 'invoice_date', '') or '',
+            "invoice_remark": getattr(po_obj, 'invoice_remark', '') or '',
+            "invoice_duration": getattr(po_obj, 'invoice_duration', '') or '',
+            "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None),
+            "utr_no": getattr(po_obj, 'utr_no', '') or '',
+            "payment_date": getattr(po_obj, 'payment_date', '') or '',
+            "payment_remark": getattr(po_obj, 'payment_remark', '') or '',
+            "payment_advice_url": getattr(po_obj, 'payment_advice_url', None)
+        })
+    return response
+
+@app.put("/api/purchase-orders/{po_number}/disbursement")
+async def process_po_disbursement(
+    po_number: str,
+    utr_no: str = Form(""),
+    payment_date: str = Form(""),
+    payment_remark: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase Order entity not found.")
+    
+    po.utr_no = utr_no
+    po.payment_date = payment_date
+    po.payment_remark = payment_remark
+    
+    if file:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
+            raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"BANK_RECEIPT_{po_number}_{timestamp}"
+        
+        try:
+            upload_result = cloudinary.uploader.upload(
+                file.file, 
+                public_id=filename,
+                folder="aarvi_payment_advices",
+                resource_type="auto"
+            )
+            po.payment_advice_url = upload_result.get("secure_url")
+        except Exception as e:
+            logger.error(f"Cloudinary Upload Failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to upload payment receipt to cloud storage.")
+    
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+    if ticket:
+        ticket.status = "Dispatched"
+        db.add(models.TicketHistory(
+            ticket_number=ticket.ticket_number,
+            user_name="Accounts Executive",
+            action_taken="Payment Disbursed & Order Dispatched",
+            remarks=f"Payment UTR {utr_no} processed on {payment_date}. Bank transfer receipt attached and order released for final logistics dispatch."
+        ))
+        
+    db.commit()
+    return {"message": "Disbursement successfully logged and order marked as Dispatched."}
+
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
 def connection_ping():

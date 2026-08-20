@@ -2,7 +2,7 @@
 import React from 'react';
 import { 
   LayoutDashboard, FileSpreadsheet, FileCheck, ShieldAlert, 
-  LogOut, ShoppingCart, CheckSquare, ShieldCheck, Building2, Zap
+  LogOut, ShoppingCart, CheckSquare, ShieldCheck, Building2, Zap, Landmark
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -36,6 +36,14 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
           { name: 'Direct Procurement', path: '/direct-request', icon: Zap },
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileCheck },
         ];
+      // 🎯 NEW: Added Accounts Department Routing
+      case 'Accounts Executive':
+      case 'Accounts':
+      case 'Finance Manager':
+        return [
+          { name: 'Accounts Desk', path: '/accounts-desk', icon: Landmark },
+          { name: 'Master PO Ledger', path: '/po-ledger', icon: FileSpreadsheet },
+        ];
       case 'IT Manager':
         return [
           { name: 'Direct Procurement', path: '/direct-procurement', icon: Zap },
@@ -50,7 +58,6 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
         return [
           { name: 'IT Control Center', path: '/admin', icon: ShieldCheck },
           { name: 'Direct Procurement', path: '/direct-procurement', icon: Zap }
-          
         ];  
       default:
         return [

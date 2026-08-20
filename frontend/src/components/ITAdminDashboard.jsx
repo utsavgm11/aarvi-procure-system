@@ -14,12 +14,12 @@ export default function ITAdminDashboard() {
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
-  // Create User States
-  const [empcode, setEmpcode] = useState(''); // 🎯 NEW: Manual Emp Code State
+  // 🎯 FIX 4: Form states default to standardized strings
+  const [empcode, setEmpcode] = useState(''); 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('Site Coordinator');
+  const [role, setRole] = useState('Project Manager'); // Defaulted to Project Manager
 
   // Full Edit User Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -28,7 +28,7 @@ export default function ITAdminDashboard() {
   const [editEmpcode, setEditEmpcode] = useState('');
   const [editRole, setEditRole] = useState('');
   const [editPassword, setEditPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false); // Controls password visibility
+  const [showPassword, setShowPassword] = useState(false); 
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -41,23 +41,24 @@ export default function ITAdminDashboard() {
 
   useEffect(() => {
     let isMounted = true;
-    const initializeData = async () => {
+    const timer = setTimeout(() => {
       if (isMounted) {
-        await fetchUsers();
+        fetchUsers();
       }
+    }, 0);
+    return () => { 
+      isMounted = false; 
+      clearTimeout(timer);
     };
-    initializeData();
-    return () => { isMounted = false; };
   }, [fetchUsers]);
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
     setLoading(true); setAlert(null);
     try {
-      // 🎯 Sends the manual empcode to the backend
       await axios.post(`${API_BASE_URL}/admin/users`, { empcode, name, email, password, role });
       setAlert({ type: 'success', message: `User ${name} provisioned as ${role}.` });
-      setEmpcode(''); setName(''); setEmail(''); setPassword('');
+      setEmpcode(''); setName(''); setEmail(''); setPassword(''); setRole('Project Manager');
       fetchUsers();
     } catch (err) {
       setAlert({ type: 'error', message: err.response?.data?.detail || 'Creation failed.' });
@@ -104,7 +105,7 @@ export default function ITAdminDashboard() {
     setSelectedEmail(user.email);
     setEditName(user.name || '');
     setEditEmpcode(user.empcode || '');
-    setEditRole(user.role || 'Site Coordinator');
+    setEditRole(user.role || 'Project Manager');
     setEditPassword('');
     setShowPassword(false);
     setIsModalOpen(true);
@@ -136,7 +137,7 @@ export default function ITAdminDashboard() {
         <h2 className="text-xs font-bold text-[#2c2a57] uppercase tracking-widest flex items-center gap-2 mb-5 border-b border-slate-100 pb-3">
           <UserPlus size={15} className="text-[#0b9c54]" /> Register & Provision System Operator
         </h2>
-        {/* 🎯 Adjusted Grid to fit 5 inputs perfectly */}
+        
         <form onSubmit={handleCreateUser} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4 items-end">
           <div className="lg:col-span-2">
             <Input label="Emp Code" required value={empcode} onChange={e => setEmpcode(e.target.value)} placeholder="e.g. HO09" />
@@ -152,6 +153,7 @@ export default function ITAdminDashboard() {
           </div>
           <div className="lg:col-span-2">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">System Designation</label>
+            {/* 🎯 FIX 1 & 2: Added Accounts Role and standardized strings */}
             <select 
               value={role} 
               onChange={e => setRole(e.target.value)} 
@@ -161,6 +163,7 @@ export default function ITAdminDashboard() {
               <option value="Site Manager">Site Manager</option>
               <option value="Purchase Executive">Purchase Executive</option>
               <option value="Project Manager">Project Manager</option>
+              <option value="Accounts">Accounts / Finance</option> 
               <option value="Director">Director</option>
               <option value="Admin">IT Admin</option>
             </select>
@@ -204,7 +207,12 @@ export default function ITAdminDashboard() {
                     {u.email}
                   </td>
                   <td className="py-3.5 px-6">
-                    <span className="bg-indigo-50/60 border border-indigo-100/80 text-indigo-700 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide">
+                    {/* 🎯 FIX 3: Dynamic UI Badges for the DataGrid */}
+                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide border ${
+                      u.role === 'Admin' ? 'bg-purple-50 text-purple-700 border-purple-200' : 
+                      u.role === 'Accounts' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                      'bg-blue-50 text-blue-700 border-blue-200'
+                    }`}>
                       {u.role}
                     </span>
                   </td>
@@ -299,6 +307,7 @@ export default function ITAdminDashboard() {
                     <option value="Site Manager">Site Manager</option>
                     <option value="Purchase Executive">Purchase Executive</option>
                     <option value="Project Manager">Project Manager</option>
+                    <option value="Accounts">Accounts / Finance</option>
                     <option value="Director">Director</option>
                     <option value="Admin">IT Admin</option>
                   </select>

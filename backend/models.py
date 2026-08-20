@@ -108,10 +108,13 @@ class PurchaseOrder(Base):
     invoice_no = Column(String, nullable=True)
     invoice_date = Column(String, nullable=True)
     invoice_remark = Column(String, nullable=True)
-    
-    # 🎯 NEW COLUMNS ADDED HERE
     invoice_duration = Column(String, nullable=True)
     proforma_invoice_url = Column(String, nullable=True)
+    # 🎯 NEW PHASE 4 COLUMNS: Accounts Disbursement Tracking
+    utr_no = Column(String, nullable=True)
+    payment_date = Column(String, nullable=True)
+    payment_remark = Column(String, nullable=True)
+    payment_advice_url = Column(String, nullable=True)
 
 class Vendor(Base):
     __tablename__ = "vendors"
