@@ -108,6 +108,10 @@ class PurchaseOrder(Base):
     invoice_no = Column(String, nullable=True)
     invoice_date = Column(String, nullable=True)
     invoice_remark = Column(String, nullable=True)
+    
+    # 🎯 NEW COLUMNS ADDED HERE
+    invoice_duration = Column(String, nullable=True)
+    proforma_invoice_url = Column(String, nullable=True)
 
 class Vendor(Base):
     __tablename__ = "vendors"
