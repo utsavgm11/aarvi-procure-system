@@ -422,7 +422,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                           {/* ======================================================== */}
                           <td className="p-3 bg-slate-50/40 border-l border-slate-200 align-top">
                             {isPurchaseExecutive && isHealthyFormActive(isEditing) ? (
-                              <div className="flex flex-col gap-2 animate-in fade-in zoom-in duration-150 border border-indigo-200 bg-white p-2 rounded-xl shadow-md">
+                              <div className="flex flex-col gap-2 animate-in fade-in zoom-in duration-150 border border-indigo-200 bg-white p-2.5 rounded-xl shadow-md">
                                 <div className="flex gap-2">
                                   <input 
                                     type="text" 
@@ -456,20 +456,35 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   />
                                 </div>
                                 
-                                {/* 🚀 NEW: File Upload Input */}
-                                <div className="flex items-center mt-1 border-t border-dashed border-slate-200 pt-2">
-                                  <input 
-                                    type="file" 
-                                    accept=".pdf,.png,.jpg,.jpeg"
-                                    onChange={(e) => handleFileChange(po.po_number, e)}
-                                    className="text-[10px] file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 flex-1 outline-none text-slate-500"
-                                  />
-                                  <div className="flex space-x-1 flex-shrink-0">
+                                {/* 🚀 NEW: Enhanced File Upload UI (Shows Selected Filename) */}
+                                <div className="flex items-center justify-between mt-1 border-t border-dashed border-slate-200 pt-2.5">
+                                  <div className="flex items-center gap-2 overflow-hidden">
+                                    <label className="cursor-pointer flex-shrink-0 px-3 py-1.5 bg-indigo-50 text-indigo-700 font-bold text-[10px] rounded-md border border-indigo-200 hover:bg-indigo-100 transition-colors shadow-3xs">
+                                      <input 
+                                        type="file" 
+                                        accept=".pdf,.png,.jpg,.jpeg"
+                                        onChange={(e) => handleFileChange(po.po_number, e)}
+                                        className="hidden"
+                                      />
+                                      <UploadCloud size={12} className="inline mr-1" /> {form.file ? "Change File" : "Attach PI"}
+                                    </label>
+                                    
+                                    {/* Shows the name of the file they just picked BEFORE submitting */}
+                                    {form.file ? (
+                                      <span className="text-[10px] font-bold text-emerald-600 truncate max-w-[120px]" title={form.file.name}>
+                                        📄 {form.file.name}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] italic text-slate-400">No file selected</span>
+                                    )}
+                                  </div>
+                                  
+                                  <div className="flex space-x-1.5 flex-shrink-0 ml-2">
                                     <button onClick={() => toggleEditInvoice(po.po_number)} className="p-1.5 bg-slate-300 text-white rounded-md hover:bg-slate-400 transition-colors shadow-3xs">
                                       <X size={14} />
                                     </button>
-                                    <button onClick={() => handleSaveInvoiceDetails(po.po_number)} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0b9c54] text-white font-bold rounded-md hover:bg-emerald-600 transition-colors shadow-3xs">
-                                      <UploadCloud size={14} /> Submit
+                                    <button onClick={() => handleSaveInvoiceDetails(po.po_number)} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0b9c54] text-white font-bold text-[10px] rounded-md hover:bg-emerald-600 transition-colors shadow-3xs">
+                                      Submit
                                     </button>
                                   </div>
                                 </div>
@@ -502,15 +517,15 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   )}
                                 </div>
 
-                                {/* 🚀 NEW: File Attachment Display Row */}
+                                {/* 🚀 NEW: Displays the ACTUAL filename instead of just "View Document" */}
                                 <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <Paperclip size={12} className="text-slate-400" />
-                                    <span className="font-bold text-slate-500 uppercase text-[9px]">Attachment:</span>
+                                  <div className="flex items-center gap-2 overflow-hidden">
+                                    <Paperclip size={12} className="text-slate-400 flex-shrink-0" />
+                                    <span className="font-bold text-slate-500 uppercase text-[9px] flex-shrink-0">File:</span>
                                     
                                     {po.proforma_invoice_url ? (
-                                      <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 font-bold text-[10px] hover:underline flex items-center gap-1">
-                                        View Document
+                                      <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 font-bold text-[10px] hover:underline flex items-center gap-1 truncate" title="Click to view/download">
+                                        📄 {po.proforma_invoice_url.split('/').pop()}
                                       </a>
                                     ) : (
                                       <span className="text-rose-500/80 font-bold italic text-[10px] bg-rose-50 px-2 py-0.5 rounded">Pending Upload</span>
