@@ -1193,6 +1193,52 @@ async def update_po_invoice_details(
     db.commit()
     return {"message": "Invoice logging verified, stored in cloud, and saved successfully."}
 
+# 🚀 NEW: Deletes the PI document from Cloudinary AND clears the DB reference
+@app.delete("/api/purchase-orders/{po_number}/invoice-file")
+def delete_po_invoice_file(po_number: str, db: Session = Depends(get_db)):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase Order entity not found.")
+    
+    if po.proforma_invoice_url:
+        try:
+            # Parse the Cloudinary public_id from the URL
+            # Example URL: https://res.cloudinary.com/cloud_name/image/upload/v12345/aarvi_invoices/PI_PO-2026-641905_20260820.pdf
+            url = po.proforma_invoice_url
+            if "/upload/" in url:
+                path_after_upload = url.split("/upload/")[1]
+                parts = path_after_upload.split('/')
+                # Skip version tag if present (e.g. v1787214100)
+                if parts[0].startswith('v') and parts[0][1:].isdigit():
+                    parts = parts[1:]
+                
+                full_path = "/".join(parts)
+                public_id = os.path.splitext(full_path)[0] # e.g. "aarvi_invoices/PI_PO-2026-641905_20260820"
+                
+                # Delete from Cloudinary
+                cloudinary.uploader.destroy(public_id, resource_type="image")
+                cloudinary.uploader.destroy(public_id, resource_type="raw")
+                cloudinary.uploader.destroy(full_path, resource_type="raw")
+                
+        except Exception as e:
+            logger.error(f"Failed to delete Cloudinary file: {str(e)}")
+
+        # Clear the database column
+        po.proforma_invoice_url = None
+        
+        # Log to ticket history
+        ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+        if ticket:
+            db.add(models.TicketHistory(
+                ticket_number=ticket.ticket_number,
+                user_name="Purchase Executive",
+                action_taken="Proforma Invoice Attachment Removed",
+                remarks=f"Proforma invoice attachment deleted for PO {po_number}."
+            ))
+
+    db.commit()
+    return {"message": "Attachment deleted successfully from Cloudinary and Database."}    
+
 # -------------------------------------------------------------------
 # 🏢 VENDOR MASTER DIRECTORY LAYER
 # -------------------------------------------------------------------

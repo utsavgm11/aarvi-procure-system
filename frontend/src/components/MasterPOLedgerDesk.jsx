@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
   FileCheck, Search, ChevronDown, ChevronUp, Landmark, Layers3, 
   Save, Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
-  UploadCloud, Paperclip
+  UploadCloud, Paperclip,Trash2 
 } from 'lucide-react';
 import { Card, Button } from './ui/SharedUI';
 
@@ -114,6 +114,20 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       alert("Failed to commit manual invoice data and attachment to the backend engine.");
     }
   };
+
+  // 🚀 NEW: Handles deleting the attached PI document
+const handleDeleteInvoiceFile = async (poNumber) => {
+  if (!window.confirm("Are you sure you want to permanently delete this attached Proforma Invoice from cloud storage?")) {
+    return;
+  }
+  
+  try {
+    await axios.delete(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice-file`);
+    fetchLedgerPOs(); // Refresh grid
+  } catch (err) {
+    alert("Failed to delete attachment from server.");
+  }
+};
 
   const openPoDocumentSection = async (po) => {
     setSelectedPoForView(po);
@@ -518,20 +532,33 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                 </div>
 
                                 {/* 🚀 NEW: Displays the ACTUAL filename instead of just "View Document" */}
-                                <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between">
-                                  <div className="flex items-center gap-2 overflow-hidden">
-                                    <Paperclip size={12} className="text-slate-400 flex-shrink-0" />
-                                    <span className="font-bold text-slate-500 uppercase text-[9px] flex-shrink-0">File:</span>
-                                    
-                                    {po.proforma_invoice_url ? (
-                                      <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 font-bold text-[10px] hover:underline flex items-center gap-1 truncate" title="Click to view/download">
-                                        📄 {po.proforma_invoice_url.split('/').pop()}
-                                      </a>
-                                    ) : (
-                                      <span className="text-rose-500/80 font-bold italic text-[10px] bg-rose-50 px-2 py-0.5 rounded">Pending Upload</span>
-                                    )}
-                                  </div>
-                                </div>
+                                {/* 🚀 NEW: Displays the file name + Trash Delete Button */}
+<div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between">
+  <div className="flex items-center gap-2 overflow-hidden">
+    <Paperclip size={12} className="text-slate-400 flex-shrink-0" />
+    <span className="font-bold text-slate-500 uppercase text-[9px] flex-shrink-0">File:</span>
+    
+    {po.proforma_invoice_url ? (
+      <div className="flex items-center gap-2 truncate">
+        <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 font-bold text-[10px] hover:underline flex items-center gap-1 truncate" title="Click to view/download">
+          📄 {po.proforma_invoice_url.split('/').pop()}
+        </a>
+        
+        {isPurchaseExecutive && (
+          <button 
+            onClick={() => handleDeleteInvoiceFile(po.po_number)} 
+            className="text-slate-400 hover:text-rose-600 p-0.5 rounded transition-colors"
+            title="Delete file permanently from Cloudinary"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+      </div>
+    ) : (
+      <span className="text-rose-500/80 font-bold italic text-[10px] bg-rose-50 px-2 py-0.5 rounded">Pending Upload</span>
+    )}
+  </div>
+</div>
 
                               </div>
                             )}
