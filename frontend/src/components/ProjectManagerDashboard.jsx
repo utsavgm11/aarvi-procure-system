@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { 
   CheckSquare, ShieldCheck, ThumbsUp, Inbox, Archive, Clock, 
-  Award, MessageSquare, AlertTriangle 
+  Award, MessageSquare, AlertTriangle, FileText, ExternalLink, CheckCircle2 
 } from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI';
 
@@ -18,6 +18,9 @@ export default function ProjectManagerDashboard({ currentUser }) {
   const [vendorQuotes, setVendorQuotes] = useState([]);
   const [historyLogs, setHistoryLogs] = useState([]);
   
+  // 🎯 NEW: PO / Proforma Invoice Details State
+  const [poDetails, setPoDetails] = useState(null);
+
   // Interactive States
   const [selectedBids, setSelectedBids] = useState({});
   const [remarks, setRemarks] = useState('');
@@ -61,9 +64,10 @@ export default function ProjectManagerDashboard({ currentUser }) {
     setSelectedBids({}); 
     setRemarks('');
     setAlert(null);
+    setPoDetails(null);
+
     try {
       const itemsRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
-      // 🎯 FIXED: Mapped item_type so the PM can see and edit the Asset/Consumable flag
       setItems(itemsRes.data.map(item => ({ 
         ...item, 
         is_reimbursable: item.is_reimbursable || false,
@@ -75,6 +79,12 @@ export default function ProjectManagerDashboard({ currentUser }) {
 
       const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
       setHistoryLogs(histRes.data);
+
+      // 🎯 Fetch PO / Proforma Invoice details if ticket is in PI approval stage
+      if (ticket.status === 'PI Pending PM Approval') {
+        const poRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/po`);
+        setPoDetails(poRes.data);
+      }
     } catch (err) { console.error("Error loading ticket specifications", err); }
   };
 
@@ -88,7 +98,6 @@ export default function ProjectManagerDashboard({ currentUser }) {
     ));
   };
 
-  // 🎯 NEW: Handler to update the item classification (Asset vs Consumable)
   const handleItemTypeChange = (itemIndex, newValue) => {
     setItems(prevItems => prevItems.map(item => 
       item.item_index === itemIndex ? { ...item, item_type: newValue } : item
@@ -100,12 +109,10 @@ export default function ProjectManagerDashboard({ currentUser }) {
       setAlert({ type: 'error', message: "Operational remarks are mandatory before raising technical deviations." });
       return;
     }
-
     if (actionType === "Approve" && Object.keys(selectedBids).length !== items.length) {
       setAlert({ type: 'error', message: "You must explicitly select exactly 1 winning vendor option for every line item." });
       return;
     }
-
     setLoading(true);
     try {
       await axios.post(`${API_BASE_URL}/requisitions/${selectedTicket.ticket_number}/action`, {
@@ -131,6 +138,28 @@ export default function ProjectManagerDashboard({ currentUser }) {
     }
   };
 
+  // 🎯 NEW: Handler for PM Proforma Invoice Approval
+  const handleApprovePI = async () => {
+    setLoading(true);
+    try {
+      await axios.put(`${API_BASE_URL}/requisitions/${selectedTicket.ticket_number}/approve-pi`, {
+        user_name: currentUser?.name || "Project Manager",
+        remarks: remarks || "Proforma Invoice verified and cleared by PM. Dispatched to Accounts Desk for disbursement."
+      });
+
+      setAlert({
+        type: 'success',
+        message: "Proforma Invoice cleared! Order routed to Accounts Desk for payment processing."
+      });
+      setSelectedTicket(null);
+      fetchPMQueue();
+    } catch (err) {
+      setAlert({ type: 'error', message: "Failed to process PI approval." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6 relative">
       
@@ -138,7 +167,7 @@ export default function ProjectManagerDashboard({ currentUser }) {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">PM Commercial Clearance</h1>
-          <p className="text-sm text-slate-500 font-medium">Evaluate supplier matrices, verify client-billing flags, and authorize budgets</p>
+          <p className="text-sm text-slate-500 font-medium">Evaluate supplier matrices, verify Proforma Invoices, and authorize budgets</p>
         </div>
         <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full md:w-auto">
           <Button variant={activeTab === 'queue' ? 'primary' : 'ghost'} onClick={() => { setActiveTab('queue'); setSelectedTicket(null); }} className="text-xs py-1.5 flex-1 md:flex-none flex items-center justify-center gap-1.5">
@@ -188,121 +217,204 @@ export default function ProjectManagerDashboard({ currentUser }) {
                     </div>
                     <div>
                       <h3 className="font-bold text-[#2c2a57] text-sm uppercase tracking-wider">
-                        PM Commercial Valuation & Billing Checks
+                        {selectedTicket.status === 'PI Pending PM Approval' ? 'Proforma Invoice Financial Sign-Off' : 'PM Commercial Valuation & Billing Checks'}
                       </h3>
                       <p className="text-xs text-slate-500 font-mono mt-0.5">{selectedTicket.ticket_number} • {selectedTicket.project_name}</p>
                     </div>
                   </div>
                 </Card>
 
-                <Card>
-                  <div className="p-4 bg-slate-50/50 border-b border-slate-200 text-xs font-bold text-[#2c2a57] uppercase tracking-wider flex justify-between items-center">
-                    <span>Line Material Quantities & Quotation Framework</span>
-                    <span className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-bold animate-pulse">Click card option below to choose winner</span>
-                  </div>
-                  <div className="p-4 space-y-6 divide-y divide-slate-100">
-                    {items.map(item => {
-                      const itemBids = vendorQuotes.filter(q => q.item_index === item.item_index);
-                      return (
-                        <div key={item.item_index} className="pt-4 first:pt-0 space-y-3">
-                          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-slate-100 pb-2">
-                            <div>
-                              <h4 className="text-sm font-bold text-[#2c2a57]">{item.item_index}. {item.product_description}</h4>
-                              <span className="text-[10px] text-slate-400 font-medium block mt-0.5">Site Justification: <span className="italic text-slate-600 font-semibold">{item.purpose}</span></span>
+                {/* ======================================================== */}
+                {/* 🎯 MODE A: PROFORMA INVOICE (PI) PM APPROVAL CARD        */}
+                {/* ======================================================== */}
+                {selectedTicket.status === 'PI Pending PM Approval' ? (
+                  <Card className="p-6 space-y-6 bg-white border-slate-200 shadow-sm">
+                    <div className="border-b border-slate-200 pb-4">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 bg-indigo-50 px-2 py-1 rounded">
+                        Action Required: Verify Vendor Proforma Invoice
+                      </span>
+                      <h3 className="text-base font-extrabold text-[#2c2a57] mt-2">
+                        Vendor Proforma Invoice Clearance Stage
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Review the vendor's submitted invoice parameters and attached PDF before dispatching to the Accounts team for payment release.
+                      </p>
+                    </div>
+
+                    {/* Invoice Metadata Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase block">Invoice No:</span>
+                        <span className="font-mono font-black text-slate-800 text-sm">{poDetails?.invoice_no || 'N/A'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase block">Invoice Date:</span>
+                        <span className="font-mono font-bold text-slate-700">{poDetails?.invoice_date || 'N/A'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase block">Tenure / Duration:</span>
+                        <span className="font-bold text-slate-700">{poDetails?.invoice_duration || '-'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase block">Purchase Remarks / Terms:</span>
+                        <span className="font-medium text-slate-700">{poDetails?.invoice_remark || 'None'}</span>
+                      </div>
+                    </div>
+
+                    {/* PDF Attachment Card */}
+                    <div className="p-4 bg-indigo-50/40 border border-indigo-200 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <FileText size={24} className="text-indigo-600" />
+                        <div>
+                          <p className="text-xs font-bold text-[#2c2a57]">Vendor Proforma Invoice Document</p>
+                          <p className="text-[10px] text-slate-500 font-mono">
+                            {poDetails?.proforma_invoice_url ? poDetails.proforma_invoice_url.split('/').pop() : 'No file attached'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {poDetails?.proforma_invoice_url ? (
+                        <a 
+                          href={poDetails.proforma_invoice_url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-colors shadow-xs"
+                        >
+                          <span>Preview PI PDF</span>
+                          <ExternalLink size={14} />
+                        </a>
+                      ) : (
+                        <span className="text-xs font-bold text-rose-500 italic bg-rose-50 px-3 py-1 rounded border border-rose-200">
+                          Attachment Missing
+                        </span>
+                      )}
+                    </div>
+
+                    {/* PM Action Input & Buttons */}
+                    <div className="pt-4 border-t border-slate-200 space-y-4">
+                      <Input 
+                        label="PM Approval Notes / Account Disbursement Instructions" 
+                        value={remarks} 
+                        onChange={e => setRemarks(e.target.value)} 
+                        placeholder="e.g. Cleared for 50% advance payment as per PO terms..." 
+                      />
+                      
+                      <div className="flex justify-end gap-3">
+                        <Button variant="danger" onClick={() => handleCommercialAuthorization("Raise Query")} disabled={loading} className="text-xs py-2">
+                          <span>Reject & Flag Query</span>
+                        </Button>
+                        <Button variant="success" onClick={handleApprovePI} disabled={loading} className="text-xs py-2 shadow-sm bg-[#0b9c54] hover:bg-emerald-600">
+                          <CheckCircle2 size={16} /> <span>Approve PI & Route to Accounts</span>
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ) : (
+
+                  /* ======================================================== */
+                  /* 🎯 MODE B: EXISTING BIDDING SELECTION MATRIX            */
+                  /* ======================================================== */
+                  <Card>
+                    <div className="p-4 bg-slate-50/50 border-b border-slate-200 text-xs font-bold text-[#2c2a57] uppercase tracking-wider flex justify-between items-center">
+                      <span>Line Material Quantities & Quotation Framework</span>
+                      <span className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-bold animate-pulse">Click card option below to choose winner</span>
+                    </div>
+                    <div className="p-4 space-y-6 divide-y divide-slate-100">
+                      {items.map(item => {
+                        const itemBids = vendorQuotes.filter(q => q.item_index === item.item_index);
+                        return (
+                          <div key={item.item_index} className="pt-4 first:pt-0 space-y-3">
+                            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 border-b border-slate-100 pb-2">
+                              <div>
+                                <h4 className="text-sm font-bold text-[#2c2a57]">{item.item_index}. {item.product_description}</h4>
+                                <span className="text-[10px] text-slate-400 font-medium block mt-0.5">Site Justification: <span className="italic text-slate-600 font-semibold">{item.purpose}</span></span>
+                              </div>
+                              
+                              <div className="flex flex-wrap items-center bg-slate-50 border border-slate-200 p-1.5 rounded-lg gap-2">
+                                <div className="flex items-center border-r border-slate-200 pr-2">
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase mr-2 ml-1">Type:</span>
+                                  <select
+                                    value={item.item_type || 'Consumable'}
+                                    onChange={(e) => handleItemTypeChange(item.item_index, e.target.value)}
+                                    className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border outline-none cursor-pointer bg-white text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors"
+                                  >
+                                    <option value="Consumable">📦 Consumable</option>
+                                    <option value="Asset">🖥️ Asset</option>
+                                  </select>
+                                </div>
+                                <div className="flex items-center">
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase mr-3 ml-1">Client Billed Expense?</span>
+                                  <label className="flex items-center justify-center cursor-pointer mr-1">
+                                    <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${item.is_reimbursable ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                                      <div className={`bg-white w-4 h-4 rounded-full shadow-sm transform transition-transform ${item.is_reimbursable ? 'translate-x-5' : 'translate-x-0'}`} />
+                                    </div>
+                                    <input 
+                                      type="checkbox" 
+                                      className="hidden" 
+                                      checked={item.is_reimbursable || false} 
+                                      onChange={(e) => handleReimbursableToggle(item.item_index, e.target.checked)} 
+                                    />
+                                  </label>
+                                </div>
+                              </div>
                             </div>
                             
-                            {/* 🎯 MANDATORY PM Financial Toggle Switch for each item */}
-                            <div className="flex flex-wrap items-center bg-slate-50 border border-slate-200 p-1.5 rounded-lg gap-2">
-                              {/* 🎯 NEW: Asset vs Consumable Dropdown */}
-                              <div className="flex items-center border-r border-slate-200 pr-2">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase mr-2 ml-1">Type:</span>
-                                <select
-                                  value={item.item_type || 'Consumable'}
-                                  onChange={(e) => handleItemTypeChange(item.item_index, e.target.value)}
-                                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border outline-none cursor-pointer bg-white text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors"
-                                >
-                                  <option value="Consumable">📦 Consumable</option>
-                                  <option value="Asset">🖥️ Asset</option>
-                                </select>
-                              </div>
-
-                              <div className="flex items-center">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase mr-3 ml-1">Client Billed Expense?</span>
-                                <label className="flex items-center justify-center cursor-pointer mr-1">
-                                  <div className={`w-10 h-5 rounded-full p-0.5 transition-colors ${item.is_reimbursable ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                                    <div className={`bg-white w-4 h-4 rounded-full shadow-sm transform transition-transform ${item.is_reimbursable ? 'translate-x-5' : 'translate-x-0'}`} />
-                                  </div>
-                                  <input 
-                                    type="checkbox" 
-                                    className="hidden" 
-                                    checked={item.is_reimbursable || false} 
-                                    onChange={(e) => handleReimbursableToggle(item.item_index, e.target.checked)} 
-                                  />
-                                </label>
-                              </div>
-                            </div>
-
-                          </div>
-                          
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            {itemBids.map((bid, bIdx) => {
-                              const isChosen = selectedBids[item.item_index] === bid.vendor_name;
-                              
-                              return (
-                                <div 
-                                  key={bIdx} 
-                                  onClick={() => toggleBidSelection(item.item_index, bid.vendor_name)}
-                                  className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col justify-between relative overflow-hidden ${
-                                    isChosen 
-                                      ? 'border-[#0b9c54] bg-emerald-50/40 ring-1 ring-[#0b9c54] shadow-md transform scale-[1.01]' 
-                                      : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-xs'
-                                  }`}
-                                >
-                                  {isChosen && (
-                                    <div className="absolute top-0 right-0 bg-[#0b9c54] text-white p-1 rounded-bl-lg">
-                                      <Award size={12} />
-                                    </div>
-                                  )}
-                                  <div>
-                                    <span className={`text-[9px] font-black uppercase tracking-wider block mb-1 ${isChosen ? 'text-[#0b9c54]' : 'text-slate-400'}`}>
-                                      Bid {bIdx + 1} {isChosen && '• SELECTED'}
-                                    </span>
-                                    <span className="text-xs font-bold text-slate-800 truncate block">{bid.vendor_name}</span>
-                                    {bid.special_terms && <span className="text-[9px] font-medium text-slate-500 italic block mt-1 line-clamp-2">Clauses: {bid.special_terms}</span>}
-                                    
-                                    {bid.quality_remarks && (
-                                      <div className="mt-2 bg-amber-50/50 border border-amber-100 p-1.5 rounded-md">
-                                        <span className="text-[9px] font-bold text-amber-700 block uppercase mb-0.5">Tech Specs / QA:</span>
-                                        <span className="text-[10px] font-medium text-slate-700 italic line-clamp-2 leading-tight">{bid.quality_remarks}</span>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              {itemBids.map((bid, bIdx) => {
+                                const isChosen = selectedBids[item.item_index] === bid.vendor_name;
+                                return (
+                                  <div 
+                                    key={bIdx} 
+                                    onClick={() => toggleBidSelection(item.item_index, bid.vendor_name)}
+                                    className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col justify-between relative overflow-hidden ${
+                                      isChosen 
+                                        ? 'border-[#0b9c54] bg-emerald-50/40 ring-1 ring-[#0b9c54] shadow-md transform scale-[1.01]' 
+                                        : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-xs'
+                                    }`}
+                                  >
+                                    {isChosen && (
+                                      <div className="absolute top-0 right-0 bg-[#0b9c54] text-white p-1 rounded-bl-lg">
+                                        <Award size={12} />
                                       </div>
                                     )}
-                                    
+                                    <div>
+                                      <span className={`text-[9px] font-black uppercase tracking-wider block mb-1 ${isChosen ? 'text-[#0b9c54]' : 'text-slate-400'}`}>
+                                        Bid {bIdx + 1} {isChosen && '• SELECTED'}
+                                      </span>
+                                      <span className="text-xs font-bold text-slate-800 truncate block">{bid.vendor_name}</span>
+                                      {bid.special_terms && <span className="text-[9px] font-medium text-slate-500 italic block mt-1 line-clamp-2">Clauses: {bid.special_terms}</span>}
+                                      {bid.quality_remarks && (
+                                        <div className="mt-2 bg-amber-50/50 border border-amber-100 p-1.5 rounded-md">
+                                          <span className="text-[9px] font-bold text-amber-700 block uppercase mb-0.5">Tech Specs / QA:</span>
+                                          <span className="text-[10px] font-medium text-slate-700 italic line-clamp-2 leading-tight">{bid.quality_remarks}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="mt-3 flex justify-between items-baseline border-t border-slate-100 pt-2">
+                                      <span className="text-xs font-black text-[#0b9c54]">₹{bid.total_amount.toLocaleString('en-IN')}</span>
+                                      <span className="text-[9px] font-bold text-slate-400">{bid.time_of_delivery}</span>
+                                    </div>
                                   </div>
-                                  <div className="mt-3 flex justify-between items-baseline border-t border-slate-100 pt-2">
-                                    <span className={`text-xs font-black ${isChosen ? 'text-[#0b9c54]' : 'text-[#0b9c54]'}`}>₹{bid.total_amount.toLocaleString('en-IN')}</span>
-                                    <span className="text-[9px] font-bold text-slate-400">{bid.time_of_delivery}</span>
-                                  </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-4">
-                    <Input label="PM Directives & Comments" value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Add any site instructions for Sagar's purchase department..." />
-                    <div className="flex flex-col sm:flex-row justify-end gap-2 pt-1">
-                      <Button variant="danger" onClick={() => handleCommercialAuthorization("Raise Query")} disabled={loading} className="text-xs py-2">
-                        <span>Flag Technical Query</span>
-                      </Button>
-                      <Button variant="success" onClick={() => handleCommercialAuthorization("Approve")} disabled={loading} className="text-xs py-2 shadow-sm">
-                        <ThumbsUp size={14} /> <span>Approve Budget Allocation</span>
-                      </Button>
+                        );
+                      })}
                     </div>
-                  </div>
-                </Card>
+                    <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-4">
+                      <Input label="PM Directives & Comments" value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Add any site instructions for purchase department..." />
+                      <div className="flex flex-col sm:flex-row justify-end gap-2 pt-1">
+                        <Button variant="danger" onClick={() => handleCommercialAuthorization("Raise Query")} disabled={loading} className="text-xs py-2">
+                          <span>Flag Technical Query</span>
+                        </Button>
+                        <Button variant="success" onClick={() => handleCommercialAuthorization("Approve")} disabled={loading} className="text-xs py-2 shadow-sm">
+                          <ThumbsUp size={14} /> <span>Approve Budget Allocation</span>
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                )}
 
                 {historyLogs.length > 0 && (
                   <Card className="p-4 space-y-4">
@@ -323,7 +435,7 @@ export default function ProjectManagerDashboard({ currentUser }) {
               <div className="h-64 border border-dashed border-slate-300 rounded-xl bg-white flex flex-col items-center justify-center text-slate-400 text-sm p-6 text-center">
                 <span className="text-3xl mb-2">🏢</span>
                 <h3 className="text-sm font-bold text-[#2c2a57] uppercase tracking-wider">PM Review Stream Idle</h3>
-                <p className="max-w-xs mt-1 text-xs text-slate-500">Select a project's materials folder to evaluate associated supplier cost matrices.</p>
+                <p className="max-w-xs mt-1 text-xs text-slate-500">Select a project's materials folder to evaluate associated supplier cost matrices or approve Proforma Invoices.</p>
               </div>
             )}
           </div>
@@ -351,7 +463,7 @@ export default function ProjectManagerDashboard({ currentUser }) {
                       <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-tight">Cost Center: {ticket.project_code}</span>
                     </div>
                     <p className="text-xs font-bold text-slate-600">{ticket.project_name}</p>
-                    <div className="flex items-center space-x-1.5 mt-2 text-[10px] font-mono text-slate-500 bg-slate-50  px-2 py-1 rounded w-max border border-slate-100">
+                    <div className="flex items-center space-x-1.5 mt-2 text-[10px] font-mono text-slate-500 bg-slate-50 px-2 py-1 rounded w-max border border-slate-100">
                       <Clock size={10} className="text-[#0b9c54]" />
                       <span>Approved On: <strong className="text-slate-700">{ticket.approval_date || "Date Unavailable"}</strong></span>
                     </div>

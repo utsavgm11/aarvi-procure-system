@@ -856,10 +856,12 @@ def get_pending_management_approval_tickets(manager_id: int, db: Session = Depen
                 models.MaterialTicket.assigned_project_manager_id == manager_id,
                 models.MaterialTicket.assigned_project_manager_id == None
             ),
-            models.MaterialTicket.status.in_(["Pending Project Manager", "Query Raised"])
+            # 🎯 UPDATED: Added 'PI Pending PM Approval'
+            models.MaterialTicket.status.in_(["Pending Project Manager", "Query Raised", "PI Pending PM Approval"])
         ).order_by(models.MaterialTicket.created_at.desc()).all()
         
     return [{"ticket_number": t.ticket_number, "project_code": t.project_code, "project_name": t.project_name, "status": t.status} for t in tickets]
+   
 
 @app.get("/api/requisitions/pm-history/{manager_id}", response_model=List[dict])
 def get_pm_history(manager_id: int, db: Session = Depends(get_db)):
@@ -1411,6 +1413,49 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
                 "link": f"/dashboard/management"
             })
     return notifications
+
+# 🎯 NEW: Fetch PO details for a specific ticket
+@app.get("/api/requisitions/{ticket_number}/po", response_model=dict)
+def get_po_by_ticket(ticket_number: str, db: Session = Depends(get_db)):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.ticket_number == ticket_number).first()
+    if not po:
+        return {}
+    return {
+        "po_number": po.po_number,
+        "ticket_number": po.ticket_number,
+        "invoice_no": po.invoice_no or "",
+        "invoice_date": po.invoice_date or "",
+        "invoice_remark": po.invoice_remark or "",
+        "invoice_duration": po.invoice_duration or "",
+        "proforma_invoice_url": po.proforma_invoice_url or None
+    }
+
+# 🎯 NEW: Project Manager Approves Proforma Invoice & Routes to Accounts
+class ApprovePIPayload(BaseModel):
+    user_name: str
+    remarks: Optional[str] = ""
+
+@app.put("/api/requisitions/{ticket_number}/approve-pi")
+def approve_proforma_invoice(
+    ticket_number: str,
+    payload: ApprovePIPayload,
+    db: Session = Depends(get_db)
+):
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Requisition not found.")
+    
+    ticket.status = "PI Approved - Sent to Accounts"
+    
+    db.add(models.TicketHistory(
+        ticket_number=ticket_number,
+        user_name=payload.user_name,
+        action_taken="Proforma Invoice Approved",
+        remarks=payload.remarks or "Proforma Invoice verified and approved by PM. Routed to Accounts Desk for disbursement."
+    ))
+    
+    db.commit()
+    return {"ticket_number": ticket_number, "status": ticket.status}
 
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
