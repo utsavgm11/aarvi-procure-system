@@ -14,6 +14,9 @@ import ITAdminDashboard from './components/ITAdminDashboard';
 import PODistributionDashboard from './components/PODistributionDashboard'; 
 import MasterPOLedgerDesk from './components/MasterPOLedgerDesk'; 
 
+// 🎯 NEW: Import the Accounts & Disbursement Desk
+import AccountsDesk from './components/AccountsDesk';
+
 // 🎯 NEW: Import the Direct Procurement / Fast-Track Portal
 import ManagerRequestPortal from './components/ManagerRequestPortal';
 
@@ -25,6 +28,9 @@ const getRoleHomePath = (role) => {
     case 'Site Manager':       return '/vetting-gateway';
     case 'Purchase Executive': return '/sourcing-hub';
     case 'Project Manager':    return '/commercial-approvals';
+    case 'Accounts':           return '/accounts-desk'; // 🎯 Added Accounts landing path
+    case 'Accounts Executive': return '/accounts-desk'; 
+    case 'Finance Manager':    return '/accounts-desk'; 
     case 'IT Manager':         return '/direct-procurement';
     case 'Director':           return '/corporate-approvals';
     case 'Admin':              return '/admin';
@@ -61,6 +67,9 @@ function App() {
           <Route path="commercial-approvals" element={<ProjectManagerDashboard currentUser={userSession} />} />
           <Route path="corporate-approvals" element={<DirectorDashboard currentUser={userSession} />} />
           
+          {/* 🎯 ACCOUNTS DEPARTMENT WORKSPACE */}
+          <Route path="accounts-desk" element={<AccountsDesk currentUser={userSession} />} />
+
           {/* ⚡ FAST-TRACK ROUTES (Accessible by Project Managers & IT Managers) */}
           <Route path="direct-procurement" element={<ManagerRequestPortal currentUser={userSession} />} />
           <Route path="direct-request" element={<ManagerRequestPortal currentUser={userSession} />} />
