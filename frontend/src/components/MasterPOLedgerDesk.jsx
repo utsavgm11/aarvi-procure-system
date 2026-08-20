@@ -3,7 +3,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { 
   FileCheck, Search, ChevronDown, ChevronUp, Landmark, Layers3, 
-  Save, Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter
+  Save, Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
+  UploadCloud, Paperclip
 } from 'lucide-react';
 import { Card, Button } from './ui/SharedUI';
 
@@ -16,7 +17,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [expandedRows, setExpandedRows] = useState({});
   const [selectedPoForView, setSelectedPoForView] = useState(null);
   const [poItems, setPoItems] = useState([]);
-
+  
   // Filter Dropdown Selection States
   const [selectedProjectFilter, setSelectedProjectFilter] = useState('ALL');
   const [selectedTimeFilter, setSelectedTimeFilter] = useState('ALL'); 
@@ -24,7 +25,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   // Form states for manual entry parameters
   const [invoiceForms, setInvoiceForms] = useState({});
   const [editingInvoices, setEditingInvoices] = useState({});
-
   const isPurchaseExecutive = currentUser?.role === 'Purchase Executive';
 
   const fetchLedgerPOs = useCallback(async () => {
@@ -39,7 +39,8 @@ export default function MasterPOLedgerDesk({ currentUser }) {
           invoice_no: po.invoice_no || '',
           invoice_date: po.invoice_date || '',
           invoice_remark: po.invoice_remark || '',
-          invoice_duration: po.invoice_duration || '' 
+          invoice_duration: po.invoice_duration || '',
+          file: null // Added for file uploads
         };
       });
       setInvoiceForms(initialForms);
@@ -50,7 +51,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }
   }, []);
 
-  // 🎯 THE FIX: Defer state invocation via macro-task to prevent cascading render fault lines
+  // Defer state invocation via macro-task to prevent cascading render fault lines
   useEffect(() => {
     let isMounted = true;
     const timer = setTimeout(() => {
@@ -72,18 +73,45 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }));
   };
 
+  // Handle physical file attachment
+  const handleFileChange = (poNumber, event) => {
+    const file = event.target.files[0];
+    setInvoiceForms(prev => ({
+      ...prev,
+      [poNumber]: { ...prev[poNumber], file: file }
+    }));
+  };
+
   const toggleEditInvoice = (poNumber) => {
     setEditingInvoices(prev => ({ ...prev, [poNumber]: !prev[poNumber] }));
   };
 
+  // 🚀 UPDATED API CALL: Uses FormData to handle file uploads + text data
   const handleSaveInvoiceDetails = async (poNumber) => {
-    const formData = invoiceForms[poNumber];
+    const formState = invoiceForms[poNumber];
+    
+    // Package data as FormData so the backend can accept the file
+    const formData = new FormData();
+    formData.append('invoice_no', formState.invoice_no);
+    formData.append('invoice_date', formState.invoice_date);
+    formData.append('invoice_duration', formState.invoice_duration);
+    formData.append('invoice_remark', formState.invoice_remark);
+    
+    if (formState.file) {
+      formData.append('file', formState.file);
+    }
+
     try {
-      await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice`, formData);
+      await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      
       setEditingInvoices(prev => ({ ...prev, [poNumber]: false }));
-      fetchLedgerPOs();
+      fetchLedgerPOs(); // Refresh grid to show new document
     } catch (err) {
-      alert("Failed to commit manual invoice data changes to the backend engine.");
+      alert("Failed to commit manual invoice data and attachment to the backend engine.");
     }
   };
 
@@ -97,7 +125,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }
   };
 
-  // --- TIME-SERIES TIMELINE MATRIX CHECKER ---
   const isWithinLast6Months = (dateStr) => {
     if (!dateStr || dateStr === 'N/A') return false;
     try {
@@ -119,7 +146,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }
   };
 
-  // --- COMPREHENSIVE Spend Analytics Evaluation Engine ---
   const analyticsMetrics = useMemo(() => {
     let totalSpend = 0;
     let reimbursableTotal = 0;
@@ -157,12 +183,11 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     };
   }, [ledgerList, selectedProjectFilter, selectedTimeFilter]);
 
-  // --- RUNTIME FILTERS CONTROLLER ---
   const filteredLedger = useMemo(() => {
     return ledgerList.filter(po => {
       if (selectedProjectFilter !== 'ALL' && po.project_code !== selectedProjectFilter) return false;
       if (selectedTimeFilter === '6_MONTHS' && !isWithinLast6Months(po.generated_at)) return false;
-
+      
       const matchesSearch = po.po_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
         po.project_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
         po.project_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -309,7 +334,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                 className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-1.5 text-xs text-slate-800 outline-none focus:border-[#2c2a57] shadow-3xs"
               />
             </div>
-
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
                 <Filter size={12} className="text-slate-400" />
@@ -318,7 +342,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   {uniqueProjectFilterOptions.map(code => <option key={code} value={code}>{code}</option>)}
                 </select>
               </div>
-
               <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
                 <Calendar size={12} className="text-slate-400" />
                 <span className="text-[11px] font-bold text-slate-500 uppercase">Duration:</span>
@@ -342,7 +365,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                     <th className="p-4 w-60">Vendor Communication Matrix</th>
                     <th className="p-4 w-36">Sign-off Trail</th>
                     <th className="p-4 text-right">Landed Cost</th>
-                    <th className="p-4 bg-slate-100/60 text-[#2c2a57] font-extrabold w-[450px]">Manual Invoice Logging (Purchase Scope)</th>
+                    <th className="p-4 bg-slate-100/60 text-[#2c2a57] font-extrabold w-[450px]">Vendor Invoice / File Logging</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
@@ -350,7 +373,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                     const isExpanded = !!expandedRows[po.po_number];
                     const isEditing = !!editingInvoices[po.po_number];
                     const form = invoiceForms[po.po_number] || { invoice_no: '', invoice_date: '', invoice_remark: '', invoice_duration: '' };
-
+                    
                     return (
                       <React.Fragment key={po.po_number}>
                         <tr className={`hover:bg-slate-50/40 transition-colors ${isExpanded ? 'bg-indigo-50/20' : ''}`}>
@@ -394,48 +417,65 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                           </td>
                           <td className="p-4 text-right font-mono font-black text-slate-900 text-sm pr-6 align-top">₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                           
+                          {/* ======================================================== */}
+                          {/* 🎯 UPDATED RIGHT COLUMN: FILE UPLOAD & INVOICE LOGGING */}
+                          {/* ======================================================== */}
                           <td className="p-3 bg-slate-50/40 border-l border-slate-200 align-top">
                             {isPurchaseExecutive && isHealthyFormActive(isEditing) ? (
-                              <div className="flex flex-wrap items-center gap-2 animate-in fade-in zoom-in duration-150">
-                                <input 
-                                  type="text" 
-                                  value={form.invoice_no} 
-                                  onChange={(e) => handleInputChange(po.po_number, 'invoice_no', e.target.value)} 
-                                  placeholder="Invoice No" 
-                                  className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] w-24 font-mono outline-none shadow-3xs"
-                                />
-                                <input 
-                                  type="text" 
-                                  value={form.invoice_date} 
-                                  onChange={(e) => handleInputChange(po.po_number, 'invoice_date', e.target.value)} 
-                                  placeholder="DD-MM-YYYY" 
-                                  className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] w-24 font-mono outline-none shadow-3xs"
-                                />
-                                <input 
-                                  type="text" 
-                                  value={form.invoice_duration} 
-                                  onChange={(e) => handleInputChange(po.po_number, 'invoice_duration', e.target.value)} 
-                                  placeholder="Duration (Opt)" 
-                                  className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] w-24 outline-none shadow-3xs"
-                                />
-                                <input 
-                                  type="text" 
-                                  value={form.invoice_remark} 
-                                  onChange={(e) => handleInputChange(po.po_number, 'invoice_remark', e.target.value)} 
-                                  placeholder="Remarks..." 
-                                  className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] flex-1 min-w-[100px] outline-none shadow-3xs"
-                                />
-                                <div className="flex space-x-1">
-                                  <button onClick={() => handleSaveInvoiceDetails(po.po_number)} className="p-1.5 bg-[#0b9c54] text-white rounded-md hover:bg-emerald-600 transition-colors shadow-3xs">
-                                    <Save size={13} />
-                                  </button>
-                                  <button onClick={() => toggleEditInvoice(po.po_number)} className="p-1.5 bg-slate-400 text-white rounded-md hover:bg-slate-500 transition-colors shadow-3xs">
-                                    <X size={13} />
-                                  </button>
+                              <div className="flex flex-col gap-2 animate-in fade-in zoom-in duration-150 border border-indigo-200 bg-white p-2 rounded-xl shadow-md">
+                                <div className="flex gap-2">
+                                  <input 
+                                    type="text" 
+                                    value={form.invoice_no} 
+                                    onChange={(e) => handleInputChange(po.po_number, 'invoice_no', e.target.value)} 
+                                    placeholder="Invoice No" 
+                                    className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] w-24 font-mono outline-none shadow-3xs"
+                                  />
+                                  <input 
+                                    type="text" 
+                                    value={form.invoice_date} 
+                                    onChange={(e) => handleInputChange(po.po_number, 'invoice_date', e.target.value)} 
+                                    placeholder="DD-MM-YYYY" 
+                                    className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] w-24 font-mono outline-none shadow-3xs"
+                                  />
+                                  <input 
+                                    type="text" 
+                                    value={form.invoice_duration} 
+                                    onChange={(e) => handleInputChange(po.po_number, 'invoice_duration', e.target.value)} 
+                                    placeholder="Duration" 
+                                    className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] w-24 outline-none shadow-3xs"
+                                  />
+                                </div>
+                                <div className="flex gap-2">
+                                  <input 
+                                    type="text" 
+                                    value={form.invoice_remark} 
+                                    onChange={(e) => handleInputChange(po.po_number, 'invoice_remark', e.target.value)} 
+                                    placeholder="Add notes / Advance % terms..." 
+                                    className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] flex-1 min-w-[100px] outline-none shadow-3xs"
+                                  />
+                                </div>
+                                
+                                {/* 🚀 NEW: File Upload Input */}
+                                <div className="flex items-center mt-1 border-t border-dashed border-slate-200 pt-2">
+                                  <input 
+                                    type="file" 
+                                    accept=".pdf,.png,.jpg,.jpeg"
+                                    onChange={(e) => handleFileChange(po.po_number, e)}
+                                    className="text-[10px] file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 flex-1 outline-none text-slate-500"
+                                  />
+                                  <div className="flex space-x-1 flex-shrink-0">
+                                    <button onClick={() => toggleEditInvoice(po.po_number)} className="p-1.5 bg-slate-300 text-white rounded-md hover:bg-slate-400 transition-colors shadow-3xs">
+                                      <X size={14} />
+                                    </button>
+                                    <button onClick={() => handleSaveInvoiceDetails(po.po_number)} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0b9c54] text-white font-bold rounded-md hover:bg-emerald-600 transition-colors shadow-3xs">
+                                      <UploadCloud size={14} /> Submit
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             ) : (
-                              <div className="flex justify-between items-start w-full">
+                              <div className="flex flex-col justify-between w-full h-full">
                                 <div className="grid grid-cols-2 gap-x-6 gap-y-1 w-full mr-2">
                                   <div className="text-[11px] text-slate-700">
                                     <span className="font-bold text-slate-400 mr-1 uppercase text-[9px]">Inv No:</span> 
@@ -443,26 +483,41 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   </div>
                                   <div className="text-[11px] text-slate-700">
                                     <span className="font-bold text-slate-400 mr-1 uppercase text-[9px]">Date:</span> 
-                                    {po.invoice_date ? <span className="font-mono">{po.invoice_date}</span> : <span className="italic text-slate-400 font-medium">Pending Entry</span>}
-                                  </div>
-                                  <div className="text-[11px] text-slate-700">
-                                    <span className="font-bold text-slate-400 mr-1 uppercase text-[9px]">Duration:</span> 
-                                    {po.invoice_duration ? <span className="font-medium text-slate-800">{po.invoice_duration}</span> : <span className="italic text-slate-400 font-medium">-</span>}
+                                    {po.invoice_date ? <span className="font-mono">{po.invoice_date}</span> : <span className="italic text-slate-400 font-medium">-</span>}
                                   </div>
                                   <div className="text-[11px] text-slate-700 truncate max-w-[180px]" title={po.invoice_remark}>
                                     <span className="font-bold text-slate-400 mr-1 uppercase text-[9px]">Remark:</span> 
                                     {po.invoice_remark ? po.invoice_remark : <span className="italic text-slate-400 font-medium">None</span>}
                                   </div>
+                                  
+                                  {isPurchaseExecutive && (
+                                    <div className="text-right">
+                                      <button 
+                                        onClick={() => toggleEditInvoice(po.po_number)} 
+                                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-slate-500 hover:text-indigo-600 bg-white border border-slate-200 rounded shadow-3xs hover:border-indigo-200 hover:bg-indigo-50 transition-all"
+                                      >
+                                        <Edit size={10} /> Edit / Upload
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
-                                
-                                {isPurchaseExecutive && (
-                                  <button 
-                                    onClick={() => toggleEditInvoice(po.po_number)} 
-                                    className="p-1.5 text-slate-400 hover:text-indigo-600 bg-white border border-slate-200 rounded-lg shadow-3xs hover:border-indigo-200 hover:bg-indigo-50 transition-all flex-shrink-0"
-                                  >
-                                    <Edit size={12} />
-                                  </button>
-                                )}
+
+                                {/* 🚀 NEW: File Attachment Display Row */}
+                                <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <Paperclip size={12} className="text-slate-400" />
+                                    <span className="font-bold text-slate-500 uppercase text-[9px]">Attachment:</span>
+                                    
+                                    {po.proforma_invoice_url ? (
+                                      <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 font-bold text-[10px] hover:underline flex items-center gap-1">
+                                        View Document
+                                      </a>
+                                    ) : (
+                                      <span className="text-rose-500/80 font-bold italic text-[10px] bg-rose-50 px-2 py-0.5 rounded">Pending Upload</span>
+                                    )}
+                                  </div>
+                                </div>
+
                               </div>
                             )}
                           </td>
