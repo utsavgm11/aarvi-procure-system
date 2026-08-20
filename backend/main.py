@@ -20,20 +20,28 @@ import models
 # 🎯 NEW: Import the email service
 from email_service import send_workflow_email
 
+# 🎯 NEW: Import Cloudinary
+import cloudinary
+import cloudinary.uploader
+from cloudinary.utils import cloudinary_url
+
 # 1. System Logging Configurations
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AarviProcure")
 
 app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.1.0")
 
-# Create and Mount Storage Directories
+# 🎯 NEW: Configure Cloudinary securely using Render Environment Variables
+cloudinary.config(
+    cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.getenv("CLOUDINARY_API_KEY"),
+    api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+    secure=True
+)
+
+# Keep local storage ONLY for temporary processing (e.g., Quotations/PO docs)
 UPLOAD_DIR = "storage/quotation_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# 🎯 NEW: Directory for Proforma Invoices
-INVOICE_DIR = "storage/proforma_invoices"
-os.makedirs(INVOICE_DIR, exist_ok=True)
-
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
 # 2. Complete CORS Cross-Origin Resource Sharing Rules
@@ -1127,7 +1135,7 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
         })
     return response
 
-# 🚀 UPDATED: Now uses Form() and File() to accept physical PDF attachments
+# 🚀 UPDATED: Uploads the physical PDF attachment directly to Cloudinary
 @app.put("/api/purchase-orders/{po_number}/invoice")
 async def update_po_invoice_details(
     po_number: str, 
@@ -1147,20 +1155,29 @@ async def update_po_invoice_details(
     po.invoice_remark = invoice_remark
     po.invoice_duration = invoice_duration
     
-    # 🎯 NEW: If a file is uploaded, save it to disk and route ticket to PM
+    # 🎯 CLOUDINARY UPLOAD LOGIC
     if file:
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
             raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
             
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"PI_{po_number}_{timestamp}{ext}"
-        filepath = os.path.join(INVOICE_DIR, filename)
+        filename = f"PI_{po_number}_{timestamp}" # Cloudinary doesn't need the extension in the public_id
         
-        with open(filepath, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        try:
+            # Upload directly to Cloudinary from memory
+            upload_result = cloudinary.uploader.upload(
+                file.file, 
+                public_id=filename,
+                folder="aarvi_invoices",
+                resource_type="auto" # Important: "auto" allows PDFs and raw files
+            )
+            # Get the permanent, safe cloud URL
+            po.proforma_invoice_url = upload_result.get("secure_url")
             
-        po.proforma_invoice_url = f"/storage/proforma_invoices/{filename}"
+        except Exception as e:
+            logger.error(f"Cloudinary Upload Failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to upload document to cloud storage.")
         
         # Route to Project Manager for PI Approval
         ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
@@ -1170,11 +1187,11 @@ async def update_po_invoice_details(
                 ticket_number=ticket.ticket_number,
                 user_name="Purchase Executive",
                 action_taken="Proforma Invoice Uploaded",
-                remarks=f"Vendor PI {invoice_no} uploaded and routed to Project Manager for financial clearance."
+                remarks=f"Vendor PI {invoice_no} securely uploaded to cloud and routed to Project Manager for financial clearance."
             ))
     
     db.commit()
-    return {"message": "Invoice logging verified and saved successfully."}
+    return {"message": "Invoice logging verified, stored in cloud, and saved successfully."}
 
 # -------------------------------------------------------------------
 # 🏢 VENDOR MASTER DIRECTORY LAYER
