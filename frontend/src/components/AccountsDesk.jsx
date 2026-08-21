@@ -17,6 +17,9 @@ export default function AccountsDesk({ currentUser }) {
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' or 'history'
   const [selectedPo, setSelectedPo] = useState(null);
 
+  // 🎯 NEW: State for Inline Document Preview Modal
+  const [previewDoc, setPreviewDoc] = useState(null);
+
   // Form States
   const [utrNo, setUtrNo] = useState('');
   const [paymentDate, setPaymentDate] = useState('');
@@ -60,6 +63,17 @@ export default function AccountsDesk({ currentUser }) {
     return grandTotal;
   };
 
+  // 🎯 HELPER: Handles Opening Documents in the Smooth Modal Viewer
+  const handlePreview = (url, title) => {
+    if (!url) return;
+    let fullUrl = url;
+    // Fix relative system URLs to prevent routing/login issues
+    if (url.startsWith('/')) {
+      fullUrl = `https://aarvi-procure-system.onrender.com${url}`;
+    }
+    setPreviewDoc({ url: fullUrl, title });
+  };
+
   const openDisbursementModal = (po) => {
     setSelectedPo(po);
     setUtrNo(po.utr_no || '');
@@ -87,7 +101,7 @@ export default function AccountsDesk({ currentUser }) {
     formData.append('utr_no', utrNo);
     formData.append('payment_date', paymentDate);
     formData.append('payment_remark', paymentRemark);
-    formData.append('disbursed_amount', disbursedAmount); // 🎯 Send disbursed amount to backend
+    formData.append('disbursed_amount', disbursedAmount);
     if (paymentFile) {
       formData.append('file', paymentFile);
     }
@@ -101,7 +115,7 @@ export default function AccountsDesk({ currentUser }) {
       setTimeout(() => {
         setSelectedPo(null);
         fetchAccountsOrders();
-        setActiveTab('history'); // Switch to history tab to show the completed item
+        setActiveTab('history');
       }, 1500);
     } catch (err) {
       setAlert({ type: 'error', message: "Failed to submit payment disbursement details." });
@@ -132,6 +146,45 @@ export default function AccountsDesk({ currentUser }) {
   return (
     <div className="space-y-6 relative pb-10">
       
+      {/* 🎯 SMOOTH INLINE DOCUMENT PREVIEW MODAL */}
+      {previewDoc && (
+        <div 
+          className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
+          onClick={() => setPreviewDoc(null)} // Click outside to close
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden relative"
+            onClick={(e) => e.stopPropagation()} // Prevent clicks inside from closing
+          >
+            {/* Modal Header */}
+            <div className="bg-[#2c2a57] p-4 text-white flex justify-between items-center shrink-0 z-10">
+              <div className="flex items-center gap-2">
+                <FileText size={18} className="text-indigo-300" />
+                <h3 className="font-extrabold text-sm uppercase tracking-wider">{previewDoc.title}</h3>
+              </div>
+              <button onClick={() => setPreviewDoc(null)} className="text-slate-300 hover:text-white bg-white/10 p-1.5 rounded-full transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            
+            {/* Modal Body (Scrollable Iframe) */}
+            <div className="flex-1 bg-slate-100 relative overflow-auto custom-scrollbar">
+              {previewDoc.url.match(/\.(jpeg|jpg|gif|png)$/i) != null ? (
+                <div className="min-h-full flex items-center justify-center p-4">
+                  <img src={previewDoc.url} alt={previewDoc.title} className="max-w-full h-auto rounded-lg shadow-sm" />
+                </div>
+              ) : (
+                <iframe 
+                  src={previewDoc.url} 
+                  className="w-full h-full border-0"
+                  title="Document Preview"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* HEADER SECTION */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
@@ -246,26 +299,35 @@ export default function AccountsDesk({ currentUser }) {
                   <span className="text-[10px] font-bold text-slate-500 uppercase block">Audit Vault:</span>
                   <div className="flex flex-col gap-1.5">
                     {poDocUrl && (
-                      <a href={poDocUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-1.5 rounded hover:bg-indigo-100 transition-colors flex items-center justify-between">
+                      <button 
+                        onClick={() => handlePreview(poDocUrl, po.signed_po_url ? "Signed PO Document" : "System Generated PO")} 
+                        className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-1.5 rounded hover:bg-indigo-100 transition-colors flex items-center justify-between"
+                      >
                         <span className="flex items-center gap-1">{po.signed_po_url ? "✍️ Signed PO" : "📄 System PO"}</span>
                         <ExternalLink size={10} />
-                      </a>
+                      </button>
                     )}
                     {po.proforma_invoice_url ? (
-                      <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1.5 rounded hover:bg-amber-100 transition-colors flex items-center justify-between">
+                      <button 
+                        onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)}
+                        className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1.5 rounded hover:bg-amber-100 transition-colors flex items-center justify-between"
+                      >
                         <span className="flex items-center gap-1">📄 PI ({po.invoice_no || 'Pending'})</span>
                         <ExternalLink size={10} />
-                      </a>
+                      </button>
                     ) : (
-                      <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded">No PI Attached</span>
+                      <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded w-full block">No PI Attached</span>
                     )}
                     {po.tax_invoice_url ? (
-                      <a href={po.tax_invoice_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1.5 rounded hover:bg-emerald-100 transition-colors flex items-center justify-between">
+                      <button 
+                        onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)}
+                        className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1.5 rounded hover:bg-emerald-100 transition-colors flex items-center justify-between"
+                      >
                         <span className="flex items-center gap-1">🧾 Tax Inv ({po.tax_invoice_no || 'Pending'})</span>
                         <ExternalLink size={10} />
-                      </a>
+                      </button>
                     ) : (
-                      <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded">Tax Inv Pending</span>
+                      <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded w-full block">Tax Inv Pending</span>
                     )}
                   </div>
                 </div>
@@ -280,9 +342,12 @@ export default function AccountsDesk({ currentUser }) {
                       <span className="text-[11px] font-bold text-emerald-700 block">UTR: {po.utr_no}</span>
                       <span className="text-[9px] font-bold text-emerald-600 block">Disbursed: ₹{(po.disbursed_amount || po.grand_total).toLocaleString('en-IN')}</span>
                       {po.payment_advice_url && (
-                        <a href={po.payment_advice_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 font-bold text-[10px] inline-block hover:underline mt-1">
+                        <button 
+                          onClick={() => handlePreview(po.payment_advice_url, `Payment Receipt - ${po.utr_no}`)}
+                          className="text-indigo-600 font-bold text-[10px] inline-block hover:underline mt-1"
+                        >
                           📄 View Payment Receipt
-                        </a>
+                        </button>
                       )}
                     </div>
                   )}
@@ -322,14 +387,20 @@ export default function AccountsDesk({ currentUser }) {
 
                   return (
                     <tr key={po.po_number} className="hover:bg-slate-50/50 transition-colors">
+                      
+                      {/* PO / Ticket Code */}
                       <td className="p-4 align-top">
                         <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
                         <div className="text-[10px] text-slate-400 font-mono mt-0.5">{po.ticket_number}</div>
                       </td>
+                      
+                      {/* Project Scope */}
                       <td className="p-4 align-top">
                         <div className="font-bold text-slate-800">{po.project_code}</div>
                         <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
                       </td>
+                      
+                      {/* Vendor Details */}
                       <td className="p-4 align-top">
                         <div className="font-extrabold text-slate-800 uppercase line-clamp-1" title={po.vendor_name}>{po.vendor_name}</div>
                         <div className="text-[10px] font-mono text-slate-500 truncate">{po.vendor_contact} | {po.vendor_email}</div>
@@ -356,51 +427,45 @@ export default function AccountsDesk({ currentUser }) {
 
                         {/* Document Badges */}
                         <div className="flex flex-col gap-1.5">
-                          {/* 1. Signed PO / System PO */}
-                          <a 
-                            href={poDocUrl} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs"
+                          {/* 1. Signed PO (or System PO if missing) */}
+                          <button 
+                            onClick={() => handlePreview(poDocUrl, po.signed_po_url ? "Signed PO Document" : "System Generated PO")} 
+                            className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full"
                           >
                             <span className="font-bold text-slate-700 flex items-center gap-1">
                               {po.signed_po_url ? "✍️ Signed PO" : "📄 System PO"}
                             </span>
-                            <ExternalLink size={10} className="text-indigo-400" />
-                          </a>
+                            <ExternalLink size={10} className="text-indigo-400 flex-shrink-0" />
+                          </button>
 
                           {/* 2. Proforma Invoice (PI) */}
                           {po.proforma_invoice_url ? (
-                            <a 
-                              href={po.proforma_invoice_url} 
-                              target="_blank" 
-                              rel="noopener noreferrer" 
-                              className="flex items-center justify-between bg-amber-50/60 border border-amber-200 px-2 py-1 rounded text-[10px] hover:border-amber-400 transition-colors shadow-3xs"
+                            <button 
+                              onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)}
+                              className="flex items-center justify-between bg-amber-50/60 border border-amber-200 px-2 py-1 rounded text-[10px] hover:border-amber-400 transition-colors shadow-3xs w-full"
                             >
                               <span className="font-bold text-amber-800 flex items-center gap-1 truncate max-w-[130px]">
                                 📄 PI #{po.invoice_no}
                               </span>
-                              <ExternalLink size={10} className="text-amber-500" />
-                            </a>
+                              <ExternalLink size={10} className="text-amber-500 flex-shrink-0" />
+                            </button>
                           ) : (
-                            <span className="text-[9px] italic text-slate-400 pl-1">No PI Attached</span>
+                            <span className="text-[9px] italic text-slate-400 pl-1 block">No PI Attached</span>
                           )}
 
                           {/* 3. Final Tax Invoice (TI) */}
                           {po.tax_invoice_url ? (
-                            <a 
-                              href={po.tax_invoice_url} 
-                              target="_blank" 
-                              rel="noopener noreferrer" 
-                              className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 px-2 py-1 rounded text-[10px] hover:border-emerald-400 transition-colors shadow-3xs"
+                            <button 
+                              onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)}
+                              className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 px-2 py-1 rounded text-[10px] hover:border-emerald-400 transition-colors shadow-3xs w-full"
                             >
                               <span className="font-bold text-emerald-800 flex items-center gap-1 truncate max-w-[130px]">
                                 🧾 Tax Inv #{po.tax_invoice_no}
                               </span>
-                              <ExternalLink size={10} className="text-emerald-500" />
-                            </a>
+                              <ExternalLink size={10} className="text-emerald-500 flex-shrink-0" />
+                            </button>
                           ) : (
-                            <span className="text-[9px] italic text-slate-400 pl-1">Tax Inv Pending</span>
+                            <span className="text-[9px] italic text-slate-400 pl-1 block">Tax Inv Pending</span>
                           )}
                         </div>
                       </td>
@@ -429,14 +494,12 @@ export default function AccountsDesk({ currentUser }) {
                               Disbursed: ₹{(po.disbursed_amount || po.grand_total).toLocaleString('en-IN')}
                             </span>
                             {po.payment_advice_url && (
-                              <a 
-                                href={po.payment_advice_url} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
+                              <button 
+                                onClick={() => handlePreview(po.payment_advice_url, `Payment Receipt - ${po.utr_no}`)} 
                                 className="text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded hover:text-indigo-800 hover:bg-indigo-100 font-bold text-[10px] flex items-center gap-1 justify-center transition-colors w-full mt-1"
                               >
                                 <Download size={10} /> Receipt PDF
-                              </a>
+                              </button>
                             )}
                           </div>
                         )}
