@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
   FileCheck, Search, ChevronDown, ChevronUp, Landmark, Layers3, 
   Save, Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
-  UploadCloud, Paperclip,Trash2 
+  UploadCloud, Paperclip, Trash2, FileText, CheckCircle2 
 } from 'lucide-react';
 import { Card, Button } from './ui/SharedUI';
 
@@ -22,9 +22,12 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [selectedProjectFilter, setSelectedProjectFilter] = useState('ALL');
   const [selectedTimeFilter, setSelectedTimeFilter] = useState('ALL'); 
 
-  // Form states for manual entry parameters
+  // Form states for PI and Tax Invoice
   const [invoiceForms, setInvoiceForms] = useState({});
-  const [editingInvoices, setEditingInvoices] = useState({});
+  const [taxInvoiceForms, setTaxInvoiceForms] = useState({});
+  const [editingInvoices, setEditingInvoices] = useState({}); // Controls PI edit form
+  const [editingTaxInvoices, setEditingTaxInvoices] = useState({}); // Controls Tax Invoice edit form
+  
   const isPurchaseExecutive = currentUser?.role === 'Purchase Executive';
 
   const fetchLedgerPOs = useCallback(async () => {
@@ -34,16 +37,26 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       setLedgerList(res.data);
       
       const initialForms = {};
+      const initialTaxForms = {};
+      
       res.data.forEach(po => {
         initialForms[po.po_number] = {
           invoice_no: po.invoice_no || '',
           invoice_date: po.invoice_date || '',
           invoice_remark: po.invoice_remark || '',
-          invoice_duration: po.invoice_duration || '',
-          file: null // Added for file uploads
+          payment_terms: po.invoice_duration || '', // 🎯 Mapped duration to Payment Terms
+          file: null
+        };
+        
+        initialTaxForms[po.po_number] = {
+          tax_invoice_no: po.tax_invoice_no || '',
+          tax_invoice_date: po.tax_invoice_date || '',
+          file: null
         };
       });
+      
       setInvoiceForms(initialForms);
+      setTaxInvoiceForms(initialTaxForms);
     } catch (err) {
       console.error("Error fetching Master PO Ledger", err);
     } finally {
@@ -51,113 +64,104 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }
   }, []);
 
-  // Defer state invocation via macro-task to prevent cascading render fault lines
   useEffect(() => {
     let isMounted = true;
     const timer = setTimeout(() => {
-      if (isMounted) {
-        fetchLedgerPOs();
-      }
+      if (isMounted) fetchLedgerPOs();
     }, 0);
-    
-    return () => { 
-      isMounted = false;
-      clearTimeout(timer);
-    };
+    return () => { isMounted = false; clearTimeout(timer); };
   }, [fetchLedgerPOs]);
 
+  // --- PI Form Handlers ---
   const handleInputChange = (poNumber, field, value) => {
-    setInvoiceForms(prev => ({
-      ...prev,
-      [poNumber]: { ...prev[poNumber], [field]: value }
-    }));
+    setInvoiceForms(prev => ({ ...prev, [poNumber]: { ...prev[poNumber], [field]: value } }));
   };
-
-  // Handle physical file attachment
   const handleFileChange = (poNumber, event) => {
     const file = event.target.files[0];
-    setInvoiceForms(prev => ({
-      ...prev,
-      [poNumber]: { ...prev[poNumber], file: file }
-    }));
+    setInvoiceForms(prev => ({ ...prev, [poNumber]: { ...prev[poNumber], file: file } }));
   };
-
   const toggleEditInvoice = (poNumber) => {
     setEditingInvoices(prev => ({ ...prev, [poNumber]: !prev[poNumber] }));
+    if (editingTaxInvoices[poNumber]) setEditingTaxInvoices(prev => ({...prev, [poNumber]: false})); // Close the other
   };
 
-  // 🚀 UPDATED API CALL: Uses FormData to handle file uploads + text data
+  // --- Tax Invoice Form Handlers ---
+  const handleTaxInputChange = (poNumber, field, value) => {
+    setTaxInvoiceForms(prev => ({ ...prev, [poNumber]: { ...prev[poNumber], [field]: value } }));
+  };
+  const handleTaxFileChange = (poNumber, event) => {
+    const file = event.target.files[0];
+    setTaxInvoiceForms(prev => ({ ...prev, [poNumber]: { ...prev[poNumber], file: file } }));
+  };
+  const toggleEditTaxInvoice = (poNumber) => {
+    setEditingTaxInvoices(prev => ({ ...prev, [poNumber]: !prev[poNumber] }));
+    if (editingInvoices[poNumber]) setEditingInvoices(prev => ({...prev, [poNumber]: false})); // Close the other
+  };
+
+  // --- Submit API Calls ---
   const handleSaveInvoiceDetails = async (poNumber) => {
     const formState = invoiceForms[poNumber];
-    
-    // Package data as FormData so the backend can accept the file
     const formData = new FormData();
     formData.append('invoice_no', formState.invoice_no);
     formData.append('invoice_date', formState.invoice_date);
-    formData.append('invoice_duration', formState.invoice_duration);
+    formData.append('invoice_duration', formState.payment_terms); // 🎯 Seamlessly sends as duration to backend
     formData.append('invoice_remark', formState.invoice_remark);
-    
-    if (formState.file) {
-      formData.append('file', formState.file);
-    }
+    if (formState.file) formData.append('file', formState.file);
 
     try {
-      await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-      
+      await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice`, formData, { headers: { 'Content-Type': 'multipart/form-data'} });
       setEditingInvoices(prev => ({ ...prev, [poNumber]: false }));
-      fetchLedgerPOs(); // Refresh grid to show new document
-    } catch (err) {
-      alert("Failed to commit manual invoice data and attachment to the backend engine.");
-    }
+      fetchLedgerPOs(); 
+    } catch (err) { alert("Failed to commit manual PI data and attachment to the backend engine."); }
   };
 
-  // 🚀 NEW: Handles deleting the attached PI document
-const handleDeleteInvoiceFile = async (poNumber) => {
-  if (!window.confirm("Are you sure you want to permanently delete this attached Proforma Invoice from cloud storage?")) {
-    return;
-  }
-  
-  try {
-    await axios.delete(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice-file`);
-    fetchLedgerPOs(); // Refresh grid
-  } catch (err) {
-    alert("Failed to delete attachment from server.");
-  }
-};
+  const handleSaveTaxInvoiceDetails = async (poNumber) => {
+    const formState = taxInvoiceForms[poNumber];
+    const formData = new FormData();
+    formData.append('tax_invoice_no', formState.tax_invoice_no);
+    formData.append('tax_invoice_date', formState.tax_invoice_date);
+    if (formState.file) formData.append('file', formState.file);
+
+    try {
+      await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/tax-invoice`, formData, { headers: { 'Content-Type': 'multipart/form-data'} });
+      setEditingTaxInvoices(prev => ({ ...prev, [poNumber]: false }));
+      fetchLedgerPOs(); 
+    } catch (err) { alert("Failed to commit final Tax Invoice data to the backend engine."); }
+  };
+
+  // --- Delete API Calls ---
+  const handleDeleteInvoiceFile = async (poNumber) => {
+    if (!window.confirm("Are you sure you want to permanently delete this attached Proforma Invoice?")) return;
+    try {
+      await axios.delete(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice-file`);
+      fetchLedgerPOs();
+    } catch (err) { alert("Failed to delete attachment from server."); }
+  };
 
   const openPoDocumentSection = async (po) => {
     setSelectedPoForView(po);
     try {
       const res = await axios.get(`${API_BASE_URL}/requisitions/${po.ticket_number}/quotations`);
       setPoItems(res.data.filter(q => q.is_selected === true));
-    } catch (err) {
-      console.error("Error generating PO template rows injection", err);
-    }
+    } catch (err) { console.error("Error generating PO template rows injection", err); }
   };
 
+  // --- Metrics & Search Logic ---
   const isWithinLast6Months = (dateStr) => {
     if (!dateStr || dateStr === 'N/A') return false;
     try {
       const cleanStr = dateStr.split(' ')[0];
       const parts = cleanStr.split('-');
       const day = parseInt(parts[0], 10);
-      
       const monthsMap = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
       const month = monthsMap[parts[1].toLowerCase()];
       const year = parseInt(parts[2], 10);
       
       const poDate = new Date(year, month, day);
-      const comparisonLimit = new Date(2026, 6, 9); 
+      const comparisonLimit = new Date(); 
       comparisonLimit.setMonth(comparisonLimit.getMonth() - 6);
-      
       return poDate >= comparisonLimit;
-    } catch(e) {
-      return true; 
-    }
+    } catch(e) { return true; }
   };
 
   const analyticsMetrics = useMemo(() => {
@@ -187,33 +191,21 @@ const handleDeleteInvoiceFile = async (poNumber) => {
     const reimbursablePercentage = totalSpend > 0 ? (reimbursableTotal / totalSpend) * 100 : 0;
     const nonReimbursablePercentage = totalSpend > 0 ? (nonReimbursableTotal / totalSpend) * 100 : 0;
 
-    return {
-      totalSpend,
-      reimbursableTotal,
-      nonReimbursableTotal,
-      reimbursablePercentage,
-      nonReimbursablePercentage,
-      uniqueSitesCount: projectCodes.size
-    };
+    return { totalSpend, reimbursableTotal, nonReimbursableTotal, reimbursablePercentage, nonReimbursablePercentage, uniqueSitesCount: projectCodes.size };
   }, [ledgerList, selectedProjectFilter, selectedTimeFilter]);
 
   const filteredLedger = useMemo(() => {
     return ledgerList.filter(po => {
       if (selectedProjectFilter !== 'ALL' && po.project_code !== selectedProjectFilter) return false;
       if (selectedTimeFilter === '6_MONTHS' && !isWithinLast6Months(po.generated_at)) return false;
-      
-      const matchesSearch = po.po_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      return po.po_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
         po.project_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
         po.project_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         po.vendor_name.toLowerCase().includes(searchQuery.toLowerCase());
-        
-      return matchesSearch;
     });
   }, [ledgerList, selectedProjectFilter, selectedTimeFilter, searchQuery]);
 
-  const uniqueProjectFilterOptions = useMemo(() => {
-    return ['ALL', ...new Set(ledgerList.map(po => po.project_code))];
-  }, [ledgerList]);
+  const uniqueProjectFilterOptions = useMemo(() => ['ALL', ...new Set(ledgerList.map(po => po.project_code))], [ledgerList]);
 
   return (
     <div className="space-y-6 relative">
@@ -369,205 +361,167 @@ const handleDeleteInvoiceFile = async (poNumber) => {
 
           <Card className="overflow-hidden border-slate-200 shadow-sm bg-white">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[1600px]">
+              <table className="w-full text-left border-collapse min-w-[1400px]">
                 <thead>
                   <tr className="text-[10px] uppercase font-black tracking-wider text-slate-400 bg-slate-50 border-b border-slate-200">
                     <th className="p-4 w-12 text-center">Manifest</th>
                     <th className="p-4 w-44">Requisition Context</th>
-                    <th className="p-4 w-40">PO Code ID</th>
                     <th className="p-4 w-48">Project Scope Context</th>
-                    <th className="p-4 w-60">Vendor Communication Matrix</th>
-                    <th className="p-4 w-36">Sign-off Trail</th>
-                    <th className="p-4 text-right">Landed Cost</th>
-                    <th className="p-4 bg-slate-100/60 text-[#2c2a57] font-extrabold w-[450px]">Vendor Invoice / File Logging</th>
+                    <th className="p-4 w-52">Vendor Matrix</th>
+                    <th className="p-4 text-right w-32">Landed Cost</th>
+                    <th className="p-4 bg-slate-100/60 text-[#2c2a57] font-extrabold w-[380px]">3-Way Document Vault</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
                   {filteredLedger.map((po) => {
                     const isExpanded = !!expandedRows[po.po_number];
-                    const isEditing = !!editingInvoices[po.po_number];
-                    const form = invoiceForms[po.po_number] || { invoice_no: '', invoice_date: '', invoice_remark: '', invoice_duration: '' };
+                    const isEditingPI = !!editingInvoices[po.po_number];
+                    const isEditingTax = !!editingTaxInvoices[po.po_number];
+                    const piForm = invoiceForms[po.po_number] || {};
+                    const taxForm = taxInvoiceForms[po.po_number] || {};
                     
                     return (
                       <React.Fragment key={po.po_number}>
                         <tr className={`hover:bg-slate-50/40 transition-colors ${isExpanded ? 'bg-indigo-50/20' : ''}`}>
+                          
+                          {/* Col 1: Manifest Expand */}
                           <td className="p-4 text-center align-top">
                             <button onClick={() => setExpandedRows(prev => ({ ...prev, [po.po_number]: !prev[po.po_number] }))} className="text-slate-400 p-1 border rounded bg-white shadow-3xs">
                               {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                             </button>
                           </td>
+                          
+                          {/* Col 2: Context */}
                           <td className="p-4 space-y-1 align-top">
-                            <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-mono"><Calendar size={10} className="text-[#0b9c54]" /> <span>Req Raised: <strong>{po.requisition_date}</strong></span></div>
-                            <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-mono"><Clock size={10} className="text-indigo-500" /> <span>PO Sealed: <strong>{po.generated_at}</strong></span></div>
+                            <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
+                            <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-mono mt-1"><Calendar size={10} className="text-[#0b9c54]" /> <span>PO Sealed: <strong>{po.generated_at}</strong></span></div>
                           </td>
-                          <td className="p-4 align-top">
-                            <div className="font-mono font-black text-[#2c2a57]">{po.po_number}</div>
-                            <button 
-                              onClick={() => openPoDocumentSection(po)} 
-                              className="mt-2 flex items-center space-x-1.5 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors border border-indigo-100 shadow-3xs"
-                            >
-                              <Eye size={12} /> <span>Preview Full PO</span>
-                            </button>
-                          </td>
+                          
+                          {/* Col 3: Project Scope */}
                           <td className="p-4 space-y-1 align-top">
                             <div><strong className="text-slate-900">{po.project_code}</strong></div>
                             <div className="text-[10px] text-slate-500 truncate w-40">{po.project_name}</div>
-                            <div className="text-[10px] bg-indigo-50/60 border border-indigo-100/50 rounded text-slate-600 px-1.5 py-0.5 w-max font-medium mt-1"><strong>Purpose:</strong> {po.purpose}</div>
+                            <div className={`mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded w-max uppercase tracking-wider ${po.status === 'Dispatched' || po.status.includes('Delivered') ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                              {po.status}
+                            </div>
                           </td>
+
+                          {/* Col 4: Vendor */}
                           <td className="p-4 space-y-0.5 leading-tight align-top">
-                            <div className="font-extrabold text-slate-800 uppercase">{po.vendor_name}</div>
-                            <div className="text-[10px] text-slate-400 truncate w-60">{po.vendor_address}</div>
-                            <div className="text-[10px] font-mono text-slate-500">Contact: {po.vendor_contact} | {po.vendor_email}</div>
+                            <div className="font-extrabold text-slate-800 uppercase line-clamp-2 pr-2">{po.vendor_name}</div>
                           </td>
-                          <td className="p-4 space-y-1 align-top">
-                            <div className="flex flex-col">
-                              <span className="text-[9px] font-bold text-slate-400 uppercase">Site Manager</span>
-                              <span className="text-[11px] font-semibold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded w-max">{po.site_manager}</span>
-                            </div>
-                            <div className="flex flex-col mt-1">
-                              <span className="text-[9px] font-bold text-indigo-400 uppercase">Project Manager</span>
-                              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded w-max">{po.project_manager}</span>
-                            </div>
-                          </td>
-                          <td className="p-4 text-right font-mono font-black text-slate-900 text-sm pr-6 align-top">₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                           
-                          {/* ======================================================== */}
-                          {/* 🎯 UPDATED RIGHT COLUMN: FILE UPLOAD & INVOICE LOGGING */}
-                          {/* ======================================================== */}
+                          {/* Col 5: Total */}
+                          <td className="p-4 text-right font-mono font-black text-slate-900 text-sm pr-6 align-top">
+                            ₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </td>
+                          
+                          {/* Col 6: 🎯 3-WAY DOCUMENT VAULT & UPLOADER */}
                           <td className="p-3 bg-slate-50/40 border-l border-slate-200 align-top">
-                            {isPurchaseExecutive && isHealthyFormActive(isEditing) ? (
-                              <div className="flex flex-col gap-2 animate-in fade-in zoom-in duration-150 border border-indigo-200 bg-white p-2.5 rounded-xl shadow-md">
-                                <div className="flex gap-2">
-                                  <input 
-                                    type="text" 
-                                    value={form.invoice_no} 
-                                    onChange={(e) => handleInputChange(po.po_number, 'invoice_no', e.target.value)} 
-                                    placeholder="Invoice No" 
-                                    className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] w-24 font-mono outline-none shadow-3xs"
-                                  />
-                                  <input 
-                                    type="text" 
-                                    value={form.invoice_date} 
-                                    onChange={(e) => handleInputChange(po.po_number, 'invoice_date', e.target.value)} 
-                                    placeholder="DD-MM-YYYY" 
-                                    className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] w-24 font-mono outline-none shadow-3xs"
-                                  />
-                                  <input 
-                                    type="text" 
-                                    value={form.invoice_duration} 
-                                    onChange={(e) => handleInputChange(po.po_number, 'invoice_duration', e.target.value)} 
-                                    placeholder="Duration" 
-                                    className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] w-24 outline-none shadow-3xs"
-                                  />
-                                </div>
-                                <div className="flex gap-2">
-                                  <input 
-                                    type="text" 
-                                    value={form.invoice_remark} 
-                                    onChange={(e) => handleInputChange(po.po_number, 'invoice_remark', e.target.value)} 
-                                    placeholder="Add notes / Advance % terms..." 
-                                    className="bg-white border border-indigo-300 focus:ring-1 focus:ring-indigo-500 rounded-md px-2 py-1.5 text-[11px] flex-1 min-w-[100px] outline-none shadow-3xs"
-                                  />
-                                </div>
-                                
-                                {/* 🚀 NEW: Enhanced File Upload UI (Shows Selected Filename) */}
-                                <div className="flex items-center justify-between mt-1 border-t border-dashed border-slate-200 pt-2.5">
-                                  <div className="flex items-center gap-2 overflow-hidden">
-                                    <label className="cursor-pointer flex-shrink-0 px-3 py-1.5 bg-indigo-50 text-indigo-700 font-bold text-[10px] rounded-md border border-indigo-200 hover:bg-indigo-100 transition-colors shadow-3xs">
-                                      <input 
-                                        type="file" 
-                                        accept=".pdf,.png,.jpg,.jpeg"
-                                        onChange={(e) => handleFileChange(po.po_number, e)}
-                                        className="hidden"
-                                      />
-                                      <UploadCloud size={12} className="inline mr-1" /> {form.file ? "Change File" : "Attach PI"}
-                                    </label>
-                                    
-                                    {/* Shows the name of the file they just picked BEFORE submitting */}
-                                    {form.file ? (
-                                      <span className="text-[10px] font-bold text-emerald-600 truncate max-w-[120px]" title={form.file.name}>
-                                        📄 {form.file.name}
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] italic text-slate-400">No file selected</span>
-                                    )}
-                                  </div>
-                                  
-                                  <div className="flex space-x-1.5 flex-shrink-0 ml-2">
-                                    <button onClick={() => toggleEditInvoice(po.po_number)} className="p-1.5 bg-slate-300 text-white rounded-md hover:bg-slate-400 transition-colors shadow-3xs">
-                                      <X size={14} />
-                                    </button>
-                                    <button onClick={() => handleSaveInvoiceDetails(po.po_number)} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0b9c54] text-white font-bold text-[10px] rounded-md hover:bg-emerald-600 transition-colors shadow-3xs">
-                                      Submit
-                                    </button>
-                                  </div>
-                                </div>
+                            
+                            <div className="flex flex-col gap-2 relative">
+                              
+                              {/* DOC 1: SYSTEM PO (Always Present) */}
+                              <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs hover:border-[#2c2a57] transition-all">
+                                <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#2c2a57]"/> System PO Document</span>
+                                <button onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-2 py-0.5 bg-indigo-50 rounded">📄 View PO</button>
                               </div>
-                            ) : (
-                              <div className="flex flex-col justify-between w-full h-full">
-                                <div className="grid grid-cols-2 gap-x-6 gap-y-1 w-full mr-2">
-                                  <div className="text-[11px] text-slate-700">
-                                    <span className="font-bold text-slate-400 mr-1 uppercase text-[9px]">Inv No:</span> 
-                                    {po.invoice_no ? <span className="font-mono font-bold text-slate-800">{po.invoice_no}</span> : <span className="italic text-slate-400 font-medium">Pending Entry</span>}
-                                  </div>
-                                  <div className="text-[11px] text-slate-700">
-                                    <span className="font-bold text-slate-400 mr-1 uppercase text-[9px]">Date:</span> 
-                                    {po.invoice_date ? <span className="font-mono">{po.invoice_date}</span> : <span className="italic text-slate-400 font-medium">-</span>}
-                                  </div>
-                                  <div className="text-[11px] text-slate-700 truncate max-w-[180px]" title={po.invoice_remark}>
-                                    <span className="font-bold text-slate-400 mr-1 uppercase text-[9px]">Remark:</span> 
-                                    {po.invoice_remark ? po.invoice_remark : <span className="italic text-slate-400 font-medium">None</span>}
+
+                              {/* DOC 2: PROFORMA INVOICE (Advance Payment) */}
+                              {isEditingPI && isPurchaseExecutive ? (
+                                // 🎯 UPDATED PI UPLOAD FORM (NO NOTES)
+                                <div className="border border-amber-300 bg-amber-50/30 p-2.5 rounded-xl shadow-md animate-in fade-in space-y-2 z-10">
+                                  <div className="flex justify-between items-center mb-1">
+                                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-600">Upload Proforma (PI)</span>
+                                    <button onClick={() => toggleEditInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
                                   </div>
                                   
-                                  {isPurchaseExecutive && (
-                                    <div className="text-right">
-                                      <button 
-                                        onClick={() => toggleEditInvoice(po.po_number)} 
-                                        className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-slate-500 hover:text-indigo-600 bg-white border border-slate-200 rounded shadow-3xs hover:border-indigo-200 hover:bg-indigo-50 transition-all"
-                                      >
-                                        <Edit size={10} /> Edit / Upload
-                                      </button>
+                                  {/* Row 1: Invoice No & Date */}
+                                  <div className="flex gap-2">
+                                    <input type="text" value={piForm.invoice_no} onChange={(e) => handleInputChange(po.po_number, 'invoice_no', e.target.value)} placeholder="Invoice No." className="bg-white border border-amber-200 focus:ring-1 focus:ring-amber-400 rounded-md px-2 py-1.5 text-[10px] w-1/2 font-mono outline-none shadow-3xs" />
+                                    <input type="text" value={piForm.invoice_date} onChange={(e) => handleInputChange(po.po_number, 'invoice_date', e.target.value)} placeholder="DD-MM-YYYY" className="bg-white border border-amber-200 focus:ring-1 focus:ring-amber-400 rounded-md px-2 py-1.5 text-[10px] w-1/2 font-mono outline-none shadow-3xs" />
+                                  </div>
+                                  
+                                  {/* Row 2: Payment Terms Only */}
+                                  <div className="flex gap-2">
+                                    <input type="text" value={piForm.payment_terms} onChange={(e) => handleInputChange(po.po_number, 'payment_terms', e.target.value)} placeholder="Payment Terms" className="w-full bg-white border border-amber-200 focus:ring-1 focus:ring-amber-400 rounded-md px-2 py-1.5 text-[10px] outline-none shadow-3xs" />
+                                  </div>
+
+                                  <div className="flex items-center justify-between mt-1 pt-2 border-t border-amber-200/50">
+                                    <label className="cursor-pointer text-[9px] font-bold text-amber-700 bg-white border border-amber-200 px-2 py-1 rounded hover:bg-amber-100 flex items-center shadow-3xs">
+                                      <input type="file" accept=".pdf,.png,.jpg" onChange={(e) => handleFileChange(po.po_number, e)} className="hidden" />
+                                      <UploadCloud size={10} className="mr-1"/> {piForm.file ? "Change File" : "Attach PI"}
+                                    </label>
+                                    <button onClick={() => handleSaveInvoiceDetails(po.po_number)} className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-4 py-1.5 rounded shadow-3xs transition-colors">Submit</button>
+                                  </div>
+                                  {piForm.file && <p className="text-[9px] font-bold text-emerald-600 truncate mt-1">📄 {piForm.file.name}</p>}
+                                </div>
+                              ) : (
+                                // PI BADGE DISPLAY
+                                <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs hover:border-amber-400 transition-all group">
+                                  <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-amber-500"/> Proforma Invoice (PI)</span>
+                                  {po.proforma_invoice_url ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-amber-600 hover:underline px-2 py-0.5 bg-amber-50 rounded">📄 View PI</a>
+                                      {isPurchaseExecutive && (
+                                        <button onClick={() => handleDeleteInvoiceFile(po.po_number)} className="text-slate-300 hover:text-rose-500 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete PI"><Trash2 size={12}/></button>
+                                      )}
                                     </div>
+                                  ) : (
+                                    isPurchaseExecutive ? (
+                                      <button onClick={() => toggleEditInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-amber-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:border-amber-400 bg-slate-50 transition-colors">+ Add PI</button>
+                                    ) : <span className="text-[9px] text-slate-400 italic">Not Uploaded</span>
                                   )}
                                 </div>
+                              )}
 
-                                {/* 🚀 NEW: Displays the ACTUAL filename instead of just "View Document" */}
-                                {/* 🚀 NEW: Displays the file name + Trash Delete Button */}
-<div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between">
-  <div className="flex items-center gap-2 overflow-hidden">
-    <Paperclip size={12} className="text-slate-400 flex-shrink-0" />
-    <span className="font-bold text-slate-500 uppercase text-[9px] flex-shrink-0">File:</span>
-    
-    {po.proforma_invoice_url ? (
-      <div className="flex items-center gap-2 truncate">
-        <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 font-bold text-[10px] hover:underline flex items-center gap-1 truncate" title="Click to view/download">
-          📄 {po.proforma_invoice_url.split('/').pop()}
-        </a>
-        
-        {isPurchaseExecutive && (
-          <button 
-            onClick={() => handleDeleteInvoiceFile(po.po_number)} 
-            className="text-slate-400 hover:text-rose-600 p-0.5 rounded transition-colors"
-            title="Delete file permanently from Cloudinary"
-          >
-            <Trash2 size={12} />
-          </button>
-        )}
-      </div>
-    ) : (
-      <span className="text-rose-500/80 font-bold italic text-[10px] bg-rose-50 px-2 py-0.5 rounded">Pending Upload</span>
-    )}
-  </div>
-</div>
-
-                              </div>
-                            )}
+                              {/* DOC 3: TAX INVOICE (Final Document) */}
+                              {isEditingTax && isPurchaseExecutive ? (
+                                // TAX INVOICE UPLOAD FORM
+                                <div className="border border-emerald-300 bg-emerald-50/30 p-2.5 rounded-xl shadow-md animate-in fade-in space-y-2 z-10">
+                                  <div className="flex justify-between items-center mb-1">
+                                    <span className="text-[9px] font-black uppercase tracking-widest text-emerald-600">Upload Final Tax Invoice</span>
+                                    <button onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <input type="text" value={taxForm.tax_invoice_no} onChange={(e) => handleTaxInputChange(po.po_number, 'tax_invoice_no', e.target.value)} placeholder="Tax Inv No." className="bg-white border border-emerald-200 focus:ring-1 focus:ring-emerald-400 rounded-md px-2 py-1 text-[10px] w-1/2 font-mono outline-none" />
+                                    <input type="text" value={taxForm.tax_invoice_date} onChange={(e) => handleTaxInputChange(po.po_number, 'tax_invoice_date', e.target.value)} placeholder="DD-MM-YYYY" className="bg-white border border-emerald-200 focus:ring-1 focus:ring-emerald-400 rounded-md px-2 py-1 text-[10px] w-1/2 font-mono outline-none" />
+                                  </div>
+                                  <div className="flex items-center justify-between mt-1 pt-1 border-t border-emerald-200/50">
+                                    <label className="cursor-pointer text-[9px] font-bold text-emerald-700 bg-white border border-emerald-200 px-2 py-1 rounded hover:bg-emerald-100 flex items-center shadow-3xs">
+                                      <input type="file" accept=".pdf,.png,.jpg" onChange={(e) => handleTaxFileChange(po.po_number, e)} className="hidden" />
+                                      <UploadCloud size={10} className="mr-1"/> {taxForm.file ? "Change File" : "Attach Tax Inv"}
+                                    </label>
+                                    <button onClick={() => handleSaveTaxInvoiceDetails(po.po_number)} className="bg-[#0b9c54] hover:bg-emerald-600 text-white font-bold text-[9px] px-4 py-1.5 rounded shadow-3xs transition-colors">Submit Final</button>
+                                  </div>
+                                  {taxForm.file && <p className="text-[9px] font-bold text-emerald-600 truncate mt-1">📄 {taxForm.file.name}</p>}
+                                </div>
+                              ) : (
+                                // TAX INVOICE BADGE DISPLAY
+                                <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs hover:border-[#0b9c54] transition-all group">
+                                  <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#0b9c54]"/> Final Tax Invoice</span>
+                                  {po.tax_invoice_url ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <a href={po.tax_invoice_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-700 hover:underline px-2 py-0.5 bg-emerald-50 rounded flex items-center gap-1">
+                                        <CheckCircle2 size={10}/> View Tax Inv
+                                      </a>
+                                    </div>
+                                  ) : (
+                                    isPurchaseExecutive ? (
+                                      <button onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-emerald-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:border-emerald-400 bg-slate-50 transition-colors">+ Add Tax Inv</button>
+                                    ) : <span className="text-[9px] text-slate-400 italic">Not Uploaded</span>
+                                  )}
+                                </div>
+                              )}
+                              
+                            </div>
                           </td>
                         </tr>
 
+                        {/* EXANDED MATERIAL MANIFEST ROW (Remains unchanged) */}
                         {isExpanded && (
                           <tr className="bg-slate-50/40">
-                            <td colSpan="8" className="p-4 pl-16 border-y border-slate-200">
+                            <td colSpan="6" className="p-4 pl-16 border-y border-slate-200">
                               <div className="flex items-center space-x-2 text-[10px] font-black uppercase text-slate-400 tracking-wider mb-2.5">
                                 <span>Material Manifest Components</span>
                               </div>
@@ -598,8 +552,4 @@ const handleDeleteInvoiceFile = async (poNumber) => {
       )}
     </div>
   );
-}
-
-function isHealthyFormActive(isEditing) {
-  return isEditing === true;
 }

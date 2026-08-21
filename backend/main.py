@@ -6,7 +6,6 @@ import io
 from typing import List, Optional
 from datetime import date, datetime
 from pydantic import BaseModel
-# 🎯 ADDED 'Form' to the imports to handle multipart/form-data
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -17,10 +16,7 @@ from database import get_db
 from docxtpl import DocxTemplate
 import models
 
-# 🎯 NEW: Import the email service
 from email_service import send_workflow_email
-
-# 🎯 NEW: Import Cloudinary
 import cloudinary
 import cloudinary.uploader
 from cloudinary.utils import cloudinary_url
@@ -31,7 +27,7 @@ logger = logging.getLogger("AarviProcure")
 
 app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.1.0")
 
-# 🎯 NEW: Configure Cloudinary securely using Render Environment Variables
+# Configure Cloudinary securely using Render Environment Variables
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
     api_key=os.getenv("CLOUDINARY_API_KEY"),
@@ -39,24 +35,25 @@ cloudinary.config(
     secure=True
 )
 
-# Keep local storage ONLY for temporary processing (e.g., Quotations/PO docs)
 UPLOAD_DIR = "storage/quotation_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
-# 2. Complete CORS Cross-Origin Resource Sharing Rules
+# 2. CORS Rules
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173",
+    allow_origins=[
+        "http://localhost:5173",
         "https://aarvi-procure-system.vercel.app",
-        "https://procure.aarviencon.com"], 
+        "https://procure.aarviencon.com"
+    ], 
     allow_credentials=True,
     allow_methods=["*"], 
     allow_headers=["*"], 
 )
 
 # -------------------------------------------------------------------
-# PYDANTIC INCOMING DATA VALIDATORS (Data Contracts)
+# PYDANTIC INCOMING DATA VALIDATORS
 # -------------------------------------------------------------------
 class RequisitionRowItem(BaseModel):
     product_description: str
@@ -486,7 +483,10 @@ def attach_vendor_quotations(
             db.query(models.TicketItem).filter(
                 models.TicketItem.ticket_number == ticket_number,
                 models.TicketItem.item_index == row.item_index
-            ).update({"item_type": row.item_type})
+            ).update({
+                "item_type": row.item_type,
+                "quantity": row.quantity
+            })
         
     highest_landed_total = 0.0
     any_item_exceeds_2_5l = False 
@@ -700,7 +700,7 @@ def sign_and_finalize_purchase_order(po_number: str, payload: DualApprovalPayloa
     return {"po_number": po_number, "status": "Approved"}
 
 # -------------------------------------------------------------------
-# SYNCHRONIZATION ENDPOINTS (Live Dashboard Tracking)
+# SYNCHRONIZATION ENDPOINTS
 # -------------------------------------------------------------------
 @app.get("/api/requisitions/pending-vetting/{manager_id}", response_model=List[dict])
 def get_pending_vetting_tickets(manager_id: int, db: Session = Depends(get_db)):
@@ -860,13 +860,11 @@ def get_pending_management_approval_tickets(manager_id: int, db: Session = Depen
                 models.MaterialTicket.assigned_project_manager_id == manager_id,
                 models.MaterialTicket.assigned_project_manager_id == None
             ),
-            # 🎯 UPDATED: Added 'PI Pending PM Approval'
             models.MaterialTicket.status.in_(["Pending Project Manager", "Query Raised", "PI Pending PM Approval"])
         ).order_by(models.MaterialTicket.created_at.desc()).all()
         
     return [{"ticket_number": t.ticket_number, "project_code": t.project_code, "project_name": t.project_name, "status": t.status} for t in tickets]
    
-
 @app.get("/api/requisitions/pm-history/{manager_id}", response_model=List[dict])
 def get_pm_history(manager_id: int, db: Session = Depends(get_db)):
     tickets = db.query(models.MaterialTicket).filter(
@@ -1082,7 +1080,10 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
         models.MaterialTicket
     ).join(
         models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number
-    ).filter(models.MaterialTicket.status.in_(["Approved", "PI Pending PM Approval", "PI Approved - Sent to Accounts", "Dispatched"])).order_by(models.PurchaseOrder.generated_at.desc()).all()
+    ).filter(models.MaterialTicket.status.in_([
+        "Approved", "PI Pending PM Approval", "PI Approved - Sent to Accounts", 
+        "Dispatched", "Partially Delivered", "Delivered - GRN Logged"
+    ])).order_by(models.PurchaseOrder.generated_at.desc()).all()
     
     response = []
     for po_obj, ticket_obj in orders:
@@ -1136,12 +1137,21 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             "project_manager": project_manager,
             "items": item_list,
             "category": ticket_obj.category,
+            "status": ticket_obj.status,
+            "po_pdf_url": po_obj.pdf_url,
             "invoice_no": getattr(po_obj, 'invoice_no', '') or '',
             "invoice_date": getattr(po_obj, 'invoice_date', '') or '',
             "invoice_remark": getattr(po_obj, 'invoice_remark', '') or '',
             "invoice_duration": getattr(po_obj, 'invoice_duration', '') or '',
-            # 🎯 NEW: Returns the URL so the frontend can display "View Document"
-            "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None) 
+            "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None),
+            # 🎯 NEW TAX INVOICE FIELDS
+            "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '',
+            "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '',
+            "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None),
+            "utr_no": getattr(po_obj, 'utr_no', '') or '',
+            "payment_date": getattr(po_obj, 'payment_date', '') or '',
+            "payment_remark": getattr(po_obj, 'payment_remark', '') or '',
+            "payment_advice_url": getattr(po_obj, 'payment_advice_url', None)
         })
     return response
 
@@ -1165,31 +1175,27 @@ async def update_po_invoice_details(
     po.invoice_remark = invoice_remark
     po.invoice_duration = invoice_duration
     
-    # 🎯 CLOUDINARY UPLOAD LOGIC
     if file:
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
             raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
             
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"PI_{po_number}_{timestamp}" # Cloudinary doesn't need the extension in the public_id
+        filename = f"PI_{po_number}_{timestamp}"
         
         try:
-            # Upload directly to Cloudinary from memory
             upload_result = cloudinary.uploader.upload(
                 file.file, 
                 public_id=filename,
                 folder="aarvi_invoices",
-                resource_type="auto" # Important: "auto" allows PDFs and raw files
+                resource_type="auto"
             )
-            # Get the permanent, safe cloud URL
             po.proforma_invoice_url = upload_result.get("secure_url")
             
         except Exception as e:
             logger.error(f"Cloudinary Upload Failed: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to upload document to cloud storage.")
         
-        # Route to Project Manager for PI Approval
         ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
         if ticket:
             ticket.status = "PI Pending PM Approval"
@@ -1203,7 +1209,6 @@ async def update_po_invoice_details(
     db.commit()
     return {"message": "Invoice logging verified, stored in cloud, and saved successfully."}
 
-# 🚀 NEW: Deletes the PI document from Cloudinary AND clears the DB reference
 @app.delete("/api/purchase-orders/{po_number}/invoice-file")
 def delete_po_invoice_file(po_number: str, db: Session = Depends(get_db)):
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
@@ -1212,20 +1217,16 @@ def delete_po_invoice_file(po_number: str, db: Session = Depends(get_db)):
     
     if po.proforma_invoice_url:
         try:
-            # Parse the Cloudinary public_id from the URL
-            # Example URL: https://res.cloudinary.com/cloud_name/image/upload/v12345/aarvi_invoices/PI_PO-2026-641905_20260820.pdf
             url = po.proforma_invoice_url
             if "/upload/" in url:
                 path_after_upload = url.split("/upload/")[1]
                 parts = path_after_upload.split('/')
-                # Skip version tag if present (e.g. v1787214100)
                 if parts[0].startswith('v') and parts[0][1:].isdigit():
                     parts = parts[1:]
                 
                 full_path = "/".join(parts)
-                public_id = os.path.splitext(full_path)[0] # e.g. "aarvi_invoices/PI_PO-2026-641905_20260820"
+                public_id = os.path.splitext(full_path)[0]
                 
-                # Delete from Cloudinary
                 cloudinary.uploader.destroy(public_id, resource_type="image")
                 cloudinary.uploader.destroy(public_id, resource_type="raw")
                 cloudinary.uploader.destroy(full_path, resource_type="raw")
@@ -1233,10 +1234,8 @@ def delete_po_invoice_file(po_number: str, db: Session = Depends(get_db)):
         except Exception as e:
             logger.error(f"Failed to delete Cloudinary file: {str(e)}")
 
-        # Clear the database column
         po.proforma_invoice_url = None
         
-        # Log to ticket history
         ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
         if ticket:
             db.add(models.TicketHistory(
@@ -1248,6 +1247,57 @@ def delete_po_invoice_file(po_number: str, db: Session = Depends(get_db)):
 
     db.commit()
     return {"message": "Attachment deleted successfully from Cloudinary and Database."}    
+
+# -------------------------------------------------------------------
+# 🧾 TAX INVOICE UPLOAD ENDPOINT
+# -------------------------------------------------------------------
+@app.put("/api/purchase-orders/{po_number}/tax-invoice")
+async def update_po_tax_invoice_details(
+    po_number: str, 
+    tax_invoice_no: str = Form(""),
+    tax_invoice_date: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase Order entity not found.")
+    
+    po.tax_invoice_no = tax_invoice_no
+    po.tax_invoice_date = tax_invoice_date
+    
+    if file:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
+            raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"TAX_INV_{po_number}_{timestamp}"
+        
+        try:
+            upload_result = cloudinary.uploader.upload(
+                file.file, 
+                public_id=filename,
+                folder="aarvi_tax_invoices",
+                resource_type="auto"
+            )
+            po.tax_invoice_url = upload_result.get("secure_url")
+        except Exception as e:
+            logger.error(f"Cloudinary Upload Failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to upload Tax Invoice to cloud storage.")
+        
+        ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+        if ticket:
+            db.add(models.TicketHistory(
+                ticket_number=ticket.ticket_number,
+                user_name="Purchase Executive",
+                action_taken="Tax Invoice Uploaded",
+                remarks=f"Final Tax Invoice {tax_invoice_no} uploaded to cloud repository."
+            ))
+    
+    db.commit()
+    return {"message": "Tax Invoice details saved successfully.", "tax_invoice_url": po.tax_invoice_url}
+
 
 # -------------------------------------------------------------------
 # 🏢 VENDOR MASTER DIRECTORY LAYER
@@ -1422,7 +1472,6 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
             })
     return notifications
 
-# 🎯 NEW: Fetch PO details for a specific ticket
 @app.get("/api/requisitions/{ticket_number}/po", response_model=dict)
 def get_po_by_ticket(ticket_number: str, db: Session = Depends(get_db)):
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.ticket_number == ticket_number).first()
@@ -1438,7 +1487,6 @@ def get_po_by_ticket(ticket_number: str, db: Session = Depends(get_db)):
         "proforma_invoice_url": po.proforma_invoice_url or None
     }
 
-# 🎯 NEW: Project Manager Approves Proforma Invoice & Routes to Accounts
 class ApprovePIPayload(BaseModel):
     user_name: str
     remarks: Optional[str] = ""
@@ -1464,7 +1512,6 @@ def approve_proforma_invoice(
     
     db.commit()
     return {"ticket_number": ticket_number, "status": ticket.status}
-
 
 # -------------------------------------------------------------------
 # 💳 PHASE 4: ACCOUNTS DESK & PAYMENT DISBURSEMENT ENDPOINTS
@@ -1567,7 +1614,7 @@ async def process_po_disbursement(
 async def process_goods_receipt_note(
     ticket_number: str,
     user_name: str = Form(...),
-    receipt_type: str = Form("CLEAN"), # "CLEAN" | "PARTIAL" | "DISCREPANCY"
+    receipt_type: str = Form("CLEAN"),
     discrepancy_category: str = Form(""),
     remarks: str = Form(""),
     file: Optional[UploadFile] = File(None),
@@ -1598,7 +1645,6 @@ async def process_goods_receipt_note(
             logger.error(f"Cloudinary Upload Failed for GRN: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to upload GRN/Proof document to cloud storage.")
             
-    # Update Ticket Status & Audit Log based on Inspection Type
     if receipt_type == "CLEAN":
         ticket.status = "Delivered - GRN Logged"
         action = "Material Delivered & Clean GRN Verified"
@@ -1609,7 +1655,7 @@ async def process_goods_receipt_note(
         action = "Partial Delivery Logged at Site"
         detail_text = f"Partial quantity received by {user_name}. Remarks: {remarks or 'None'}"
         
-    else: # "DISCREPANCY"
+    else:
         ticket.status = "Material Discrepancy Raised"
         action = f"CRITICAL ALERT: Material Discrepancy ({discrepancy_category})"
         detail_text = f"Issue flagged by {user_name} [{discrepancy_category}]: {remarks or 'No remarks provided'}"
@@ -1626,6 +1672,7 @@ async def process_goods_receipt_note(
     
     db.commit()
     return {"message": "Receipt status processed successfully.", "status": ticket.status, "grn_url": grn_url}
+
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
 def connection_ping():

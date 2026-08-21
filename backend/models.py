@@ -29,15 +29,13 @@ class MaterialTicket(Base):
     project_name = Column(String, nullable=False)
     coordinator_id = Column(Integer, ForeignKey("users.id"))
     
-    # 🎯 NEW: Dynamic Routing Assignments
+    # 🎯 Dynamic Routing Assignments
     assigned_site_manager_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     assigned_project_manager_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
     category = Column(String, default="GOODS")
     status = Column(String, default="Pending Site Manager")
     created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Note: is_reimbursable removed from here and moved to TicketItem
 
 class TicketItem(Base):
     __tablename__ = "ticket_items"
@@ -49,7 +47,7 @@ class TicketItem(Base):
     quantity = Column(Integer, nullable=False)
     purpose = Column(String, nullable=False)
     
-    # 🎯 NEW: Financial tracking flags shifted to the LINE-ITEM level
+    # 🎯 Financial tracking flags shifted to line-item level
     is_reimbursable = Column(Boolean, default=False)
     reimbursement_notes = Column(Text, nullable=True)
     
@@ -105,12 +103,20 @@ class PurchaseOrder(Base):
     ticket_number = Column(String, ForeignKey("material_tickets.ticket_number", ondelete="CASCADE"))
     generated_at = Column(DateTime, default=datetime.utcnow)
     pdf_url = Column(String, nullable=False)
+    
+    # Proforma Invoice (PI) Fields
     invoice_no = Column(String, nullable=True)
     invoice_date = Column(String, nullable=True)
     invoice_remark = Column(String, nullable=True)
     invoice_duration = Column(String, nullable=True)
     proforma_invoice_url = Column(String, nullable=True)
-    # 🎯 NEW PHASE 4 COLUMNS: Accounts Disbursement Tracking
+    
+    # 🎯 NEW TAX INVOICE FIELDS
+    tax_invoice_no = Column(String, nullable=True)
+    tax_invoice_date = Column(String, nullable=True)
+    tax_invoice_url = Column(String, nullable=True)
+    
+    # Accounts Disbursement Tracking
     utr_no = Column(String, nullable=True)
     payment_date = Column(String, nullable=True)
     payment_remark = Column(String, nullable=True)
@@ -124,4 +130,4 @@ class Vendor(Base):
     address = Column(String)
     contact_number = Column(String)
     email = Column(String)
-    is_active = Column(Boolean, default=True)    
+    is_active = Column(Boolean, default=True)
