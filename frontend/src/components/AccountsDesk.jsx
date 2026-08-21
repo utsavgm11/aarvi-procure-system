@@ -4,9 +4,13 @@ import axios from 'axios';
 import { 
   Landmark, Search, Calendar, FileText, UploadCloud, CheckCircle2, 
   Clock, ExternalLink, Paperclip, ShieldCheck, ArrowRight, X, Building2,
-  Filter, CheckSquare, Download, Wallet, AlertCircle
+  Filter, CheckSquare, Download, Wallet, AlertCircle, Printer
 } from 'lucide-react';
 import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
+
+// Assets for System PO Rendering
+import aarviLogo from '../assets/logo.png';
+import Letterhead from '../assets/letter_head.jpg';
 
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
@@ -17,8 +21,10 @@ export default function AccountsDesk({ currentUser }) {
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' or 'history'
   const [selectedPo, setSelectedPo] = useState(null);
 
-  // 🎯 NEW: State for Inline Document Preview Modal
-  const [previewDoc, setPreviewDoc] = useState(null);
+  // 🎯 Modals State
+  const [previewDoc, setPreviewDoc] = useState(null); // For Cloudinary PDFs/Images
+  const [selectedSystemPo, setSelectedSystemPo] = useState(null); // For Live System PO HTML
+  const [poItems, setPoItems] = useState([]);
 
   // Form States
   const [utrNo, setUtrNo] = useState('');
@@ -41,7 +47,6 @@ export default function AccountsDesk({ currentUser }) {
     }
   }, []);
 
-  // Defer state invocation via macro-task to prevent cascading render fault lines
   useEffect(() => {
     let isMounted = true;
     const timer = setTimeout(() => {
@@ -63,15 +68,26 @@ export default function AccountsDesk({ currentUser }) {
     return grandTotal;
   };
 
-  // 🎯 HELPER: Handles Opening Documents in the Smooth Modal Viewer
+  // 🎯 HELPER: Handles Opening Cloudinary Documents in Modal
   const handlePreview = (url, title) => {
     if (!url) return;
     let fullUrl = url;
-    // Fix relative system URLs to prevent routing/login issues
     if (url.startsWith('/')) {
       fullUrl = `https://aarvi-procure-system.onrender.com${url}`;
     }
     setPreviewDoc({ url: fullUrl, title });
+  };
+
+  // 🎯 HELPER: Fetches and Opens the Live System Generated PO
+  const openSystemPoView = async (po) => {
+    setSelectedSystemPo(po);
+    try {
+      const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${po.ticket_number}/quotations`);
+      const winningLines = quotesRes.data.filter(q => q.is_selected === true);
+      setPoItems(winningLines);
+    } catch (err) {
+      console.error("Error loading PO items", err);
+    }
   };
 
   const openDisbursementModal = (po) => {
@@ -146,17 +162,16 @@ export default function AccountsDesk({ currentUser }) {
   return (
     <div className="space-y-6 relative pb-10">
       
-      {/* 🎯 SMOOTH INLINE DOCUMENT PREVIEW MODAL */}
+      {/* 🎯 1. SMOOTH INLINE DOCUMENT PREVIEW MODAL (Cloudinary Iframes) */}
       {previewDoc && (
         <div 
           className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
-          onClick={() => setPreviewDoc(null)} // Click outside to close
+          onClick={() => setPreviewDoc(null)} 
         >
           <div 
             className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden relative"
-            onClick={(e) => e.stopPropagation()} // Prevent clicks inside from closing
+            onClick={(e) => e.stopPropagation()} 
           >
-            {/* Modal Header */}
             <div className="bg-[#2c2a57] p-4 text-white flex justify-between items-center shrink-0 z-10">
               <div className="flex items-center gap-2">
                 <FileText size={18} className="text-indigo-300" />
@@ -166,8 +181,6 @@ export default function AccountsDesk({ currentUser }) {
                 <X size={16} />
               </button>
             </div>
-            
-            {/* Modal Body (Scrollable Iframe) */}
             <div className="flex-1 bg-slate-100 relative overflow-auto custom-scrollbar">
               {previewDoc.url.match(/\.(jpeg|jpg|gif|png)$/i) != null ? (
                 <div className="min-h-full flex items-center justify-center p-4">
@@ -180,6 +193,102 @@ export default function AccountsDesk({ currentUser }) {
                   title="Document Preview"
                 />
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🎯 2. LIVE SYSTEM PO VIEWER MODAL */}
+      {selectedSystemPo && (
+        <div 
+          className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
+          onClick={() => setSelectedSystemPo(null)} 
+        >
+          <div 
+            className="bg-slate-100 rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden relative"
+            onClick={(e) => e.stopPropagation()} 
+          >
+            {/* Modal Header */}
+            <div className="bg-[#2c2a57] p-4 text-white flex justify-between items-center shrink-0 z-10 print:hidden">
+              <div className="flex items-center gap-2">
+                <FileText size={18} className="text-indigo-300" />
+                <h3 className="font-extrabold text-sm uppercase tracking-wider">System Generated Purchase Order</h3>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button variant="ghost" onClick={() => window.print()} className="text-xs bg-white/10 hover:bg-white/20 text-white border-0 py-1.5 px-3">
+                  <Printer size={14} className="mr-1.5" /> Print
+                </Button>
+                <button onClick={() => setSelectedSystemPo(null)} className="text-slate-300 hover:text-white bg-white/10 p-1.5 rounded-full transition-colors">
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            
+            {/* Scrollable Document Area */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
+              <div className="bg-white p-8 md:p-12 mx-auto border border-slate-200 shadow-sm max-w-4xl text-sm text-slate-800 font-sans print:shadow-none print:border-none print:p-0">
+                
+                {/* Branding Header */}
+                <div className="w-full text-xs text-slate-700 font-sans relative avoid-break">
+                  <div className="w-full bg-white relative z-10 mb-1">
+                    <img src={Letterhead} alt="Aarvi Letterhead" className="w-full h-auto object-contain select-none" onError={(e) => e.target.style.display='none'} />
+                  </div>
+                  <div className="mt-2 flex justify-between items-baseline border-t border-slate-400 pt-1 font-mono text-[11px] relative z-10">
+                    <span className="font-black text-slate-900">Ref: AEL/{selectedSystemPo.vendor_name?.substring(0,6).toUpperCase()}-PO/{selectedSystemPo.po_number?.split('-')[2]}</span>
+                    <span className="font-bold text-slate-800">Date: {selectedSystemPo.generated_at}</span>
+                  </div>
+                  <h1 className="text-base font-black text-slate-950 tracking-wider uppercase text-center mt-2 bg-slate-100 py-1 border-y border-slate-400 relative z-10">
+                    Purchase Order
+                  </h1>
+                </div>
+
+                {/* Vendor & Project Info */}
+                <div className="grid grid-cols-2 gap-12 my-8">
+                  <div>
+                    <h3 className="text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-1">To Vendor</h3>
+                    <p className="font-extrabold text-slate-900 text-sm uppercase">M/s. {selectedSystemPo.vendor_name}</p>
+                    <p className="text-slate-600 text-xs mt-1">{selectedSystemPo.vendor_address || "Address Not Available"}</p>
+                    <p className="text-slate-600 text-xs mt-1 font-mono">Contact: {selectedSystemPo.vendor_contact || "N/A"}</p>
+                  </div>
+                  <div className="text-right">
+                    <h3 className="text-[10px] font-black uppercase text-[#0b9c54] tracking-wider mb-1">Project Destination</h3>
+                    <p className="font-extrabold text-slate-900 text-sm">{selectedSystemPo.project_name}</p>
+                    <p className="text-slate-600 text-xs mt-1 font-mono">Project Code: {selectedSystemPo.project_code}</p>
+                  </div>
+                </div>
+
+                {/* Items Table */}
+                <table className="w-full text-left mb-6 border-collapse border border-slate-400">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-700 text-[10px] uppercase tracking-wider border-b border-slate-400">
+                      <th className="py-2.5 px-3 border-r border-slate-400 text-center w-12">Sr.</th>
+                      <th className="py-2.5 px-3 border-r border-slate-400">Description & Specifications</th>
+                      <th className="py-2.5 px-3 border-r border-slate-400 text-center w-20">Qty</th>
+                      <th className="py-2.5 px-3 text-right w-32">Total Price (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {poItems.map((item, i) => (
+                      <tr key={i} className="text-xs border-b border-slate-300">
+                        <td className="py-3 px-3 border-r border-slate-400 text-center text-slate-600 font-mono">{i + 1}</td>
+                        <td className="py-3 px-3 border-r border-slate-400 font-bold text-slate-800">{item.product_description} {item.make_brand && `(${item.make_brand})`}</td>
+                        <td className="py-3 px-3 border-r border-slate-400 text-center font-mono font-bold">{item.quantity || 1}</td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-slate-900">{(item.base_total_value || item.total_amount || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                      </tr>
+                    ))}
+                    <tr className="font-black bg-slate-100 border-t-2 border-slate-400 text-black">
+                      <td colSpan="3" className="py-2.5 px-3 border-r border-slate-400 text-right uppercase text-[10px]">Net Amount Payable (Incl. GST)</td>
+                      <td className="py-2.5 px-3 text-right font-mono text-sm">{selectedSystemPo.grand_total.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                {/* Terms */}
+                <div className="text-xs space-y-2 mt-8 text-slate-700">
+                  <p><strong className="text-slate-900 uppercase">Payment Terms:</strong> {selectedSystemPo.payment_terms || "100% Payable on Delivery"}</p>
+                  <p><strong className="text-slate-900 uppercase">Billing Status:</strong> Proforma Invoice Generated</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -258,7 +367,6 @@ export default function AccountsDesk({ currentUser }) {
           </Card>
         ) : (
           filteredOrders.map((po) => {
-            const poDocUrl = po.signed_po_url || po.po_pdf_url;
             const targetPayable = calculatePayableNow(po.payment_terms, po.grand_total);
 
             return (
@@ -298,15 +406,26 @@ export default function AccountsDesk({ currentUser }) {
                 <div className="border-t border-slate-100 pt-3 space-y-2">
                   <span className="text-[10px] font-bold text-slate-500 uppercase block">Audit Vault:</span>
                   <div className="flex flex-col gap-1.5">
-                    {poDocUrl && (
+                    {/* 1. Signed PO / System PO */}
+                    {po.signed_po_url ? (
                       <button 
-                        onClick={() => handlePreview(poDocUrl, po.signed_po_url ? "Signed PO Document" : "System Generated PO")} 
+                        onClick={() => handlePreview(po.signed_po_url, `Signed PO Document`)} 
                         className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-1.5 rounded hover:bg-indigo-100 transition-colors flex items-center justify-between"
                       >
-                        <span className="flex items-center gap-1">{po.signed_po_url ? "✍️ Signed PO" : "📄 System PO"}</span>
+                        <span className="flex items-center gap-1">✍️ Signed PO</span>
+                        <ExternalLink size={10} />
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => openSystemPoView(po)} 
+                        className="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 px-2 py-1.5 rounded hover:bg-indigo-50 transition-colors flex items-center justify-between shadow-3xs"
+                      >
+                        <span className="flex items-center gap-1">📄 System Generated PO</span>
                         <ExternalLink size={10} />
                       </button>
                     )}
+
+                    {/* 2. PI */}
                     {po.proforma_invoice_url ? (
                       <button 
                         onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)}
@@ -318,6 +437,8 @@ export default function AccountsDesk({ currentUser }) {
                     ) : (
                       <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded w-full block">No PI Attached</span>
                     )}
+
+                    {/* 3. Tax Invoice */}
                     {po.tax_invoice_url ? (
                       <button 
                         onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)}
@@ -382,7 +503,6 @@ export default function AccountsDesk({ currentUser }) {
                 </tr>
               ) : (
                 filteredOrders.map((po) => {
-                  const poDocUrl = po.signed_po_url || po.po_pdf_url;
                   const targetPayable = calculatePayableNow(po.payment_terms, po.grand_total);
 
                   return (
@@ -427,22 +547,30 @@ export default function AccountsDesk({ currentUser }) {
 
                         {/* Document Badges */}
                         <div className="flex flex-col gap-1.5">
-                          {/* 1. Signed PO (or System PO if missing) */}
-                          <button 
-                            onClick={() => handlePreview(poDocUrl, po.signed_po_url ? "Signed PO Document" : "System Generated PO")} 
-                            className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full"
-                          >
-                            <span className="font-bold text-slate-700 flex items-center gap-1">
-                              {po.signed_po_url ? "✍️ Signed PO" : "📄 System PO"}
-                            </span>
-                            <ExternalLink size={10} className="text-indigo-400 flex-shrink-0" />
-                          </button>
+                          {/* 1. Signed PO / System PO */}
+                          {po.signed_po_url ? (
+                            <button 
+                              onClick={() => handlePreview(po.signed_po_url, `Signed PO - ${po.po_number}`)} 
+                              className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left"
+                            >
+                              <span className="font-bold text-slate-700 flex items-center gap-1">✍️ Signed PO</span>
+                              <ExternalLink size={10} className="text-indigo-400 flex-shrink-0" />
+                            </button>
+                          ) : (
+                            <button 
+                              onClick={() => openSystemPoView(po)} 
+                              className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left"
+                            >
+                              <span className="font-bold text-slate-700 flex items-center gap-1">📄 System PO</span>
+                              <span className="text-[9px] font-black text-indigo-600 uppercase">View</span>
+                            </button>
+                          )}
 
                           {/* 2. Proforma Invoice (PI) */}
                           {po.proforma_invoice_url ? (
                             <button 
                               onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)}
-                              className="flex items-center justify-between bg-amber-50/60 border border-amber-200 px-2 py-1 rounded text-[10px] hover:border-amber-400 transition-colors shadow-3xs w-full"
+                              className="flex items-center justify-between bg-amber-50/60 border border-amber-200 px-2 py-1 rounded text-[10px] hover:border-amber-400 transition-colors shadow-3xs w-full text-left"
                             >
                               <span className="font-bold text-amber-800 flex items-center gap-1 truncate max-w-[130px]">
                                 📄 PI #{po.invoice_no}
@@ -457,7 +585,7 @@ export default function AccountsDesk({ currentUser }) {
                           {po.tax_invoice_url ? (
                             <button 
                               onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)}
-                              className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 px-2 py-1 rounded text-[10px] hover:border-emerald-400 transition-colors shadow-3xs w-full"
+                              className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 px-2 py-1 rounded text-[10px] hover:border-emerald-400 transition-colors shadow-3xs w-full text-left"
                             >
                               <span className="font-bold text-emerald-800 flex items-center gap-1 truncate max-w-[130px]">
                                 🧾 Tax Inv #{po.tax_invoice_no}
@@ -541,7 +669,7 @@ export default function AccountsDesk({ currentUser }) {
                 </div>
               )}
 
-              {/* 🎯 4-CARD FINANCIAL SUMMARY BANNER */}
+              {/* 🎯 FINANCIAL SUMMARY BANNER */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 text-xs shadow-3xs">
                 <div className="flex justify-between items-center border-b border-slate-200/60 pb-2">
                   <span className="font-bold text-slate-500 uppercase tracking-widest text-[9px]">PO Number:</span> 
@@ -568,8 +696,6 @@ export default function AccountsDesk({ currentUser }) {
 
               {/* Form Fields */}
               <div className="space-y-4">
-                
-                {/* 🎯 EDITABLE DISBURSED AMOUNT INPUT */}
                 <div>
                   <Input 
                     label="Final Amount Disbursing Now (₹) *" 
