@@ -22,11 +22,14 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [selectedProjectFilter, setSelectedProjectFilter] = useState('ALL');
   const [selectedTimeFilter, setSelectedTimeFilter] = useState('ALL'); 
 
-  // Form states for PI and Tax Invoice
+  // Form states for PI, Tax Invoice, and Signed PO
   const [invoiceForms, setInvoiceForms] = useState({});
   const [taxInvoiceForms, setTaxInvoiceForms] = useState({});
+  const [poFileForms, setPoFileForms] = useState({});
+  
   const [editingInvoices, setEditingInvoices] = useState({}); // Controls PI edit form
   const [editingTaxInvoices, setEditingTaxInvoices] = useState({}); // Controls Tax Invoice edit form
+  const [editingPOs, setEditingPOs] = useState({}); // Controls Signed PO edit form
   
   const isPurchaseExecutive = currentUser?.role === 'Purchase Executive';
 
@@ -38,13 +41,13 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       
       const initialForms = {};
       const initialTaxForms = {};
+      const initialPoFileForms = {};
       
       res.data.forEach(po => {
         initialForms[po.po_number] = {
           invoice_no: po.invoice_no || '',
           invoice_date: po.invoice_date || '',
-          invoice_remark: po.invoice_remark || '',
-          payment_terms: po.invoice_duration || '', // 🎯 Mapped duration to Payment Terms
+          payment_terms: po.invoice_duration || '', 
           file: null
         };
         
@@ -53,10 +56,15 @@ export default function MasterPOLedgerDesk({ currentUser }) {
           tax_invoice_date: po.tax_invoice_date || '',
           file: null
         };
+
+        initialPoFileForms[po.po_number] = {
+          file: null
+        };
       });
       
       setInvoiceForms(initialForms);
       setTaxInvoiceForms(initialTaxForms);
+      setPoFileForms(initialPoFileForms);
     } catch (err) {
       console.error("Error fetching Master PO Ledger", err);
     } finally {
@@ -72,6 +80,39 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     return () => { isMounted = false; clearTimeout(timer); };
   }, [fetchLedgerPOs]);
 
+  // --- Signed PO Form Handlers ---
+  const handlePoFileChange = (poNumber, event) => {
+    const file = event.target.files[0];
+    setPoFileForms(prev => ({ ...prev, [poNumber]: { file } }));
+  };
+
+  const toggleEditPO = (poNumber) => {
+    setEditingPOs(prev => ({ ...prev, [poNumber]: !prev[poNumber] }));
+    if (editingInvoices[poNumber]) setEditingInvoices(prev => ({...prev, [poNumber]: false}));
+    if (editingTaxInvoices[poNumber]) setEditingTaxInvoices(prev => ({...prev, [poNumber]: false}));
+  };
+
+  const handleSaveSignedPo = async (poNumber) => {
+    const formState = poFileForms[poNumber];
+    if (!formState?.file) {
+      alert("Please select a signed PO file first.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', formState.file);
+
+    try {
+      await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/signed-po`, formData, { 
+        headers: { 'Content-Type': 'multipart/form-data'} 
+      });
+      setEditingPOs(prev => ({ ...prev, [poNumber]: false }));
+      fetchLedgerPOs(); 
+    } catch (err) { 
+      alert("Failed to upload signed PO file."); 
+    }
+  };
+
   // --- PI Form Handlers ---
   const handleInputChange = (poNumber, field, value) => {
     setInvoiceForms(prev => ({ ...prev, [poNumber]: { ...prev[poNumber], [field]: value } }));
@@ -82,7 +123,8 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   };
   const toggleEditInvoice = (poNumber) => {
     setEditingInvoices(prev => ({ ...prev, [poNumber]: !prev[poNumber] }));
-    if (editingTaxInvoices[poNumber]) setEditingTaxInvoices(prev => ({...prev, [poNumber]: false})); // Close the other
+    if (editingTaxInvoices[poNumber]) setEditingTaxInvoices(prev => ({...prev, [poNumber]: false}));
+    if (editingPOs[poNumber]) setEditingPOs(prev => ({...prev, [poNumber]: false}));
   };
 
   // --- Tax Invoice Form Handlers ---
@@ -95,7 +137,8 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   };
   const toggleEditTaxInvoice = (poNumber) => {
     setEditingTaxInvoices(prev => ({ ...prev, [poNumber]: !prev[poNumber] }));
-    if (editingInvoices[poNumber]) setEditingInvoices(prev => ({...prev, [poNumber]: false})); // Close the other
+    if (editingInvoices[poNumber]) setEditingInvoices(prev => ({...prev, [poNumber]: false}));
+    if (editingPOs[poNumber]) setEditingPOs(prev => ({...prev, [poNumber]: false}));
   };
 
   // --- Submit API Calls ---
@@ -104,8 +147,8 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     const formData = new FormData();
     formData.append('invoice_no', formState.invoice_no);
     formData.append('invoice_date', formState.invoice_date);
-    formData.append('invoice_duration', formState.payment_terms); // 🎯 Seamlessly sends as duration to backend
-    formData.append('invoice_remark', formState.invoice_remark);
+    formData.append('invoice_duration', formState.payment_terms); 
+    formData.append('invoice_remark', ""); 
     if (formState.file) formData.append('file', formState.file);
 
     try {
@@ -377,8 +420,11 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                     const isExpanded = !!expandedRows[po.po_number];
                     const isEditingPI = !!editingInvoices[po.po_number];
                     const isEditingTax = !!editingTaxInvoices[po.po_number];
+                    const isEditingPO = !!editingPOs[po.po_number];
+                    
                     const piForm = invoiceForms[po.po_number] || {};
                     const taxForm = taxInvoiceForms[po.po_number] || {};
+                    const poFileForm = poFileForms[po.po_number] || {};
                     
                     return (
                       <React.Fragment key={po.po_number}>
@@ -421,15 +467,49 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                             
                             <div className="flex flex-col gap-2 relative">
                               
-                              {/* DOC 1: SYSTEM PO (Always Present) */}
-                              <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs hover:border-[#2c2a57] transition-all">
-                                <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#2c2a57]"/> System PO Document</span>
-                                <button onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-2 py-0.5 bg-indigo-50 rounded">📄 View PO</button>
-                              </div>
+                              {/* DOC 1: SYSTEM / SIGNED PO */}
+                              {isEditingPO && isPurchaseExecutive ? (
+                                <div className="border border-indigo-300 bg-indigo-50/30 p-2.5 rounded-xl shadow-md animate-in fade-in space-y-2 z-10">
+                                  <div className="flex justify-between items-center mb-1">
+                                    <span className="text-[9px] font-black uppercase tracking-widest text-indigo-700">Upload Signed PO</span>
+                                    <button onClick={() => toggleEditPO(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
+                                  </div>
+                                  <div className="flex items-center justify-between mt-1 pt-1 border-t border-indigo-200/50">
+                                    <label className="cursor-pointer text-[9px] font-bold text-indigo-700 bg-white border border-indigo-200 px-2 py-1 rounded hover:bg-indigo-100 flex items-center shadow-3xs">
+                                      <input type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" onChange={(e) => handlePoFileChange(po.po_number, e)} className="hidden" />
+                                      <UploadCloud size={10} className="mr-1"/> {poFileForm.file ? "Change File" : "Attach Signed PO"}
+                                    </label>
+                                    <button onClick={() => handleSaveSignedPo(po.po_number)} className="bg-[#2c2a57] hover:bg-indigo-900 text-white font-bold text-[9px] px-3 py-1 rounded shadow-3xs transition-colors">Submit</button>
+                                  </div>
+                                  {poFileForm.file && <p className="text-[9px] font-bold text-emerald-600 truncate mt-1">📄 {poFileForm.file.name}</p>}
+                                </div>
+                              ) : (
+                                <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs hover:border-[#2c2a57] transition-all group">
+                                  <div className="flex items-center gap-1.5">
+                                    <FileText size={12} className="text-[#2c2a57]"/>
+                                    <span className="text-[10px] font-bold text-slate-600">PO Document</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <button onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-1.5 py-0.5 bg-indigo-50 rounded">
+                                      📄 View PO
+                                    </button>
+                                    {po.signed_po_url ? (
+                                      <a href={po.signed_po_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-700 hover:underline px-1.5 py-0.5 bg-emerald-50 rounded flex items-center gap-1">
+                                        <CheckCircle2 size={10} /> Signed PO
+                                      </a>
+                                    ) : (
+                                      isPurchaseExecutive && (
+                                        <button onClick={() => toggleEditPO(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:border-indigo-400 bg-slate-50 transition-colors">
+                                          + Add Signed PO
+                                        </button>
+                                      )
+                                    )}
+                                  </div>
+                                </div>
+                              )}
 
                               {/* DOC 2: PROFORMA INVOICE (Advance Payment) */}
                               {isEditingPI && isPurchaseExecutive ? (
-                                // 🎯 UPDATED PI UPLOAD FORM (NO NOTES)
                                 <div className="border border-amber-300 bg-amber-50/30 p-2.5 rounded-xl shadow-md animate-in fade-in space-y-2 z-10">
                                   <div className="flex justify-between items-center mb-1">
                                     <span className="text-[9px] font-black uppercase tracking-widest text-amber-600">Upload Proforma (PI)</span>
@@ -443,7 +523,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   </div>
                                   
                                   {/* Row 2: Payment Terms Only */}
-                                  <div className="flex gap-2">
+                                  <div className="flex gap-2 mt-2">
                                     <input type="text" value={piForm.payment_terms} onChange={(e) => handleInputChange(po.po_number, 'payment_terms', e.target.value)} placeholder="Payment Terms" className="w-full bg-white border border-amber-200 focus:ring-1 focus:ring-amber-400 rounded-md px-2 py-1.5 text-[10px] outline-none shadow-3xs" />
                                   </div>
 
@@ -457,7 +537,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   {piForm.file && <p className="text-[9px] font-bold text-emerald-600 truncate mt-1">📄 {piForm.file.name}</p>}
                                 </div>
                               ) : (
-                                // PI BADGE DISPLAY
                                 <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs hover:border-amber-400 transition-all group">
                                   <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-amber-500"/> Proforma Invoice (PI)</span>
                                   {po.proforma_invoice_url ? (
@@ -477,7 +556,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
 
                               {/* DOC 3: TAX INVOICE (Final Document) */}
                               {isEditingTax && isPurchaseExecutive ? (
-                                // TAX INVOICE UPLOAD FORM
                                 <div className="border border-emerald-300 bg-emerald-50/30 p-2.5 rounded-xl shadow-md animate-in fade-in space-y-2 z-10">
                                   <div className="flex justify-between items-center mb-1">
                                     <span className="text-[9px] font-black uppercase tracking-widest text-emerald-600">Upload Final Tax Invoice</span>
@@ -497,7 +575,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   {taxForm.file && <p className="text-[9px] font-bold text-emerald-600 truncate mt-1">📄 {taxForm.file.name}</p>}
                                 </div>
                               ) : (
-                                // TAX INVOICE BADGE DISPLAY
                                 <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs hover:border-[#0b9c54] transition-all group">
                                   <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#0b9c54]"/> Final Tax Invoice</span>
                                   {po.tax_invoice_url ? (
@@ -518,7 +595,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                           </td>
                         </tr>
 
-                        {/* EXANDED MATERIAL MANIFEST ROW (Remains unchanged) */}
+                        {/* EXANDED MATERIAL MANIFEST ROW */}
                         {isExpanded && (
                           <tr className="bg-slate-50/40">
                             <td colSpan="6" className="p-4 pl-16 border-y border-slate-200">

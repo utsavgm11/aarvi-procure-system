@@ -6,6 +6,7 @@ import io
 from typing import List, Optional
 from datetime import date, datetime
 from pydantic import BaseModel
+# 🎯 ADDED 'Form' to the imports to handle multipart/form-data
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -16,7 +17,10 @@ from database import get_db
 from docxtpl import DocxTemplate
 import models
 
+# 🎯 NEW: Import the email service
 from email_service import send_workflow_email
+
+# 🎯 NEW: Import Cloudinary
 import cloudinary
 import cloudinary.uploader
 from cloudinary.utils import cloudinary_url
@@ -27,7 +31,7 @@ logger = logging.getLogger("AarviProcure")
 
 app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.1.0")
 
-# Configure Cloudinary securely using Render Environment Variables
+# 🎯 NEW: Configure Cloudinary securely using Render Environment Variables
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
     api_key=os.getenv("CLOUDINARY_API_KEY"),
@@ -35,25 +39,24 @@ cloudinary.config(
     secure=True
 )
 
+# Keep local storage ONLY for temporary processing (e.g., Quotations/PO docs)
 UPLOAD_DIR = "storage/quotation_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
-# 2. CORS Rules
+# 2. Complete CORS Cross-Origin Resource Sharing Rules
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
+    allow_origins=["http://localhost:5173",
         "https://aarvi-procure-system.vercel.app",
-        "https://procure.aarviencon.com"
-    ], 
+        "https://procure.aarviencon.com"], 
     allow_credentials=True,
     allow_methods=["*"], 
     allow_headers=["*"], 
 )
 
 # -------------------------------------------------------------------
-# PYDANTIC INCOMING DATA VALIDATORS
+# PYDANTIC INCOMING DATA VALIDATORS (Data Contracts)
 # -------------------------------------------------------------------
 class RequisitionRowItem(BaseModel):
     product_description: str
@@ -1138,20 +1141,21 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             "items": item_list,
             "category": ticket_obj.category,
             "status": ticket_obj.status,
-            "po_pdf_url": po_obj.pdf_url,
+            "po_pdf_url": getattr(po_obj, 'pdf_url', None),
+            "signed_po_url": getattr(po_obj, 'signed_po_url', None),
             "invoice_no": getattr(po_obj, 'invoice_no', '') or '',
             "invoice_date": getattr(po_obj, 'invoice_date', '') or '',
             "invoice_remark": getattr(po_obj, 'invoice_remark', '') or '',
             "invoice_duration": getattr(po_obj, 'invoice_duration', '') or '',
             "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None),
-            # 🎯 NEW TAX INVOICE FIELDS
             "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '',
             "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '',
             "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None),
             "utr_no": getattr(po_obj, 'utr_no', '') or '',
             "payment_date": getattr(po_obj, 'payment_date', '') or '',
             "payment_remark": getattr(po_obj, 'payment_remark', '') or '',
-            "payment_advice_url": getattr(po_obj, 'payment_advice_url', None)
+            "payment_advice_url": getattr(po_obj, 'payment_advice_url', None),
+            "disbursed_amount": float(getattr(po_obj, 'disbursed_amount', 0) or 0)
         })
     return response
 
@@ -1175,27 +1179,31 @@ async def update_po_invoice_details(
     po.invoice_remark = invoice_remark
     po.invoice_duration = invoice_duration
     
+    # 🎯 CLOUDINARY UPLOAD LOGIC
     if file:
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
             raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
             
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"PI_{po_number}_{timestamp}"
+        filename = f"PI_{po_number}_{timestamp}" # Cloudinary doesn't need the extension in the public_id
         
         try:
+            # Upload directly to Cloudinary from memory
             upload_result = cloudinary.uploader.upload(
                 file.file, 
                 public_id=filename,
                 folder="aarvi_invoices",
-                resource_type="auto"
+                resource_type="auto" # Important: "auto" allows PDFs and raw files
             )
+            # Get the permanent, safe cloud URL
             po.proforma_invoice_url = upload_result.get("secure_url")
             
         except Exception as e:
             logger.error(f"Cloudinary Upload Failed: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to upload document to cloud storage.")
         
+        # Route to Project Manager for PI Approval
         ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
         if ticket:
             ticket.status = "PI Pending PM Approval"
@@ -1247,6 +1255,41 @@ def delete_po_invoice_file(po_number: str, db: Session = Depends(get_db)):
 
     db.commit()
     return {"message": "Attachment deleted successfully from Cloudinary and Database."}    
+
+# -------------------------------------------------------------------
+# 🎯 SIGNED PO UPLOAD ENDPOINT
+# -------------------------------------------------------------------
+@app.put("/api/purchase-orders/{po_number}/signed-po")
+async def upload_signed_po_document(
+    po_number: str, 
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase Order not found.")
+        
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in [".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx"]:
+        raise HTTPException(status_code=400, detail="Invalid file type.")
+        
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"SIGNED_PO_{po_number}_{timestamp}"
+    
+    try:
+        upload_result = cloudinary.uploader.upload(
+            file.file, 
+            public_id=filename,
+            folder="aarvi_signed_pos",
+            resource_type="auto"
+        )
+        po.signed_po_url = upload_result.get("secure_url")
+    except Exception as e:
+        logger.error(f"Cloudinary Signed PO Upload Failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upload Signed PO.")
+        
+    db.commit()
+    return {"message": "Signed PO uploaded successfully.", "signed_po_url": po.signed_po_url}
 
 # -------------------------------------------------------------------
 # 🧾 TAX INVOICE UPLOAD ENDPOINT
@@ -1545,15 +1588,21 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
             "vendor_contact": getattr(primary_quote, 'vendor_contact', 'N/A') if primary_quote else 'N/A',
             "grand_total": float(grand_total),
             "status": ticket_obj.status,
+            "po_pdf_url": getattr(po_obj, 'pdf_url', None),
+            "signed_po_url": getattr(po_obj, 'signed_po_url', None),
             "invoice_no": getattr(po_obj, 'invoice_no', '') or '',
             "invoice_date": getattr(po_obj, 'invoice_date', '') or '',
             "invoice_remark": getattr(po_obj, 'invoice_remark', '') or '',
-            "invoice_duration": getattr(po_obj, 'invoice_duration', '') or '',
+            "payment_terms": getattr(po_obj, 'invoice_duration', '') or '100% Payable',
             "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None),
+            "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '',
+            "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '',
+            "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None),
             "utr_no": getattr(po_obj, 'utr_no', '') or '',
             "payment_date": getattr(po_obj, 'payment_date', '') or '',
             "payment_remark": getattr(po_obj, 'payment_remark', '') or '',
-            "payment_advice_url": getattr(po_obj, 'payment_advice_url', None)
+            "payment_advice_url": getattr(po_obj, 'payment_advice_url', None),
+            "disbursed_amount": float(getattr(po_obj, 'disbursed_amount', 0) or 0)
         })
     return response
 
@@ -1563,6 +1612,7 @@ async def process_po_disbursement(
     utr_no: str = Form(""),
     payment_date: str = Form(""),
     payment_remark: str = Form(""),
+    disbursed_amount: float = Form(0.0),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
@@ -1573,6 +1623,7 @@ async def process_po_disbursement(
     po.utr_no = utr_no
     po.payment_date = payment_date
     po.payment_remark = payment_remark
+    po.disbursed_amount = disbursed_amount
     
     if file:
         ext = os.path.splitext(file.filename)[1].lower()
@@ -1601,7 +1652,7 @@ async def process_po_disbursement(
             ticket_number=ticket.ticket_number,
             user_name="Accounts Executive",
             action_taken="Payment Disbursed & Order Dispatched",
-            remarks=f"Payment UTR {utr_no} processed on {payment_date}. Bank transfer receipt attached and order released for final logistics dispatch."
+            remarks=f"Payment UTR {utr_no} (Amount: ₹{disbursed_amount:,.2f}) processed on {payment_date}. Bank transfer receipt attached and order released for final logistics dispatch."
         ))
         
     db.commit()

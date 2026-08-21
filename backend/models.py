@@ -104,6 +104,9 @@ class PurchaseOrder(Base):
     generated_at = Column(DateTime, default=datetime.utcnow)
     pdf_url = Column(String, nullable=False)
     
+    # 🎯 NEW: Signed PO Document URL
+    signed_po_url = Column(String, nullable=True)
+    
     # Proforma Invoice (PI) Fields
     invoice_no = Column(String, nullable=True)
     invoice_date = Column(String, nullable=True)
@@ -121,6 +124,9 @@ class PurchaseOrder(Base):
     payment_date = Column(String, nullable=True)
     payment_remark = Column(String, nullable=True)
     payment_advice_url = Column(String, nullable=True)
+    
+    # 🎯 NEW: Tracks partial/full disbursed amount
+    disbursed_amount = Column(Numeric(12, 2), default=0.00)
 
 class Vendor(Base):
     __tablename__ = "vendors"
