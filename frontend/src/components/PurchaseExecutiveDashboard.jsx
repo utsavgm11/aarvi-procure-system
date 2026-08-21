@@ -40,7 +40,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
 
   // PDF ENGINE INJECTION
   const [pdfEngineReady, setPdfEngineReady] = useState(() => typeof window !== 'undefined' && !!window.html2pdf);
-
   useEffect(() => {
     if (typeof window !== 'undefined' && window.html2pdf) return;
     const script = document.createElement('script');
@@ -102,7 +101,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           vendor_address: '',
           vendor_contact: '',
           vendor_email: '',
-          base_total_value: '',
+          unit_price: '', // 🎯 NEW: Replaced base_total with Unit Price
+          base_total_value: 0,
           gst_percentage: 18,
           total_amount: 0,
           net_amount_payable: 0,
@@ -118,7 +118,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     } catch (err) { console.error(err); }
   };
 
-  // --- TICKET OPENING LOGIC (HISTORY LEDGER - DOCUMENT VIEWER) ---
+  // --- TICKET OPENING LOGIC (HISTORY LEDGER) ---
   const openHistoryTicket = async (ticket) => {
     setSelectedHistoryTicket(ticket);
     setHistoryPoItems([]);
@@ -130,7 +130,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       
       const calcTotal = winningLines.reduce((acc, curr) => acc + (curr.net_amount_payable || curr.base_total_value || 0), 0);
       setSelectedHistoryTicket(prev => ({ ...prev, grand_total: calcTotal }));
-
     } catch (err) {
       console.error("Error loading finalized matrix", err);
     } finally {
@@ -138,16 +137,38 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     }
   };
 
-  // --- SOURCING LOGIC (VIEW A) ---
+  // --- SOURCING LOGIC ---
   const handleQuoteChange = (itemIndex, quoteIndex, field, value) => {
     setQuotes(prev => {
       const updatedItemQuotes = [...prev[itemIndex]];
-      updatedItemQuotes[quoteIndex][field] = value;
+      updatedItemQuotes[quoteIndex] = { ...updatedItemQuotes[quoteIndex], [field]: value };
       return { ...prev, [itemIndex]: updatedItemQuotes };
     });
   };
 
-  // 🎯 NEW: Handler to update the item classification (Asset vs Consumable)
+  // 🎯 AUTOMATED MATH CALCULATION HANDLER
+  const handleAmountChange = (itemIndex, quoteIndex, newUnit, newGst, qty) => {
+    const unitVal = parseFloat(newUnit) || 0;
+    const gstVal = parseFloat(newGst) || 0;
+    const quantity = parseFloat(qty) || 1;
+    
+    // Core Math: (Unit Price * Quantity) + GST%
+    const base = unitVal * quantity;
+    const net = base + (base * (gstVal / 100));
+    
+    setQuotes(prev => {
+      const updatedItemQuotes = [...prev[itemIndex]];
+      updatedItemQuotes[quoteIndex] = { 
+        ...updatedItemQuotes[quoteIndex], 
+        unit_price: newUnit,
+        gst_percentage: newGst, 
+        base_total_value: base,
+        net_amount_payable: net
+      };
+      return { ...prev, [itemIndex]: updatedItemQuotes };
+    });
+  };
+
   const handleItemClassificationChange = (indexToUpdate, newType) => {
     setItems(prevItems => prevItems.map(item =>
       item.item_index === indexToUpdate ? { ...item, item_type: newType } : item
@@ -161,7 +182,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         vendor_address: '',
         vendor_contact: '',
         vendor_email: '',
-        base_total_value: '',
+        unit_price: '',
+        base_total_value: 0,
         gst_percentage: 18,
         total_amount: 0,
         net_amount_payable: 0,
@@ -186,7 +208,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     const flatQuotations = [];
     for (const [itemIndex, itemQuotes] of Object.entries(quotes)) {
       const matchingLineItem = items.find(i => i.item_index === parseInt(itemIndex)) || {};
-
       itemQuotes.forEach(q => {
         if (q.vendor_name && q.base_total_value) {
           flatQuotations.push({
@@ -195,6 +216,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             vendor_address: q.vendor_address || "",
             vendor_contact: q.vendor_contact || "",
             vendor_email: q.vendor_email || "",
+            unit_price: parseFloat(q.unit_price) || 0, // 🎯 Now storing unit_price in DB
             base_total_value: parseFloat(q.base_total_value) || 0,
             gst_percentage: parseFloat(q.gst_percentage) || 18,
             total_amount: parseFloat(q.net_amount_payable) || 0,
@@ -214,15 +236,12 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         }
       });
     }
-
     if (flatQuotations.length === 0) {
-      setAlert({ type: 'error', message: "Enter at least one valid vendor quote (Name & Base Amount) before submitting." });
+      setAlert({ type: 'error', message: "Enter at least one valid vendor quote (Name & Unit Price) before submitting." });
       return;
     }
-
     setLoading(true);
     try {
-      // 🎯 UPDATED: Passing the items array along with quotations to push classification changes
       const res = await axios.post(`${API_BASE_URL}/requisitions/${selectedTicket.ticket_number}/quotations`, { 
         quotations: flatQuotations,
         items: items
@@ -234,43 +253,41 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     finally { setLoading(false); }
   };
 
-  // --- STRATEGIC CONFIGURATION RESOLVER ---
   const getContextualUiSettings = () => {
     const category = selectedTicket?.category || selectedHistoryTicket?.category || 'GOODS';
     switch (category) {
       case 'VEHICLE':
         return {
-          amountLabel: "Monthly Rental Rate (Excl. GST)",
-          addressLabel: "Vehicle Deployment Base / Site Location",
-          addressPlaceholder: "e.g. Joda Mining Site Yard, Odisha...",
-          contactLabel: "Site Reporting Authority / Supervisor Name",
-          timeLabel: "Contract Tenure / Lock-In Duration",
+          amountLabel: "Monthly Rent Rate/Vehicle",
+          addressLabel: "Vehicle Deployment Site",
+          addressPlaceholder: "e.g. Joda Mining Site Yard...",
+          contactLabel: "Reporting Supervisor Name",
+          timeLabel: "Contract Tenure",
           timePlaceholder: "e.g. 12 Months",
-          remarksPlaceholder: "e.g. 24 hours shift, Diesel paid at actuals, Maintenance under contractor scope..."
+          remarksPlaceholder: "e.g. Diesel paid at actuals, Maintenance by contractor..."
         };
       case 'ACCOMMODATION':
         return {
-          amountLabel: "Monthly Rent Pricing (Excl. GST)",
-          addressLabel: "Guest House Physical Location Address",
-          addressPlaceholder: "Full flat/building location coordinates...",
-          contactLabel: "Aarvi Warden / Property Coordinator Person",
-          timeLabel: "Vacation Notice Period Liability",
+          amountLabel: "Monthly Rent Rate/Room",
+          addressLabel: "Guest House Exact Address",
+          addressPlaceholder: "Full location coordinates...",
+          contactLabel: "Aarvi Warden Name",
+          timeLabel: "Vacation Notice Period",
           timePlaceholder: "e.g. 30 Days Notice",
-          remarksPlaceholder: "e.g. Water bills in owner scope, Electricity paid by Aarvi at actuals, Maintenance under owner..."
+          remarksPlaceholder: "e.g. Water bills in owner scope, Maintenance under owner..."
         };
       default:
         return {
-          amountLabel: "Base Total (Excl. GST)",
+          amountLabel: "Unit Price (Per Item)", // 🎯 CHANGED LABEL TO UNIT PRICE
           addressLabel: "Exact Delivery Address",
-          addressPlaceholder: "Destination store/warehouse location details...",
-          contactLabel: "Site Storekeeper / Contact Name",
-          timeLabel: "Lead Time / Delivery Deadline",
+          addressPlaceholder: "Destination store location details...",
+          contactLabel: "Site Storekeeper Name",
+          timeLabel: "Lead Time / Deadline",
           timePlaceholder: "e.g. 7 Days",
-          remarksPlaceholder: "e.g. F.O.R Site delivery, Staggered delivery required, Test reports required..."
+          remarksPlaceholder: "e.g. F.O.R Site delivery, Test reports required..."
         };
     }
   };
-
   const ui = getContextualUiSettings();
 
   // 🎯 PDF / DOCUMENT FUNCTIONS FOR HISTORY VIEW
@@ -281,7 +298,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     }
     const element = document.getElementById('printable-po');
     const filenameString = `Aarvi_${selectedHistoryTicket.category}_${selectedHistoryTicket.ticket_number}.pdf`;
-
     const opt = {
       margin:       [15, 15, 15, 15], 
       filename:     filenameString,
@@ -398,7 +414,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
               ))
             )}
           </div>
-
+          
           <div className="xl:col-span-8">
             {selectedTicket ? (
               <div className="space-y-6">
@@ -420,10 +436,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                     <Card key={item.item_index} className="overflow-hidden border-slate-200 shadow-xs">
                       <div className="bg-slate-50 border-b border-slate-200 p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                         <div>
-                          <div className="flex items-center space-x-2 mb-1">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
                             <span className="bg-[#2c2a57] text-white text-[10px] font-black px-2 py-0.5 rounded font-mono">Row {item.item_index}</span>
-                            <span className="text-xs text-[#0b9c54] font-bold uppercase tracking-wider bg-[#0b9c54]/10 px-2 py-0.5 rounded border border-[#0b9c54]/10">Units Requested: {item.quantity}</span>
-                            {/* 🎯 NEW: Asset vs Consumable Dropdown */}
+                            <span className="text-[10px] sm:text-xs text-[#0b9c54] font-bold uppercase tracking-wider bg-[#0b9c54]/10 px-2 py-0.5 rounded border border-[#0b9c54]/10">
+                              Units Requested: {item.quantity}
+                            </span>
                             <select
                               value={item.item_type || 'Consumable'}
                               onChange={(e) => handleItemClassificationChange(item.item_index, e.target.value)}
@@ -437,168 +454,180 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         </div>
                       </div>
 
-                      <div className="p-4 bg-white">
+                      <div className="p-3 sm:p-4 bg-white">
                         <div className="grid grid-cols-1 gap-4">
                           {(quotes[item.item_index] || []).map((quote, qIdx) => (
                             <div key={qIdx} className="bg-slate-50/50 border border-slate-200 rounded-xl p-4 sm:p-5 relative group hover:border-slate-400 transition-all">
-                              <button onClick={() => removeQuoteBox(item.item_index, qIdx)} className="absolute top-3 right-3 text-slate-400 hover:text-rose-600 transition-colors"><Trash2 size={15} /></button>
+                              <button onClick={() => removeQuoteBox(item.item_index, qIdx)} className="absolute top-3 right-3 text-slate-400 hover:text-rose-600 transition-colors p-1"><Trash2 size={15} /></button>
                               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Option {qIdx + 1}</h4>
                               
-                              <div className="space-y-3">
+                              <div className="space-y-4">
+                                {/* Vendor Details Row */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <div>
-    <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
-    <input 
-      list={`vendor-list-${item.item_index}-${qIdx}`}
-      type="text" 
-      value={quote.vendor_name} 
-      onChange={(e) => {
-        const selectedName = e.target.value;
-        handleQuoteChange(item.item_index, qIdx, 'vendor_name', selectedName);
-        
-        // THE AUTO-FILL ENGINE
-        const matchedVendor = vendors.find(v => v.name === selectedName);
-        if (matchedVendor) {
-          handleQuoteChange(item.item_index, qIdx, 'vendor_address', matchedVendor.address || '');
-          handleQuoteChange(item.item_index, qIdx, 'vendor_contact', matchedVendor.contact_number || '');
-          handleQuoteChange(item.item_index, qIdx, 'vendor_email', matchedVendor.email || '');
-        }
-      }} 
-      placeholder="Type to search or enter new..." 
-      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all" 
-    />
-    <datalist id={`vendor-list-${item.item_index}-${qIdx}`}>
-      {vendors.map(v => (
-        <option key={v.id} value={v.name} />
-      ))}
-    </datalist>
-  </div>
+                                    <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
+                                    <input 
+                                      list={`vendor-list-${item.item_index}-${qIdx}`}
+                                      type="text" 
+                                      value={quote.vendor_name} 
+                                      onChange={(e) => {
+                                        const selectedName = e.target.value;
+                                        handleQuoteChange(item.item_index, qIdx, 'vendor_name', selectedName);
+                                        const matchedVendor = vendors.find(v => v.name === selectedName);
+                                        if (matchedVendor) {
+                                          handleQuoteChange(item.item_index, qIdx, 'vendor_address', matchedVendor.address || '');
+                                          handleQuoteChange(item.item_index, qIdx, 'vendor_contact', matchedVendor.contact_number || '');
+                                          handleQuoteChange(item.item_index, qIdx, 'vendor_email', matchedVendor.email || '');
+                                        }
+                                      }} 
+                                      placeholder="Type to search or enter new..." 
+                                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all" 
+                                    />
+                                    <datalist id={`vendor-list-${item.item_index}-${qIdx}`}>
+                                      {vendors.map(v => <option key={v.id} value={v.name} />)}
+                                    </datalist>
+                                  </div>
                                   <div>
                                     <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Office Address</label>
-                                    <input type="text" value={quote.vendor_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_address', e.target.value)} placeholder="Full operating address..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                    <input type="text" value={quote.vendor_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_address', e.target.value)} placeholder="Full operating address..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                 </div>
 
+                                {/* Math & Contact Row */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                                   <div>
                                     <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Phone/Cell</label>
-                                    <input type="text" value={quote.vendor_contact} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_contact', e.target.value)} placeholder="+91-987..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                    <input type="text" value={quote.vendor_contact} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_contact', e.target.value)} placeholder="+91-987..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                   <div>
                                     <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Email ID</label>
-                                    <input type="text" value={quote.vendor_email} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_email', e.target.value)} placeholder="sales@vendor.com" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                    <input type="text" value={quote.vendor_email} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_email', e.target.value)} placeholder="sales@vendor.com" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
+
+                                  {/* 🎯 UPDATED: Unit Price Input triggers Auto-Math */}
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">{ui.amountLabel}</label>
-                                    <input type="number" value={quote.base_total_value} onChange={(e) => {
-                                      const base = parseFloat(e.target.value) || 0;
-                                      const gst = parseFloat(quote.gst_percentage) || 18;
-                                      const net = base + (base * (gst / 100));
-                                      handleQuoteChange(item.item_index, qIdx, 'base_total_value', base);
-                                      handleQuoteChange(item.item_index, qIdx, 'net_amount_payable', net);
-                                    }} placeholder="0.00" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold outline-none" />
+                                    <label className="block text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.amountLabel} *</label>
+                                    <input 
+                                      type="number" 
+                                      value={quote.unit_price} 
+                                      onChange={(e) => handleAmountChange(item.item_index, qIdx, e.target.value, quote.gst_percentage, item.quantity)} 
+                                      placeholder="0.00" 
+                                      className="w-full bg-emerald-50 border border-emerald-300 rounded-lg px-3 py-2 text-xs font-bold text-emerald-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all" 
+                                    />
                                   </div>
+
+                                  {/* 🎯 UPDATED: GST Input triggers Auto-Math */}
                                   <div>
                                     <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">GST Percentage (%)</label>
-                                    <input type="number" value={quote.gst_percentage} onChange={(e) => {
-                                      const gst = parseFloat(e.target.value) || 0;
-                                      const base = parseFloat(quote.base_total_value) || 0;
-                                      const net = base + (base * (gst / 100));
-                                      handleQuoteChange(item.item_index, qIdx, 'gst_percentage', gst);
-                                      handleQuoteChange(item.item_index, qIdx, 'net_amount_payable', net);
-                                    }} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                    <input 
+                                      type="number" 
+                                      value={quote.gst_percentage} 
+                                      onChange={(e) => handleAmountChange(item.item_index, qIdx, quote.unit_price, e.target.value, item.quantity)} 
+                                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" 
+                                    />
                                   </div>
                                 </div>
 
+                                {/* Delivery Info Row */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.addressLabel}</label>
-                                    <input type="text" value={quote.delivery_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'delivery_address', e.target.value)} placeholder={ui.addressPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                    <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.addressLabel}</label>
+                                    <input type="text" value={quote.delivery_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'delivery_address', e.target.value)} placeholder={ui.addressPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.contactLabel}</label>
-                                    <input type="text" value={quote.site_contact_person} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_person', e.target.value)} placeholder="Personnel reference name..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                    <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.contactLabel}</label>
+                                    <input type="text" value={quote.site_contact_person} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_person', e.target.value)} placeholder="Personnel reference name..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Contact Phone Number</label>
-                                    <input type="text" value={quote.site_contact_phone} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_phone', e.target.value)} placeholder="+91-886..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                    <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Contact Phone Number</label>
+                                    <input type="text" value={quote.site_contact_phone} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_phone', e.target.value)} placeholder="+91-886..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                 </div>
 
+                                {/* Math Result & Terms Row */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <div>
                                     <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
-                                    <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                    <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
+
+                                  {/* 🎯 BEAUTIFUL CALCULATED NET VALUE DISPLAY */}
                                   <div>
-                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Calculated Net Value (Incl. GST)</label>
-                                    <div className="w-full bg-slate-100 text-slate-800 rounded-lg px-3 py-2 text-xs font-black border border-slate-200">
-                                      ₹{(quote.net_amount_payable || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                    <label className="block text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
+                                    <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner">
+                                      <span className="text-sm font-black tracking-tight">
+                                        ₹{(quote.net_amount_payable || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                      </span>
+                                      <span className="text-[10px] font-bold text-emerald-700/70 font-mono hidden sm:block">
+                                        (Total Base: ₹{(quote.base_total_value || 0).toLocaleString('en-IN')})
+                                      </span>
                                     </div>
                                   </div>
                                 </div>
 
+                                {/* Remarks Row */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <div>
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Contract / Service Custom Clauses</label>
-                                    <input type="text" value={quote.special_terms} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'special_terms', e.target.value)} placeholder={ui.remarksPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Contract / Service Custom Clauses</label>
+                                    <input type="text" value={quote.special_terms} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'special_terms', e.target.value)} placeholder={ui.remarksPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                   <div>
                                     <label className="block text-[10px] font-bold text-amber-600 uppercase mb-1">Quality / Technical Remarks</label>
-                                    <input type="text" value={quote.quality_remarks || ''} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'quality_remarks', e.target.value)} placeholder="e.g. Test Certificates provided, OEM 1-yr warranty active..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none" />
+                                    <input type="text" value={quote.quality_remarks || ''} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'quality_remarks', e.target.value)} placeholder="e.g. OEM 1-yr warranty active..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-amber-500 focus:ring-1 transition-all" />
                                   </div>
                                 </div>
+
                                 {/* OPTIONAL ATTACHMENT CONTROLLER LAYER */}
                                 <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
                                   <div>
                                     <label className="block text-[10px] font-bold text-indigo-600 uppercase mb-1">
                                       Attach Supplier Quotation Document (Optional)
                                     </label>
-                                    <div className="flex items-center space-x-3 bg-white p-2 border border-slate-300 rounded-lg">
+                                    <div className="flex items-center space-x-3 bg-white p-1.5 border border-slate-300 rounded-lg">
                                       <input 
                                         type="file" 
                                         accept=".pdf,.doc,.docx"
-                                        className="text-xs font-medium text-slate-600 outline-none file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-bold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer w-full"
+                                        className="text-xs font-medium text-slate-600 outline-none file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer w-full"
                                         onChange={async (e) => {
                                           const selectedFile = e.target.files[0];
                                           if (!selectedFile) return;
-
                                           const formData = new FormData();
                                           formData.append("file", selectedFile);
-
                                           try {
-                                            setAlert({ type: 'success', message: `Uploading document to secure repository...` });
-                                            
-                                            // Dispatch multipart form stream to backend API endpoint
+                                            setAlert({ type: 'success', message: `Uploading document...` });
                                             const res = await axios.post(
                                               `${API_BASE_URL}/upload/quotation?ticket_number=${selectedTicket.ticket_number}&item_index=${item.item_index}&option_index=${qIdx + 1}`, 
                                               formData, 
                                               { headers: { 'Content-Type': 'multipart/form-data' } }
                                             );
-                                            
-                                            // Assign the static reference URL into the corresponding quote option state cell
                                             handleQuoteChange(item.item_index, qIdx, 'file_url', res.data.file_url);
-                                            setAlert({ type: 'success', message: `Document verified and attached successfully: ${selectedFile.name}` });
+                                            setAlert({ type: 'success', message: `Attached successfully: ${selectedFile.name}` });
                                           } catch (err) {
-                                            setAlert({ type: 'error', message: err.response?.data?.detail || "Document upload execution failure." });
+                                            setAlert({ type: 'error', message: "Document upload execution failure." });
                                           }
                                         }}
                                       />
                                       {quote.file_url && (
-                                        <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-md shrink-0 animate-pulse">
+                                        <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md shrink-0 animate-pulse">
                                           ✓ ATTACHED
                                         </span>
                                       )}
                                     </div>
                                   </div>
                                 </div>
+
                               </div>
                             </div>
                           ))}
-                          <div onClick={() => addQuoteBox(item.item_index)} className="border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/20 flex flex-col items-center justify-center text-slate-400 hover:text-[#0b9c54] hover:border-[#0b9c54]/40 hover:bg-[#0b9c54]/5 transition-all cursor-pointer min-h-[100px] py-4">
-                            <Plus size={20} className="mb-1" />
-                            <span className="text-xs font-bold uppercase tracking-wider">Add Alternative Quote Option</span>
+                          
+                          {/* Add Quote Option Button */}
+                          <div onClick={() => addQuoteBox(item.item_index)} className="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center text-slate-500 hover:text-[#0b9c54] hover:border-[#0b9c54]/50 hover:bg-[#0b9c54]/5 transition-all cursor-pointer min-h-[100px] py-4 group shadow-3xs">
+                            <div className="bg-white p-2 rounded-full shadow-sm group-hover:scale-110 transition-transform mb-2">
+                              <Plus size={18} className="text-slate-400 group-hover:text-[#0b9c54]" />
+                            </div>
+                            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider">Add Alternative Quote Option</span>
                           </div>
+
                         </div>
                       </div>
                     </Card>
@@ -616,7 +645,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       )}
 
       {/* ============================================================== */}
-      {/* VIEW B: PURCHASE HISTORY LEDGER (🎯 UPDATED TO DOCUMENT VIEWER)*/}
+      {/* VIEW B: PURCHASE HISTORY LEDGER (DOCUMENT VIEWER)              */}
       {/* ============================================================== */}
       {activeTab === 'history' && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
@@ -649,14 +678,14 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             {selectedHistoryTicket && historyPoItems.length > 0 ? (
               <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative animate-in fade-in duration-200">
                 
-                <div className="bg-slate-900 text-white p-4 flex justify-between items-center print:hidden">
+                <div className="bg-slate-900 text-white p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-3 print:hidden">
                   <div className="flex items-center space-x-2.5">
                     <Edit3 size={17} className="text-amber-400 animate-pulse" />
-                    <span className="text-xs uppercase font-bold tracking-tight text-amber-50">Live Editable Canvas • Data locked from approved bids</span>
+                    <span className="text-[10px] sm:text-xs uppercase font-bold tracking-tight text-amber-50">Live Editable Canvas • Locked Data</span>
                   </div>
                   <button 
                     onClick={handleDownloadPDF} 
-                    className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center space-x-2 px-5 py-2 text-xs font-bold shadow-xs"
+                    className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-2 px-5 py-2 text-xs font-bold shadow-xs w-full sm:w-auto"
                   >
                     <Download size={14} /> <span>Download Full PDF</span>
                   </button>
@@ -681,13 +710,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         <p className="text-slate-600 font-mono mt-1">Cell No.: {primaryLine.vendor_contact || "N/A"}</p>
                         <p className="text-slate-600 font-mono">EMAIL:- {primaryLine.vendor_email || "N/A"}</p>
                       </div>
-
                       <div contentEditable="true" className="space-y-1 avoid-break">
                         <p className="font-bold text-sm text-slate-900 mt-4">Subject: Purchase Order for {primaryLine.product_description?.split(' ')[0] || 'Materials'}.</p>
                         <p className="text-xs text-slate-700 mt-2">Dear Sir,</p>
                         <p className="text-xs text-slate-700">With reference to Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'recent submission'}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of {primaryLine.product_description || 'goods'} with your company.</p>
                       </div>
-
                       <div className="avoid-break mt-4">
                         <table className="w-full text-left border-collapse border border-slate-400">
                           <thead>
@@ -729,7 +756,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           </tbody>
                         </table>
                       </div>
-
                       <div className="grid grid-cols-12 gap-2 text-[11px] leading-tight text-slate-800 mt-6 avoid-break" contentEditable="true">
                         <div className="col-span-1 font-bold">a)</div>
                         <div className="col-span-3 font-bold uppercase">TERMS OF PAYMENTS</div>
@@ -743,9 +769,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         <div className="col-span-3 font-bold uppercase">PROJECT</div>
                         <div className="col-span-8 font-bold">{selectedHistoryTicket.project_name}</div>
                       </div>
-
                       <p className="font-bold text-[11px] mt-4 avoid-break">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
-
                       <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3">
                         <p className="font-bold avoid-break">The placement of order is subject to the following Terms & Conditions:-</p>
                         <p className="avoid-break"><strong>1. PRICE:</strong><br/>The cost of Purchase with GST as shown above is Rs. {(selectedHistoryTicket.grand_total || 0).toLocaleString('en-IN')}/- (Rupees {convertNumberToWords(Math.round(selectedHistoryTicket.grand_total || 0))}). This is a fixed-price order and no escalation is applicable.</p>
@@ -777,7 +801,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         <p className="text-xs mt-2">With reference to your quotation the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place order for Hiring Vehicle with you as per the terms & conditions mentioned in this contract.</p>
                         <p className="text-xs mt-2">Mr. {primaryLine.vendor_name} hereinafter referred to as the "Contractor" of Vehicle, and M/s. Aarvi Encon Ltd hereinafter referred to as the "Client".</p>
                       </div>
-
                       <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break">Article 1</p>
                       <p className="text-xs -mt-2 avoid-break">The subject of the present Contract is the vehicle owned by the Contractor having the following characteristics & providing services for the following sites as & when required:-</p>
                       
@@ -806,7 +829,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         </table>
                         <p className="text-[11px] font-bold text-slate-900 mt-2">GST Extra as applicable</p>
                       </div>
-
                       <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded">
                         <p className="font-bold text-[12px] avoid-break">NOTE: -</p>
                         <p className="avoid-break">1. Duty hrs shall be as per site schedule.</p>
@@ -835,7 +857,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           <p className="font-bold text-[12px] underline">Article 3</p>
                           <p className="mt-1">The monthly rental rate shall be as above.</p>
                         </div>
-
                         <div className="pt-2 avoid-break">
                           <p className="font-bold text-[12px] underline">Article 4</p>
                           <p className="mt-1">The Contractor shall be responsible for any and all tax liabilities, either related to ownership of the vehicle or deriving from the rental contract, in accordance with the legislation of Government of India from time to time and location to location.</p>
@@ -845,7 +866,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           <p className="font-bold text-[12px] underline">Article 5</p>
                           <p className="mt-1">The Client shall not be responsible for any damages caused by third parties, viz., violent public demonstration, or natural disaster and any breakdown of the vehicle.<br/>The Contractor shall repair immediately, if any and all damages caused during the said contract period and the cost / replacement / stand by vehicle cost will be paid you & the services should not affect the Client business, anyway.</p>
                         </div>
-
                         <div className="pt-2 avoid-break">
                           <p className="font-bold text-[12px] underline">Article 6</p>
                           <p className="mt-1">The vehicle is to be delivered in good condition; driver and all documents related to the vehicle shall be in order.</p>
@@ -906,7 +926,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         <p className="text-xs mt-2">With reference to your quotation of the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order to rent a Guest House with you as per the terms & conditions mentioned in this contract.</p>
                         <p className="text-xs mt-2">Mr. {primaryLine.vendor_name}, hereinafter referred to as the "Contractor" of the Guest House and M/s. Aarvi Encon Ltd, hereinafter referred to as the "Client".</p>
                       </div>
-
                       <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break">Article 1</p>
                       <p className="text-xs -mt-2 avoid-break">The subject of the present Contract is the Guest House owned by the Contractor, having the following characteristics & providing service for the following sites as & when required:-</p>
                       
@@ -939,7 +958,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         </table>
                         <p className="text-[11px] text-slate-900 mt-2 font-bold">NOTE: -<br/>1. All rooms and washrooms should be properly available and in a hygienic condition at the time of shifting candidates.</p>
                       </div>
-
                       <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded">
                         <div className="avoid-break">
                           <p className="font-bold text-[12px] underline">Article 2</p>
@@ -1005,7 +1023,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         <p className="text-slate-900 font-bold mt-2">Subject: Purchase Order for Food.</p>
                         <p className="text-[12px] mt-4 leading-relaxed">With reference to your Quotation, dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `26.05.${currentYear}`}, and the subsequent discussion with our Mr Kishor Nikam (BUSINESS DEVELOPMENT), we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order for the supply of Food as mentioned below:-</p>
                       </div>
-
                       <div className="pl-6 py-6 font-bold text-[13px] text-slate-900 space-y-4 border-l-4 border-slate-300 ml-4 my-6 avoid-break" contentEditable="true">
                         {historyPoItems.map((item, idx) => (
                           <p key={idx}>{item.product_description} Rate Rs. {item.unit_price || item.base_total_value}/- {item.special_terms || 'per meal'}.</p>
@@ -1014,13 +1031,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                            <p>Sunday Rate Rs. {historyPoItems[0].unit_price ? historyPoItems[0].unit_price + 40 : 300}/- per meal Special Dinner.</p>
                         )}
                       </div>
-
                       <div className="text-[12px] space-y-2 mt-4 avoid-break" contentEditable="true">
                         <p><strong>Terms of payment:-</strong> {primaryLine.payment_terms || "100% payment to be made against submission of Invoices"}</p>
                         <p><strong>Project Name:</strong> {selectedHistoryTicket.project_name}</p>
                         <p><strong>Our GST Registration no.:</strong> 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.</p>
                       </div>
-
                       <div contentEditable="true" className="pt-6 text-[12px] leading-relaxed text-slate-800 space-y-4">
                         <p className="font-bold underline mb-4 avoid-break">The placement of work Order is subject to the following Terms & Conditions:-</p>
                         
