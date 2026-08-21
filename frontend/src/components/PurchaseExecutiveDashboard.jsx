@@ -101,7 +101,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           vendor_address: '',
           vendor_contact: '',
           vendor_email: '',
-          unit_price: '', // 🎯 NEW: Replaced base_total with Unit Price
+          unit_price: '',
           base_total_value: 0,
           gst_percentage: 18,
           total_amount: 0,
@@ -169,6 +169,33 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     });
   };
 
+  // 🎯 DYNAMIC QUANTITY UPDATER
+  const handleItemQuantityChange = (indexToUpdate, newQuantity) => {
+    const qty = parseInt(newQuantity) || 1;
+
+    setItems(prevItems => prevItems.map(item =>
+      item.item_index === indexToUpdate ? { ...item, quantity: qty } : item
+    ));
+
+    setQuotes(prev => {
+      const updatedItemQuotes = [...(prev[indexToUpdate] || [])];
+      const recalculatedQuotes = updatedItemQuotes.map(quote => {
+        const unitVal = parseFloat(quote.unit_price) || 0;
+        const gstVal = parseFloat(quote.gst_percentage) || 0;
+        
+        const base = unitVal * qty;
+        const net = base + (base * (gstVal / 100));
+        
+        return {
+          ...quote,
+          base_total_value: base,
+          net_amount_payable: net
+        };
+      });
+      return { ...prev, [indexToUpdate]: recalculatedQuotes };
+    });
+  };
+
   const handleItemClassificationChange = (indexToUpdate, newType) => {
     setItems(prevItems => prevItems.map(item =>
       item.item_index === indexToUpdate ? { ...item, item_type: newType } : item
@@ -216,7 +243,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             vendor_address: q.vendor_address || "",
             vendor_contact: q.vendor_contact || "",
             vendor_email: q.vendor_email || "",
-            unit_price: parseFloat(q.unit_price) || 0, // 🎯 Now storing unit_price in DB
+            unit_price: parseFloat(q.unit_price) || 0,
             base_total_value: parseFloat(q.base_total_value) || 0,
             gst_percentage: parseFloat(q.gst_percentage) || 18,
             total_amount: parseFloat(q.net_amount_payable) || 0,
@@ -278,7 +305,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         };
       default:
         return {
-          amountLabel: "Unit Price (Per Item)", // 🎯 CHANGED LABEL TO UNIT PRICE
+          amountLabel: "Unit Price (Per Item)", 
           addressLabel: "Exact Delivery Address",
           addressPlaceholder: "Destination store location details...",
           contactLabel: "Site Storekeeper Name",
@@ -290,7 +317,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   };
   const ui = getContextualUiSettings();
 
-  // 🎯 PDF / DOCUMENT FUNCTIONS FOR HISTORY VIEW
+  // PDF / DOCUMENT FUNCTIONS FOR HISTORY VIEW
   const handleDownloadPDF = () => {
     if (!pdfEngineReady && !window.html2pdf) {
       alert("PDF engine is still loading. Please wait a moment.");
@@ -356,7 +383,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   return (
     <div className="space-y-6 pb-12">
       
-      {/* 🛡️ DEEP CSS ISOLATION FOR PDF EXPORT */}
+      {/* DEEP CSS ISOLATION FOR PDF EXPORT */}
       <style>{`
         .avoid-break, p, tr, td, h1, h2, h3, table {
           page-break-inside: avoid !important;
@@ -438,13 +465,26 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         <div>
                           <div className="flex flex-wrap items-center gap-2 mb-1">
                             <span className="bg-[#2c2a57] text-white text-[10px] font-black px-2 py-0.5 rounded font-mono">Row {item.item_index}</span>
-                            <span className="text-[10px] sm:text-xs text-[#0b9c54] font-bold uppercase tracking-wider bg-[#0b9c54]/10 px-2 py-0.5 rounded border border-[#0b9c54]/10">
-                              Units Requested: {item.quantity}
-                            </span>
+                            
+                            {/* 🎯 EDITABLE QUANTITY BADGE */}
+                            <div className="flex items-center bg-[#0b9c54]/10 border border-[#0b9c54]/20 rounded px-1.5 py-0.5">
+                              <label className="text-[9px] sm:text-[10px] text-[#0b9c54] font-bold uppercase tracking-wider mr-1.5">
+                                Procure Qty:
+                              </label>
+                              <input 
+                                type="number" 
+                                min="1"
+                                value={item.quantity} 
+                                onChange={(e) => handleItemQuantityChange(item.item_index, e.target.value)}
+                                className="w-12 sm:w-16 bg-white border border-[#0b9c54]/30 rounded text-[10px] sm:text-xs font-black text-emerald-900 text-center outline-none focus:ring-1 focus:ring-[#0b9c54] transition-all"
+                                title="Edit Quantity if partial stock is already available"
+                              />
+                            </div>
+
                             <select
                               value={item.item_type || 'Consumable'}
                               onChange={(e) => handleItemClassificationChange(item.item_index, e.target.value)}
-                              className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border outline-none cursor-pointer bg-slate-100 text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors"
+                              className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border outline-none cursor-pointer bg-slate-100 text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors"
                             >
                               <option value="Consumable">📦 Consumable</option>
                               <option value="Asset">🖥️ Asset</option>
@@ -504,7 +544,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                     <input type="text" value={quote.vendor_email} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_email', e.target.value)} placeholder="sales@vendor.com" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
 
-                                  {/* 🎯 UPDATED: Unit Price Input triggers Auto-Math */}
+                                  {/* Unit Price Input triggers Auto-Math */}
                                   <div>
                                     <label className="block text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.amountLabel} *</label>
                                     <input 
@@ -516,7 +556,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                     />
                                   </div>
 
-                                  {/* 🎯 UPDATED: GST Input triggers Auto-Math */}
+                                  {/* GST Input triggers Auto-Math */}
                                   <div>
                                     <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">GST Percentage (%)</label>
                                     <input 
@@ -551,7 +591,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                     <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
 
-                                  {/* 🎯 BEAUTIFUL CALCULATED NET VALUE DISPLAY */}
+                                  {/* CALCULATED NET VALUE DISPLAY */}
                                   <div>
                                     <label className="block text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
                                     <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner">
@@ -577,7 +617,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
-                                {/* OPTIONAL ATTACHMENT CONTROLLER LAYER */}
+                                {/* ATTACHMENT CONTROLLER LAYER */}
                                 <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
                                   <div>
                                     <label className="block text-[10px] font-bold text-indigo-600 uppercase mb-1">
