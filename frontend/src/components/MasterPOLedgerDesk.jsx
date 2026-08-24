@@ -3,8 +3,9 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { 
   FileCheck, Search, ChevronDown, ChevronUp, Landmark, Layers3, 
-  Save, Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
-  UploadCloud, Paperclip, Trash2, FileText, CheckCircle2 
+  Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
+  UploadCloud, Paperclip, Trash2, FileText, CheckCircle2,
+  ShieldAlert, AlertOctagon
 } from 'lucide-react';
 import { Card, Button } from './ui/SharedUI';
 
@@ -18,6 +19,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [selectedPoForView, setSelectedPoForView] = useState(null);
   const [poItems, setPoItems] = useState([]);
   
+  // 🎯 NEW: Store dynamically fetched history logs for expanded rows
+  const [rowLogs, setRowLogs] = useState({});
+
   // Filter Dropdown Selection States
   const [selectedProjectFilter, setSelectedProjectFilter] = useState('ALL');
   const [selectedTimeFilter, setSelectedTimeFilter] = useState('ALL'); 
@@ -79,6 +83,22 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }, 0);
     return () => { isMounted = false; clearTimeout(timer); };
   }, [fetchLedgerPOs]);
+
+  // 🎯 NEW: Fetch History Log when expanding a row to see GRN Discrepancy details
+  const toggleExpandRow = async (poNumber, ticketNumber) => {
+    const isCurrentlyExpanded = !!expandedRows[poNumber];
+    setExpandedRows(prev => ({ ...prev, [poNumber]: !isCurrentlyExpanded }));
+    
+    // Only fetch if we are opening it and don't already have the logs
+    if (!isCurrentlyExpanded && !rowLogs[poNumber]) {
+      try {
+        const res = await axios.get(`${API_BASE_URL}/requisitions/${ticketNumber}/history`);
+        setRowLogs(prev => ({ ...prev, [poNumber]: res.data }));
+      } catch (err) {
+        console.error("Failed to fetch row history logs", err);
+      }
+    }
+  };
 
   // --- Signed PO Form Handlers ---
   const handlePoFileChange = (poNumber, event) => {
@@ -251,7 +271,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const uniqueProjectFilterOptions = useMemo(() => ['ALL', ...new Set(ledgerList.map(po => po.project_code))], [ledgerList]);
 
   return (
-    <div className="space-y-6 relative">
+    <div className="space-y-6 relative sm:px-2 md:px-4 lg:px-0">
       
       {/* SECTION VIEW A: DOCUMENT PREVIEW */}
       {selectedPoForView ? (
@@ -261,61 +281,63 @@ export default function MasterPOLedgerDesk({ currentUser }) {
               <ArrowLeft size={16} /> <span>Return to Master Ledger Desk</span>
             </button>
             <Button variant="primary" onClick={() => window.print()} className="shadow-sm bg-[#0b9c54] hover:bg-emerald-600">
-              <Printer size={16} className="mr-2" /> <span>Print / Save as PDF</span>
+              <Printer size={16} className="mr-2 hidden sm:inline" /> <span>Print / Save as PDF</span>
             </Button>
           </div>
 
-          <div className="bg-white p-12 mx-auto border border-slate-200 shadow-lg max-w-4xl text-sm text-slate-800 font-sans">
-            <div className="flex justify-between items-start border-b-[3px] border-[#2c2a57] pb-6 mb-8">
-              <div>
-                <h1 className="text-4xl font-black text-[#2c2a57] tracking-tighter">AARVI ENCON</h1>
-                <p className="text-[10px] text-slate-500 font-bold tracking-[0.2em] uppercase mt-1">Official Purchase Order</p>
+          <div className="bg-white p-6 sm:p-12 mx-auto border border-slate-200 shadow-lg max-w-4xl text-sm text-slate-800 font-sans overflow-x-auto">
+            <div className="min-w-[600px]">
+              <div className="flex justify-between items-start border-b-[3px] border-[#2c2a57] pb-6 mb-8">
+                <div>
+                  <h1 className="text-4xl font-black text-[#2c2a57] tracking-tighter">AARVI ENCON</h1>
+                  <p className="text-[10px] text-slate-500 font-bold tracking-[0.2em] uppercase mt-1">Official Purchase Order</p>
+                </div>
+                <div className="text-right">
+                  <h2 className="text-2xl font-bold text-slate-900">{selectedPoForView.po_number}</h2>
+                  <p className="text-xs text-slate-500 mt-1 font-mono">Date: {selectedPoForView.generated_at}</p>
+                </div>
               </div>
-              <div className="text-right">
-                <h2 className="text-2xl font-bold text-slate-900">{selectedPoForView.po_number}</h2>
-                <p className="text-xs text-slate-500 mt-1 font-mono">Date: {selectedPoForView.generated_at}</p>
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-12 mb-10">
-              <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                <h3 className="text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-2">To Vendor</h3>
-                <p className="font-extrabold text-slate-900 text-base">{selectedPoForView.vendor_name}</p>
-                <p className="text-slate-600 text-xs mt-1.5 whitespace-pre-wrap">{selectedPoForView.vendor_address || "Address Not Available"}</p>
+              <div className="grid grid-cols-2 gap-12 mb-10">
+                <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                  <h3 className="text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-2">To Vendor</h3>
+                  <p className="font-extrabold text-slate-900 text-base">{selectedPoForView.vendor_name}</p>
+                  <p className="text-slate-600 text-xs mt-1.5 whitespace-pre-wrap">{selectedPoForView.vendor_address || "Address Not Available"}</p>
+                </div>
+                <div className="bg-emerald-50/50 p-4 rounded-lg border border-emerald-100/50">
+                  <h3 className="text-[10px] font-black uppercase text-[#0b9c54] tracking-wider mb-2">Project Destination</h3>
+                  <p className="font-extrabold text-slate-900 text-base">{selectedPoForView.project_name}</p>
+                  <p className="text-slate-600 text-xs mt-1 font-mono">Project Code: {selectedPoForView.project_code}</p>
+                </div>
               </div>
-              <div className="bg-emerald-50/50 p-4 rounded-lg border border-emerald-100/50">
-                <h3 className="text-[10px] font-black uppercase text-[#0b9c54] tracking-wider mb-2">Project Destination</h3>
-                <p className="font-extrabold text-slate-900 text-base">{selectedPoForView.project_name}</p>
-                <p className="text-slate-600 text-xs mt-1 font-mono">Project Code: {selectedPoForView.project_code}</p>
-              </div>
-            </div>
 
-            <table className="w-full text-left mb-8 border-collapse">
-              <thead>
-                <tr className="bg-slate-800 text-white text-[10px] uppercase tracking-wider">
-                  <th className="py-2.5 px-3 text-center w-12">Sr.</th>
-                  <th className="py-2.5 px-3">Description & Specifications</th>
-                  <th className="py-2.5 px-3 text-center w-20">Qty</th>
-                  <th className="py-2.5 px-3 text-right w-32">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {poItems.map((item, i) => (
-                  <tr key={i} className="text-xs border-b border-slate-200">
-                    <td className="py-3 px-3 text-center text-slate-500 font-mono">{i + 1}</td>
-                    <td className="py-3 px-3 font-bold text-slate-800">{item.product_description}</td>
-                    <td className="py-3 px-3 text-center font-mono font-bold">{item.quantity || 1}</td>
-                    <td className="py-3 px-3 text-right font-mono font-black text-slate-900">₹{(item.base_total_value || item.total_amount || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+              <table className="w-full text-left mb-8 border-collapse">
+                <thead>
+                  <tr className="bg-slate-800 text-white text-[10px] uppercase tracking-wider">
+                    <th className="py-2.5 px-3 text-center w-12">Sr.</th>
+                    <th className="py-2.5 px-3">Description & Specifications</th>
+                    <th className="py-2.5 px-3 text-center w-20">Qty</th>
+                    <th className="py-2.5 px-3 text-right w-32">Total</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {poItems.map((item, i) => (
+                    <tr key={i} className="text-xs border-b border-slate-200">
+                      <td className="py-3 px-3 text-center text-slate-500 font-mono">{i + 1}</td>
+                      <td className="py-3 px-3 font-bold text-slate-800">{item.product_description}</td>
+                      <td className="py-3 px-3 text-center font-mono font-bold">{item.quantity || 1}</td>
+                      <td className="py-3 px-3 text-right font-mono font-black text-slate-900">₹{(item.base_total_value || item.total_amount || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
 
-            <div className="flex justify-end mb-10">
-              <div className="w-72 space-y-2 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <div className="flex justify-between text-sm font-black text-[#2c2a57]">
-                  <span>Grand Total:</span>
-                  <span className="font-mono text-lg">₹{selectedPoForView.grand_total.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+              <div className="flex justify-end mb-10">
+                <div className="w-72 space-y-2 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div className="flex justify-between text-sm font-black text-[#2c2a57]">
+                    <span>Grand Total:</span>
+                    <span className="font-mono text-lg">₹{selectedPoForView.grand_total.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -372,7 +394,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             </Card>
           </div>
 
-          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
               <input 
@@ -386,25 +408,26 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
                 <Filter size={12} className="text-slate-400" />
-                <span className="text-[11px] font-bold text-slate-500 uppercase">Site:</span>
-                <select value={selectedProjectFilter} onChange={(e) => setSelectedProjectFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer">
+                <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Site:</span>
+                <select value={selectedProjectFilter} onChange={(e) => setSelectedProjectFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer max-w-[120px] truncate">
                   {uniqueProjectFilterOptions.map(code => <option key={code} value={code}>{code}</option>)}
                 </select>
               </div>
               <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
                 <Calendar size={12} className="text-slate-400" />
-                <span className="text-[11px] font-bold text-slate-500 uppercase">Duration:</span>
+                <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Duration:</span>
                 <select value={selectedTimeFilter} onChange={(e) => setSelectedTimeFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer">
-                  <option value="ALL">All-Time Spend Records</option>
-                  <option value="6_MONTHS">Last 6 Months Outlay</option>
+                  <option value="ALL">All-Time</option>
+                  <option value="6_MONTHS">Last 6 Months</option>
                 </select>
               </div>
             </div>
           </div>
 
           <Card className="overflow-hidden border-slate-200 shadow-sm bg-white">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[1400px]">
+            {/* 🎯 MOBILE RESPONSIVE WRAPPER */}
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left border-collapse min-w-[1200px]">
                 <thead>
                   <tr className="text-[10px] uppercase font-black tracking-wider text-slate-400 bg-slate-50 border-b border-slate-200">
                     <th className="p-4 w-12 text-center">Manifest</th>
@@ -426,35 +449,52 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                     const taxForm = taxInvoiceForms[po.po_number] || {};
                     const poFileForm = poFileForms[po.po_number] || {};
                     
+                    // 🎯 Check if row contains a discrepancy or shortage
+                    const isDiscrepancy = po.status === 'Material Discrepancy Raised';
+                    const isShortage = po.status === 'Partially Delivered';
+
+                    // Extract the specific GRN log if available
+                    const poLogs = rowLogs[po.po_number] || [];
+                    const grnLogEntry = poLogs.find(l => 
+                      l.action_taken.includes("Material Delivered") || 
+                      l.action_taken.includes("Partial Delivery") || 
+                      l.action_taken.includes("CRITICAL ALERT")
+                    );
+
                     return (
                       <React.Fragment key={po.po_number}>
-                        <tr className={`hover:bg-slate-50/40 transition-colors ${isExpanded ? 'bg-indigo-50/20' : ''}`}>
+                        <tr className={`transition-colors ${isExpanded ? 'bg-indigo-50/20' : 'hover:bg-slate-50/40'} ${isDiscrepancy ? 'bg-rose-50/40 hover:bg-rose-50/60' : isShortage ? 'bg-amber-50/40 hover:bg-amber-50/60' : ''}`}>
                           
                           {/* Col 1: Manifest Expand */}
                           <td className="p-4 text-center align-top">
-                            <button onClick={() => setExpandedRows(prev => ({ ...prev, [po.po_number]: !prev[po.po_number] }))} className="text-slate-400 p-1 border rounded bg-white shadow-3xs">
+                            <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className={`p-1 border rounded shadow-3xs transition-colors ${isExpanded ? 'bg-[#2c2a57] text-white border-[#2c2a57]' : 'text-slate-400 bg-white hover:text-[#2c2a57]'}`}>
                               {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                             </button>
                           </td>
                           
                           {/* Col 2: Context */}
                           <td className="p-4 space-y-1 align-top">
-                            <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
+                            <div className={`font-mono font-black text-sm ${isDiscrepancy ? 'text-rose-700' : 'text-[#2c2a57]'}`}>{po.po_number}</div>
                             <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-mono mt-1"><Calendar size={10} className="text-[#0b9c54]" /> <span>PO Sealed: <strong>{po.generated_at}</strong></span></div>
                           </td>
                           
                           {/* Col 3: Project Scope */}
                           <td className="p-4 space-y-1 align-top">
                             <div><strong className="text-slate-900">{po.project_code}</strong></div>
-                            <div className="text-[10px] text-slate-500 truncate w-40">{po.project_name}</div>
-                            <div className={`mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded w-max uppercase tracking-wider ${po.status === 'Dispatched' || po.status.includes('Delivered') ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                            <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
+                            <div className={`mt-1.5 text-[9px] font-bold px-2 py-0.5 rounded w-max uppercase tracking-wider ${
+                              isDiscrepancy ? 'bg-rose-100 text-rose-800 border border-rose-200 animate-pulse' : 
+                              isShortage ? 'bg-amber-100 text-amber-800 border border-amber-200' : 
+                              po.status === 'Dispatched' || po.status.includes('Delivered') ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 
+                              'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                            }`}>
                               {po.status}
                             </div>
                           </td>
 
                           {/* Col 4: Vendor */}
                           <td className="p-4 space-y-0.5 leading-tight align-top">
-                            <div className="font-extrabold text-slate-800 uppercase line-clamp-2 pr-2">{po.vendor_name}</div>
+                            <div className="font-extrabold text-slate-800 uppercase line-clamp-2 pr-2" title={po.vendor_name}>{po.vendor_name}</div>
                           </td>
                           
                           {/* Col 5: Total */}
@@ -462,9 +502,8 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                             ₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                           </td>
                           
-                          {/* Col 6: 🎯 3-WAY DOCUMENT VAULT & UPLOADER */}
+                          {/* Col 6: 3-WAY DOCUMENT VAULT & UPLOADER */}
                           <td className="p-3 bg-slate-50/40 border-l border-slate-200 align-top">
-                            
                             <div className="flex flex-col gap-2 relative">
                               
                               {/* DOC 1: SYSTEM / SIGNED PO */}
@@ -490,7 +529,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                     <span className="text-[10px] font-bold text-slate-600">PO Document</span>
                                   </div>
                                   <div className="flex items-center gap-1.5">
-                                    <button onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-1.5 py-0.5 bg-indigo-50 rounded">
+                                    <button onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-1.5 py-0.5 bg-indigo-50 rounded transition-colors">
                                       📄 View PO
                                     </button>
                                     {po.signed_po_url ? (
@@ -516,13 +555,11 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                     <button onClick={() => toggleEditInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
                                   </div>
                                   
-                                  {/* Row 1: Invoice No & Date */}
                                   <div className="flex gap-2">
                                     <input type="text" value={piForm.invoice_no} onChange={(e) => handleInputChange(po.po_number, 'invoice_no', e.target.value)} placeholder="Invoice No." className="bg-white border border-amber-200 focus:ring-1 focus:ring-amber-400 rounded-md px-2 py-1.5 text-[10px] w-1/2 font-mono outline-none shadow-3xs" />
                                     <input type="text" value={piForm.invoice_date} onChange={(e) => handleInputChange(po.po_number, 'invoice_date', e.target.value)} placeholder="DD-MM-YYYY" className="bg-white border border-amber-200 focus:ring-1 focus:ring-amber-400 rounded-md px-2 py-1.5 text-[10px] w-1/2 font-mono outline-none shadow-3xs" />
                                   </div>
                                   
-                                  {/* Row 2: Payment Terms Only */}
                                   <div className="flex gap-2 mt-2">
                                     <input type="text" value={piForm.payment_terms} onChange={(e) => handleInputChange(po.po_number, 'payment_terms', e.target.value)} placeholder="Payment Terms" className="w-full bg-white border border-amber-200 focus:ring-1 focus:ring-amber-400 rounded-md px-2 py-1.5 text-[10px] outline-none shadow-3xs" />
                                   </div>
@@ -597,21 +634,45 @@ export default function MasterPOLedgerDesk({ currentUser }) {
 
                         {/* EXANDED MATERIAL MANIFEST ROW */}
                         {isExpanded && (
-                          <tr className="bg-slate-50/40">
-                            <td colSpan="6" className="p-4 pl-16 border-y border-slate-200">
+                          <tr className={`border-b-2 border-slate-200 ${isDiscrepancy ? 'bg-rose-50/20' : isShortage ? 'bg-amber-50/20' : 'bg-slate-50/40'}`}>
+                            <td colSpan="6" className="p-4 pl-16">
+                              
+                              {/* 🎯 DYNAMIC GRN DISCREPANCY AUDIT BANNER */}
+                              {(isDiscrepancy || isShortage) && grnLogEntry && (
+                                <div className={`mb-4 p-4 rounded-xl border ${isDiscrepancy ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
+                                  <div className="flex items-center space-x-2 mb-2">
+                                    {isDiscrepancy ? <ShieldAlert size={18} className="text-rose-600" /> : <AlertOctagon size={18} className="text-amber-600" />}
+                                    <h4 className={`text-xs font-black uppercase tracking-wider ${isDiscrepancy ? 'text-rose-800' : 'text-amber-800'}`}>
+                                      {grnLogEntry.action_taken}
+                                    </h4>
+                                  </div>
+                                  <div className="bg-white p-3 rounded-lg border border-slate-200/60 shadow-3xs space-y-1">
+                                    <p className="text-xs text-slate-800"><span className="font-bold text-slate-500 mr-2">Site Inspector Remarks:</span>{grnLogEntry.remarks.split(' | Proof')[0]}</p>
+                                    <div className="flex justify-between items-end mt-2 pt-2 border-t border-slate-100">
+                                      <p className="text-[10px] text-slate-400 font-mono">Logged by {grnLogEntry.user_name} on {grnLogEntry.timestamp}</p>
+                                      {grnLogEntry.remarks.includes('Proof File:') && (
+                                        <a href={grnLogEntry.remarks.split('Proof File: ')[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-600 hover:underline flex items-center gap-1">
+                                          View Attached Proof <Paperclip size={10} />
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
                               <div className="flex items-center space-x-2 text-[10px] font-black uppercase text-slate-400 tracking-wider mb-2.5">
                                 <span>Material Manifest Components</span>
                               </div>
                               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                                 {(po.items || []).map((item, idx) => (
-                                  <div key={idx} className="bg-white border border-slate-200 px-3 py-2 rounded-xl flex justify-between items-center shadow-3xs">
+                                  <div key={idx} className="bg-white border border-slate-200 px-3 py-2 rounded-xl flex justify-between items-center shadow-3xs hover:border-[#2c2a57]/30 transition-colors">
                                     <div className="truncate pr-4 flex flex-col">
-                                      <span className="font-bold text-slate-700 truncate">{item.desc}</span>
+                                      <span className="font-bold text-slate-700 truncate" title={item.desc}>{item.desc}</span>
                                       {item.is_reimbursable && (
                                         <span className="text-[9px] text-cyan-600 font-extrabold uppercase mt-0.5">✓ Reimbursable Asset</span>
                                       )}
                                     </div>
-                                    <span className="font-mono font-black text-[#0b9c54] bg-emerald-50 px-2 py-0.5 rounded text-[10px] flex-shrink-0">Qty: {item.qty}</span>
+                                    <span className="font-mono font-black text-[#0b9c54] bg-emerald-50 px-2 py-0.5 rounded text-[10px] flex-shrink-0 border border-emerald-100">Qty: {item.qty}</span>
                                   </div>
                                 ))}
                               </div>
