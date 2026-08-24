@@ -3,9 +3,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { 
   ShieldCheck, UserPlus, Key, Users, CheckCircle2, 
-  AlertCircle, Edit3, Power, X, Lock, Eye, EyeOff, User, Hash 
+  AlertCircle, Edit3, Power, X, Lock, Eye, EyeOff, User, Hash, Mail
 } from 'lucide-react';
-import { Card, Input, Button } from './ui/SharedUI';
+import { Card, Input, Button, StatusBadge } from './ui/SharedUI';
 
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
@@ -14,12 +14,12 @@ export default function ITAdminDashboard() {
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
-  // 🎯 FIX 4: Form states default to standardized strings
+  // Form states
   const [empcode, setEmpcode] = useState(''); 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('Project Manager'); // Defaulted to Project Manager
+  const [role, setRole] = useState('Project Manager'); 
 
   // Full Edit User Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -112,7 +112,7 @@ export default function ITAdminDashboard() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-12 px-4 sm:px-6 lg:px-8 animate-in fade-in duration-300 relative">
+    <div className="space-y-6 max-w-7xl mx-auto pb-12 px-2 sm:px-6 lg:px-8 animate-in fade-in duration-300 relative">
       
       {/* HEADER BAR */}
       <div className="border-b border-slate-200 pb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -133,7 +133,7 @@ export default function ITAdminDashboard() {
       )}
 
       {/* TOP SECTION: ROW-WISE REGISTRATION WORKSPACE */}
-      <Card className="p-6 border-slate-200 shadow-sm bg-white">
+      <Card className="p-4 sm:p-6 border-slate-200 shadow-sm bg-white">
         <h2 className="text-xs font-bold text-[#2c2a57] uppercase tracking-widest flex items-center gap-2 mb-5 border-b border-slate-100 pb-3">
           <UserPlus size={15} className="text-[#0b9c54]" /> Register & Provision System Operator
         </h2>
@@ -153,7 +153,6 @@ export default function ITAdminDashboard() {
           </div>
           <div className="lg:col-span-2">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">System Designation</label>
-            {/* 🎯 FIX 1 & 2: Added Accounts Role and standardized strings */}
             <select 
               value={role} 
               onChange={e => setRole(e.target.value)} 
@@ -163,13 +162,13 @@ export default function ITAdminDashboard() {
               <option value="Site Manager">Site Manager</option>
               <option value="Purchase Executive">Purchase Executive</option>
               <option value="Project Manager">Project Manager</option>
-              <option value="Accounts">Accounts / Finance</option> 
+              <option value="Accounts Executive">Accounts Executive</option> 
               <option value="Director">Director</option>
               <option value="Admin">IT Admin</option>
             </select>
           </div>
-          <div className="lg:col-span-1">
-            <Button type="submit" variant="success" disabled={loading} className="w-full h-[38px] flex items-center justify-center font-bold text-xs uppercase tracking-wide shadow-xs">
+          <div className="lg:col-span-1 mt-2 lg:mt-0">
+            <Button type="submit" variant="success" disabled={loading} className="w-full h-[38px] flex items-center justify-center font-bold text-xs uppercase tracking-wide shadow-xs bg-[#0b9c54] hover:bg-emerald-600">
               Save
             </Button>
           </div>
@@ -178,11 +177,57 @@ export default function ITAdminDashboard() {
 
       {/* BOTTOM SECTION: RESPONSIVE PERSONNEL MATRIX */}
       <Card className="overflow-hidden border-slate-200 shadow-sm bg-white">
-        <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center space-x-2">
-          <Users size={16} className="text-indigo-600" />
-          <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Active Identity & Access Directory ({users.length})</span>
+        <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between space-x-2">
+          <div className="flex items-center space-x-2">
+            <Users size={16} className="text-indigo-600" />
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Active Identity & Access Directory ({users.length})</span>
+          </div>
         </div>
-        <div className="overflow-x-auto">
+
+        {/* 📱 MOBILE CARD VIEW (Hidden on md and up) */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {users.map(u => (
+            <div key={u.id} className={`p-4 space-y-3 transition-colors ${u.is_active ? 'bg-white hover:bg-slate-50/50' : 'bg-slate-50/80 opacity-75'}`}>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-extrabold text-[#2c2a57] text-sm">{u.name}</h3>
+                  <div className="flex items-center text-[10px] text-slate-500 font-mono mt-0.5 space-x-2">
+                    <span className="flex items-center"><Hash size={10} className="mr-0.5"/> {u.empcode || 'Pending'}</span>
+                  </div>
+                </div>
+                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wide border ${u.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                  {u.is_active ? 'Active' : 'Locked'}
+                </span>
+              </div>
+              
+              <div className="flex flex-col space-y-1">
+                <div className="flex items-center text-xs text-slate-600"><Mail size={12} className="mr-1.5 text-slate-400"/> {u.email}</div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span className={`text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide border ${
+                  u.role === 'Admin' ? 'bg-purple-50 text-purple-700 border-purple-200' : 
+                  u.role === 'Accounts Executive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                  'bg-blue-50 text-blue-700 border-blue-200'
+                }`}>
+                  {u.role}
+                </span>
+                
+                <div className="flex items-center space-x-1">
+                  <button onClick={() => triggerEditModal(u)} className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+                    <Edit3 size={14} />
+                  </button>
+                  <button onClick={() => handleToggleStatus(u.email, u.name, u.is_active)} className={`p-2 rounded-lg ${u.is_active ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                    <Power size={14} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* 💻 DESKTOP TABLE VIEW (Hidden on small screens) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[700px]">
             <thead>
               <tr className="text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50/50 border-b border-slate-200 select-none">
@@ -207,10 +252,9 @@ export default function ITAdminDashboard() {
                     {u.email}
                   </td>
                   <td className="py-3.5 px-6">
-                    {/* 🎯 FIX 3: Dynamic UI Badges for the DataGrid */}
                     <span className={`text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide border ${
                       u.role === 'Admin' ? 'bg-purple-50 text-purple-700 border-purple-200' : 
-                      u.role === 'Accounts' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                      u.role === 'Accounts Executive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                       'bg-blue-50 text-blue-700 border-blue-200'
                     }`}>
                       {u.role}
@@ -263,7 +307,7 @@ export default function ITAdminDashboard() {
               </button>
             </div>
             
-            <form onSubmit={handleUpdateUser} className="p-5 space-y-4">
+            <form onSubmit={handleUpdateUser} className="p-4 sm:p-5 space-y-4">
               <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5 mb-2">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Target Account</p>
                 <p className="text-xs font-mono font-bold text-[#2c2a57] mt-0.5 truncate">{selectedEmail}</p>
@@ -307,7 +351,7 @@ export default function ITAdminDashboard() {
                     <option value="Site Manager">Site Manager</option>
                     <option value="Purchase Executive">Purchase Executive</option>
                     <option value="Project Manager">Project Manager</option>
-                    <option value="Accounts">Accounts / Finance</option>
+                    <option value="Accounts Executive">Accounts Executive</option>
                     <option value="Director">Director</option>
                     <option value="Admin">IT Admin</option>
                   </select>
@@ -337,11 +381,11 @@ export default function ITAdminDashboard() {
                 </div>
               </div>
 
-              <div className="flex justify-end space-x-2 pt-4 mt-2 border-t border-slate-100">
-                <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} className="text-xs font-semibold py-2 px-4">
+              <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-4 mt-2 border-t border-slate-100">
+                <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} className="text-xs font-semibold py-2.5 px-4 w-full sm:w-auto">
                   Cancel
                 </Button>
-                <Button type="submit" variant="primary" disabled={loading} className="text-xs font-bold py-2 px-6 shadow-xs bg-[#2c2a57] hover:bg-indigo-950">
+                <Button type="submit" variant="primary" disabled={loading} className="text-xs font-bold py-2.5 px-6 shadow-xs bg-[#2c2a57] hover:bg-indigo-950 w-full sm:w-auto">
                   Save Changes
                 </Button>
               </div>

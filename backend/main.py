@@ -16,10 +16,8 @@ from sqlalchemy import or_
 from database import get_db
 from docxtpl import DocxTemplate
 import models
-
 # 🎯 NEW: Import the email service
 from email_service import send_workflow_email
-
 # 🎯 NEW: Import Cloudinary
 import cloudinary
 import cloudinary.uploader
@@ -28,7 +26,6 @@ from cloudinary.utils import cloudinary_url
 # 1. System Logging Configurations
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AarviProcure")
-
 app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.1.0")
 
 # 🎯 NEW: Configure Cloudinary securely using Render Environment Variables
@@ -492,7 +489,7 @@ def attach_vendor_quotations(
             })
         
     highest_landed_total = 0.0
-    any_item_exceeds_2_5l = False 
+    any_unit_price_exceeds_2_5l = False 
     
     for quote in payload.quotations:
         db_quote = models.Quotation(
@@ -524,9 +521,10 @@ def attach_vendor_quotations(
         )
         db.add(db_quote)
         
-        item_cost = quote.net_amount_payable or quote.total_amount or 0.0
-        if item_cost > 250000:
-            any_item_exceeds_2_5l = True
+        # 🎯 UPDATED CHECK: Evaluates single unit_price instead of net_amount_payable
+        single_unit_price = quote.unit_price or 0.0
+        if single_unit_price > 250000:
+            any_unit_price_exceeds_2_5l = True
 
         if quote.vendor_name:
             clean_name = quote.vendor_name.strip()
@@ -545,7 +543,7 @@ def attach_vendor_quotations(
             highest_landed_total = quote.total_amount
             
     exceeds_10l_total = highest_landed_total > 1000000
-    requires_director_review = exceeds_10l_total or any_item_exceeds_2_5l
+    requires_director_review = exceeds_10l_total or any_unit_price_exceeds_2_5l
 
     if not requires_director_review:
         ticket.status = "Pending Project Manager"
@@ -567,9 +565,9 @@ def attach_vendor_quotations(
         ticket.status = "Pending Director"
         reasons = []
         if exceeds_10l_total:
-            reasons.append(f"Highest Total (₹{highest_landed_total:,.2f}) > ₹10L")
-        if any_item_exceeds_2_5l:
-            reasons.append("One or more single item values exceed ₹2.5L")
+            reasons.append(f"Highest Order Total (₹{highest_landed_total:,.2f}) > ₹10L")
+        if any_unit_price_exceeds_2_5l:
+            reasons.append("One or more items have an individual Unit Price exceeding ₹2.5L")
             
         routing_msg = f"High-value corporate order routed to Executive Director Board ({', '.join(reasons)})."
         
@@ -1168,6 +1166,7 @@ async def update_po_invoice_details(
     invoice_remark: str = Form(""),
     invoice_duration: str = Form(""),
     file: Optional[UploadFile] = File(None),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db)
 ):
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
@@ -1179,31 +1178,27 @@ async def update_po_invoice_details(
     po.invoice_remark = invoice_remark
     po.invoice_duration = invoice_duration
     
-    # 🎯 CLOUDINARY UPLOAD LOGIC
     if file:
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
             raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
             
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"PI_{po_number}_{timestamp}" # Cloudinary doesn't need the extension in the public_id
+        filename = f"PI_{po_number}_{timestamp}"
         
         try:
-            # Upload directly to Cloudinary from memory
             upload_result = cloudinary.uploader.upload(
                 file.file, 
                 public_id=filename,
                 folder="aarvi_invoices",
-                resource_type="auto" # Important: "auto" allows PDFs and raw files
+                resource_type="auto"
             )
-            # Get the permanent, safe cloud URL
             po.proforma_invoice_url = upload_result.get("secure_url")
             
         except Exception as e:
             logger.error(f"Cloudinary Upload Failed: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to upload document to cloud storage.")
         
-        # Route to Project Manager for PI Approval
         ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
         if ticket:
             ticket.status = "PI Pending PM Approval"
@@ -1213,6 +1208,19 @@ async def update_po_invoice_details(
                 action_taken="Proforma Invoice Uploaded",
                 remarks=f"Vendor PI {invoice_no} securely uploaded to cloud and routed to Project Manager for financial clearance."
             ))
+
+            # 🎯 AUTOMATED EMAIL: Alert Project Manager that PI is ready for approval
+            pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
+            if pm and pm.email:
+                background_tasks.add_task(
+                    send_workflow_email,
+                    recipient_email=pm.email,
+                    recipient_name=pm.name,
+                    subject=f"Action Required: Proforma Invoice Uploaded for {ticket.ticket_number}",
+                    ticket_number=ticket.ticket_number,
+                    project_name=ticket.project_name,
+                    status="PI Pending PM Approval"
+                )
     
     db.commit()
     return {"message": "Invoice logging verified, stored in cloud, and saved successfully."}
@@ -1515,6 +1523,64 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
             })
     return notifications
 
+# -------------------------------------------------------------------
+# 🎯 NEW: LIVE SIDEBAR COUNTS ENDPOINT
+# -------------------------------------------------------------------
+@app.get("/api/sidebar-counts", response_model=dict)
+def get_sidebar_counts(user_id: int, role: str, db: Session = Depends(get_db)):
+    counts = {
+        "pending_sourcing": 0,
+        "pending_signature": 0,
+        "po_ledger_alerts": 0,
+        "pending_approvals": 0,
+        "pending_vetting": 0,
+        "pending_disbursements": 0,
+        "coordinator_queries": 0
+    }
+    
+    if role == "Site Coordinator":
+        counts["coordinator_queries"] = db.query(models.MaterialTicket).filter(
+            models.MaterialTicket.coordinator_id == user_id,
+            models.MaterialTicket.status == "Awaiting Coordinator Sign-Off"
+        ).count()
+    
+    if role in ["Site Manager", "Project Manager"]:
+        counts["pending_vetting"] = db.query(models.MaterialTicket).filter(
+            or_(
+                (models.MaterialTicket.assigned_site_manager_id == user_id) & (models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"])),
+                (models.MaterialTicket.assigned_project_manager_id == user_id) & (models.MaterialTicket.status == "Pending PM Vetting"),
+                (models.MaterialTicket.assigned_site_manager_id == None) & (models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"]))
+            )
+        ).count()
+    
+    if role == "Purchase Executive":
+        counts["pending_sourcing"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Pending Sourcing").count()
+        counts["pending_signature"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Awaiting Digital Signature").count()
+        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+    
+    if role == "Director":
+        counts["pending_approvals"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Pending Director").count()
+        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+        
+    elif role == "Project Manager":
+        counts["pending_approvals"] = db.query(models.MaterialTicket).filter(
+            or_(
+                models.MaterialTicket.assigned_project_manager_id == user_id,
+                models.MaterialTicket.assigned_project_manager_id == None
+            ),
+            models.MaterialTicket.status.in_(["Pending Project Manager", "PI Pending PM Approval"])
+        ).count()
+        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+    
+    if role in ["Accounts Executive", "Accounts", "Finance Manager"]:
+        counts["pending_disbursements"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "PI Approved - Sent to Accounts").count()
+        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+
+    if role in ["Admin", "IT Manager"]:
+        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+
+    return counts
+
 @app.get("/api/requisitions/{ticket_number}/po", response_model=dict)
 def get_po_by_ticket(ticket_number: str, db: Session = Depends(get_db)):
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.ticket_number == ticket_number).first()
@@ -1538,6 +1604,7 @@ class ApprovePIPayload(BaseModel):
 def approve_proforma_invoice(
     ticket_number: str,
     payload: ApprovePIPayload,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
@@ -1552,9 +1619,24 @@ def approve_proforma_invoice(
         action_taken="Proforma Invoice Approved",
         remarks=payload.remarks or "Proforma Invoice verified and approved by PM. Routed to Accounts Desk for disbursement."
     ))
+
+    # 🎯 AUTOMATED EMAIL: Alert Accounts that PI is approved and ready for payment
+    accounts_users = db.query(models.User).filter(models.User.role.in_(["Accounts Executive", "Accounts", "Finance Manager"]), models.User.is_active == True).all()
+    for acc in accounts_users:
+        if acc.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=acc.email,
+                recipient_name=acc.name,
+                subject=f"Payment Action: PI Approved for {ticket_number}",
+                ticket_number=ticket_number,
+                project_name=ticket.project_name,
+                status="PI Approved - Sent to Accounts"
+            )
     
     db.commit()
     return {"ticket_number": ticket_number, "status": ticket.status}
+
 
 # -------------------------------------------------------------------
 # 💳 PHASE 4: ACCOUNTS DESK & PAYMENT DISBURSEMENT ENDPOINTS
@@ -1609,6 +1691,7 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
 @app.put("/api/purchase-orders/{po_number}/disbursement")
 async def process_po_disbursement(
     po_number: str,
+    background_tasks: BackgroundTasks,
     utr_no: str = Form(""),
     payment_date: str = Form(""),
     payment_remark: str = Form(""),
@@ -1654,6 +1737,32 @@ async def process_po_disbursement(
             action_taken="Payment Disbursed & Order Dispatched",
             remarks=f"Payment UTR {utr_no} (Amount: ₹{disbursed_amount:,.2f}) processed on {payment_date}. Bank transfer receipt attached and order released for final logistics dispatch."
         ))
+
+        # 🎯 AUTOMATED EMAIL: Alert Coordinator & Procurement that payment is done
+        coordinator = db.query(models.User).filter(models.User.id == ticket.coordinator_id).first()
+        if coordinator and coordinator.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=coordinator.email,
+                recipient_name=coordinator.name,
+                subject=f"Payment Disbursed & Dispatched: {ticket.ticket_number}",
+                ticket_number=ticket.ticket_number,
+                project_name=ticket.project_name,
+                status="Dispatched"
+            )
+        
+        purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
+        for pe in purchase_execs:
+            if pe.email:
+                background_tasks.add_task(
+                    send_workflow_email,
+                    recipient_email=pe.email,
+                    recipient_name=pe.name,
+                    subject=f"Payment Disbursed for {ticket.ticket_number}",
+                    ticket_number=ticket.ticket_number,
+                    project_name=ticket.project_name,
+                    status="Dispatched"
+                )
         
     db.commit()
     return {"message": "Disbursement successfully logged and order marked as Dispatched."}
@@ -1664,6 +1773,7 @@ async def process_po_disbursement(
 @app.put("/api/requisitions/{ticket_number}/grn")
 async def process_goods_receipt_note(
     ticket_number: str,
+    background_tasks: BackgroundTasks,
     user_name: str = Form(...),
     receipt_type: str = Form("CLEAN"),
     discrepancy_category: str = Form(""),
@@ -1720,6 +1830,33 @@ async def process_goods_receipt_note(
         action_taken=action,
         remarks=detail_text
     ))
+
+    # 🎯 AUTOMATED EMAIL: Alert Procurement & PM if there is a shortage or damage
+    if receipt_type in ["PARTIAL", "DISCREPANCY"]:
+        pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
+        if pm and pm.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=pm.email,
+                recipient_name=pm.name,
+                subject=f"URGENT ALERT: {receipt_type} Delivery on {ticket_number}",
+                ticket_number=ticket_number,
+                project_name=ticket.project_name,
+                status=ticket.status
+            )
+        
+        purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
+        for pe in purchase_execs:
+            if pe.email:
+                background_tasks.add_task(
+                    send_workflow_email,
+                    recipient_email=pe.email,
+                    recipient_name=pe.name,
+                    subject=f"URGENT ALERT: {receipt_type} Delivery on {ticket_number}",
+                    ticket_number=ticket_number,
+                    project_name=ticket.project_name,
+                    status=ticket.status
+                )
     
     db.commit()
     return {"message": "Receipt status processed successfully.", "status": ticket.status, "grn_url": grn_url}

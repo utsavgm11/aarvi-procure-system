@@ -1,6 +1,6 @@
 // src/components/SiteCoordinatorDashboard.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-import axiosInstance from 'axios'; 
+import axios from 'axios'; 
 import { 
   Plus, Trash2, Send, Clock, FileSpreadsheet, CheckCircle2, 
   MessageSquare, Check, AlertTriangle, FileText, CheckCircle, 
@@ -53,9 +53,9 @@ export default function SiteCoordinatorDashboard() {
   useEffect(() => {
     const fetchManagers = async () => {
       try {
-        const smRes = await axiosInstance.get(`${API_BASE_URL}/users/by-role?role=Site Manager`);
+        const smRes = await axios.get(`${API_BASE_URL}/users/by-role?role=Site Manager`);
         setSiteManagers(smRes.data);
-        const pmRes = await axiosInstance.get(`${API_BASE_URL}/users/by-role?role=Project Manager`);
+        const pmRes = await axios.get(`${API_BASE_URL}/users/by-role?role=Project Manager`);
         setProjectManagers(pmRes.data);
       } catch (err) { console.error("Failed to load managers", err); }
     };
@@ -66,7 +66,7 @@ export default function SiteCoordinatorDashboard() {
     if (!currentUserId) return;
     setLoading(true);
     try {
-      const response = await axiosInstance.get(`${API_BASE_URL}/requisitions/pending-handshake/${currentUserId}`);
+      const response = await axios.get(`${API_BASE_URL}/requisitions/pending-handshake/${currentUserId}`);
       setProposals(response.data);
     } catch (err) { console.error("Error fetching proposals", err); } 
     finally { setLoading(false); }
@@ -76,7 +76,7 @@ export default function SiteCoordinatorDashboard() {
     if (!currentUserId) return;
     setLoading(true);
     try {
-      const response = await axiosInstance.get(`${API_BASE_URL}/requisitions/coordinator-history/${currentUserId}`);
+      const response = await axios.get(`${API_BASE_URL}/requisitions/coordinator-history/${currentUserId}`);
       setHistory(response.data);
     } catch (err) { console.error("Error loading history", err); } 
     finally { setLoading(false); }
@@ -100,9 +100,9 @@ export default function SiteCoordinatorDashboard() {
     setCoordinatorRemarks('');
     setAlert(null);
     try {
-      const itemRes = await axiosInstance.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
+      const itemRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
       setProposalItems(itemRes.data);
-      const histRes = await axiosInstance.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
+      const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
       setHistoryLogs(histRes.data);
     } catch (err) { console.error(err); }
   };
@@ -119,7 +119,7 @@ export default function SiteCoordinatorDashboard() {
     if (!coordinatorRemarks) return setAlert({ type: 'error', message: "Provide notes before sending counter-edits." });
     setLoading(true);
     try {
-      await axiosInstance.put(`${API_BASE_URL}/requisitions/${selectedProposal.ticket_number}/propose-edits`, {
+      await axios.put(`${API_BASE_URL}/requisitions/${selectedProposal.ticket_number}/propose-edits`, {
         user_name: currentUserName, user_role: currentUserRole, remarks: coordinatorRemarks, items: proposalItems
       });
       setAlert({ type: 'success', message: "Counter-edits dispatched. Returned to Manager's inbox." });
@@ -132,7 +132,7 @@ export default function SiteCoordinatorDashboard() {
   const handleFinalSignOff = async () => {
     setLoading(true);
     try {
-      const res = await axiosInstance.put(`${API_BASE_URL}/requisitions/${selectedProposal.ticket_number}/approve`, {
+      const res = await axios.put(`${API_BASE_URL}/requisitions/${selectedProposal.ticket_number}/approve`, {
         user_name: currentUserName, user_role: currentUserRole, items: proposalItems
       });
       setAlert({ type: 'success', message: res.data.status === "Pending Sourcing" ? "Dual-Agreement Locked! Dispatched to Procurement." : "Signature applied successfully!" });
@@ -156,7 +156,7 @@ export default function SiteCoordinatorDashboard() {
     if (!projectManagerId) return setAlert({ type: 'error', message: 'You must assign a Project Manager.' });
     setLoading(true); setAlert(null);
     try {
-      const response = await axiosInstance.post(`${API_BASE_URL}/requisitions`, {
+      const response = await axios.post(`${API_BASE_URL}/requisitions`, {
         project_code: projectCode, 
         project_name: projectName, 
         coordinator_id: currentUserId,
@@ -187,7 +187,7 @@ export default function SiteCoordinatorDashboard() {
     if (grnFile) formData.append('file', grnFile);
 
     try {
-      await axiosInstance.put(`${API_BASE_URL}/requisitions/${grnModalTicket.ticket_number}/grn`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await axios.put(`${API_BASE_URL}/requisitions/${grnModalTicket.ticket_number}/grn`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       const successMsg = receiptType === 'CLEAN' 
         ? `GRN logged successfully! Order ${grnModalTicket.ticket_number} officially closed.` 
         : receiptType === 'PARTIAL'

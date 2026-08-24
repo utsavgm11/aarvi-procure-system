@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
   CheckSquare, ShieldCheck, ThumbsUp, DollarSign, Inbox, Archive, 
   Clock, Award, AlertCircle, FileText, ExternalLink, IndianRupee,
-  Building2, AlertOctagon
+  Building2, AlertOctagon, X
 } from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI';
 
@@ -20,6 +20,9 @@ export default function DirectorDashboard({ currentUser }) {
   const [remarks, setRemarks] = useState('');
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
+
+  // 🎯 NEW: Inline Document Preview Modal State
+  const [previewDoc, setPreviewDoc] = useState(null);
 
   // 🎯 Safely grab current user from session or prop
   const storedSession = localStorage.getItem('aarvi_session') || sessionStorage.getItem('aarvi_session');
@@ -75,9 +78,25 @@ export default function DirectorDashboard({ currentUser }) {
       setItems(itemsRes.data);
       const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/quotations`);
       setVendorQuotes(quotesRes.data);
+
+      // 🎯 MOBILE UX: Smooth scroll to detail view
+      setTimeout(() => {
+        document.getElementById('executive-dossier-view')?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+
     } catch (err) { 
       console.error("Error loading financial data", err); 
     }
+  };
+
+  // 🎯 HELPER: Handles Opening Cloudinary Documents in Modal
+  const handlePreviewFile = (url, title) => {
+    if (!url) return;
+    let fullUrl = url;
+    if (url.startsWith('/')) {
+      fullUrl = `https://aarvi-procure-system.onrender.com${url}`;
+    }
+    setPreviewDoc({ url: fullUrl, title });
   };
 
   const handleDirectorSignOff = async (actionType) => {
@@ -143,26 +162,62 @@ export default function DirectorDashboard({ currentUser }) {
   }
 
   return (
-    <div className="space-y-6 relative pb-10">
+    <div className="space-y-6 relative pb-10 sm:px-2 md:px-4 lg:px-0">
       
+      {/* 🎯 SMOOTH INLINE DOCUMENT PREVIEW MODAL */}
+      {previewDoc && (
+        <div 
+          className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
+          onClick={() => setPreviewDoc(null)} // Click outside to close
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden relative"
+            onClick={(e) => e.stopPropagation()} // Prevent clicks inside from closing
+          >
+            <div className="bg-[#2c2a57] p-4 text-white flex justify-between items-center shrink-0 z-10">
+              <div className="flex items-center gap-2">
+                <FileText size={18} className="text-indigo-300" />
+                <h3 className="font-extrabold text-sm uppercase tracking-wider">{previewDoc.title}</h3>
+              </div>
+              <button onClick={() => setPreviewDoc(null)} className="text-slate-300 hover:text-white bg-white/10 p-1.5 rounded-full transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 bg-slate-100 relative overflow-auto custom-scrollbar">
+              {previewDoc.url.match(/\.(jpeg|jpg|gif|png)$/i) != null ? (
+                <div className="min-h-full flex items-center justify-center p-4">
+                  <img src={previewDoc.url} alt={previewDoc.title} className="max-w-full h-auto rounded-lg shadow-sm" />
+                </div>
+              ) : (
+                <iframe 
+                  src={previewDoc.url} 
+                  className="w-full h-full border-0"
+                  title="Document Preview"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* HEADER WITH TABS (Responsive) */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-extrabold text-[#2c2a57] tracking-tight">Director Executive Board</h1>
           <p className="text-xs md:text-sm text-slate-500 font-medium">High-value capital procurement authorization and board-level clearances</p>
         </div>
-        <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
+        <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full lg:w-auto">
           <Button 
             variant={activeTab === 'queue' ? 'primary' : 'ghost'} 
             onClick={() => { setActiveTab('queue'); setSelectedTicket(null); }} 
-            className="text-xs py-2 flex-1 md:flex-none flex items-center justify-center gap-1.5"
+            className="text-xs py-2 flex-1 lg:flex-none flex items-center justify-center gap-1.5"
           >
             <Inbox size={14} /> <span>CAPEX Backlog ({tickets.length})</span>
           </Button>
           <Button 
             variant={activeTab === 'history' ? 'primary' : 'ghost'} 
             onClick={() => { setActiveTab('history'); setSelectedTicket(null); }} 
-            className="text-xs py-2 flex-1 md:flex-none flex items-center justify-center gap-1.5"
+            className="text-xs py-2 flex-1 lg:flex-none flex items-center justify-center gap-1.5"
           >
             <Archive size={14} /> <span>Executive Ledger</span>
           </Button>
@@ -170,17 +225,17 @@ export default function DirectorDashboard({ currentUser }) {
       </div>
 
       {alert && (
-        <div className={`p-4 rounded-xl flex items-center space-x-3 border ${alert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
+        <div className={`p-4 rounded-xl flex items-center space-x-3 border shadow-sm ${alert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
           <CheckSquare size={18} className="flex-shrink-0" /> <span className="font-semibold text-xs md:text-sm">{alert.message}</span>
         </div>
       )}
 
       {/* VIEW 1: ACTIVE CAPEX QUEUE */}
       {activeTab === 'queue' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1500px]">
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
           
           {/* Left Column: Ticket Stack */}
-          <div className="lg:col-span-4 space-y-3">
+          <div className="xl:col-span-4 space-y-3">
             <h2 className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Board CAPEX Backlog</h2>
             {tickets.length === 0 ? (
               <Card className="p-6 text-center text-slate-400 border-dashed border-2 bg-white text-xs md:text-sm">No high-value expenditures awaiting director clearance loops.</Card>
@@ -210,7 +265,7 @@ export default function DirectorDashboard({ currentUser }) {
           </div>
 
           {/* Right Column: Active Dossier Review */}
-          <div className="lg:col-span-8">
+          <div id="executive-dossier-view" className="xl:col-span-8 scroll-mt-24">
             {selectedTicket ? (
               <div className="space-y-6 animate-in fade-in duration-200">
                 
@@ -218,20 +273,22 @@ export default function DirectorDashboard({ currentUser }) {
                 <Card className="p-4 bg-white border-slate-200 space-y-3 shadow-xs">
                   <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-slate-100 pb-3">
                     <div className="flex items-center space-x-3">
-                      <div className="bg-[#2c2a57] text-white p-2.5 rounded-xl"><ShieldCheck size={20} /></div>
+                      <div className="bg-[#2c2a57] text-white p-2.5 rounded-xl shrink-0"><ShieldCheck size={20} /></div>
                       <div>
                         <h3 className="font-extrabold text-[#2c2a57] text-sm uppercase tracking-wider">Executive Board Fiscal Review</h3>
                         <p className="text-xs text-slate-500 font-mono mt-0.5">{selectedTicket.ticket_number} • {selectedTicket.project_name}</p>
                       </div>
                     </div>
-                    <StatusBadge status={selectedTicket.status} />
+                    <div className="shrink-0">
+                      <StatusBadge status={selectedTicket.status} />
+                    </div>
                   </div>
 
                   {/* 💰 Financial Commitment Metric Box */}
                   <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex justify-between items-center">
                     <div>
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">Total CAPEX Commitment</span>
-                      <span className="text-xs text-slate-500 font-medium">Aggregated winning vendor bids</span>
+                      <span className="text-[10px] md:text-xs text-slate-500 font-medium">Aggregated winning vendor bids</span>
                     </div>
                     <div className="text-right">
                       <span className="text-lg md:text-xl font-mono font-black text-[#0b9c54]">
@@ -253,7 +310,7 @@ export default function DirectorDashboard({ currentUser }) {
                       const itemBids = vendorQuotes.filter(q => q.item_index === item.item_index);
                       return (
                         <div key={item.item_index} className="pt-4 first:pt-0 space-y-3">
-                          <div className="flex flex-col sm:flex-row justify-between sm:items-baseline gap-2">
+                          <div className="flex flex-col sm:flex-row justify-between sm:items-baseline gap-2 border-b border-slate-100 pb-2">
                             <div>
                               <h4 className="text-xs md:text-sm font-bold text-[#2c2a57]">{item.item_index}. {item.product_description}</h4>
                               <span className="text-[11px] text-slate-400 font-medium block mt-0.5">Technical Justification: <span className="italic text-slate-600 font-semibold">{item.purpose}</span></span>
@@ -269,7 +326,7 @@ export default function DirectorDashboard({ currentUser }) {
                           </div>
                           
                           {/* Bids Grid */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                             {itemBids.map((bid, bIdx) => {
                               const isWinner = bid.is_selected === true;
                               return (
@@ -298,14 +355,15 @@ export default function DirectorDashboard({ currentUser }) {
 
                                     {/* 🎯 View Vendor Quote PDF File Link */}
                                     {bid.file_url && (
-                                      <a 
-                                        href={bid.file_url} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer" 
-                                        className="text-indigo-600 hover:text-indigo-800 font-bold text-[10px] hover:underline flex items-center gap-1 pt-1"
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handlePreviewFile(bid.file_url, `Quotation: ${bid.vendor_name}`);
+                                        }} 
+                                        className="text-indigo-600 hover:text-indigo-800 font-bold text-[10px] hover:underline flex items-center gap-1 pt-1 bg-transparent border-0 cursor-pointer text-left"
                                       >
                                         <FileText size={11} /> View Quote File <ExternalLink size={9} />
-                                      </a>
+                                      </button>
                                     )}
                                   </div>
 
@@ -337,7 +395,7 @@ export default function DirectorDashboard({ currentUser }) {
                         variant="danger" 
                         onClick={() => handleDirectorSignOff("Raise Query")} 
                         disabled={loading} 
-                        className="text-xs py-2.5"
+                        className="text-xs py-2.5 sm:w-auto"
                       >
                         <AlertOctagon size={14} className="mr-1" />
                         <span>Reject & Force Renegotiation</span>
@@ -346,7 +404,7 @@ export default function DirectorDashboard({ currentUser }) {
                         variant="primary" 
                         onClick={() => handleDirectorSignOff("Approve")} 
                         disabled={loading} 
-                        className="text-xs py-2.5 shadow-sm bg-[#0b9c54] hover:bg-emerald-600"
+                        className="text-xs py-2.5 shadow-sm bg-[#0b9c54] hover:bg-emerald-600 sm:w-auto"
                       >
                         <ThumbsUp size={14} className="mr-1" /> 
                         <span>Grant Executive Board Sanction</span>
@@ -368,7 +426,7 @@ export default function DirectorDashboard({ currentUser }) {
 
       {/* VIEW 2: EXECUTIVE HISTORY LEDGER */}
       {activeTab === 'history' && (
-        <Card className="p-4 md:p-5 max-w-5xl animate-in fade-in duration-200">
+        <Card className="p-4 md:p-5 max-w-5xl animate-in fade-in duration-200 mx-auto lg:mx-0">
           <div className="flex items-center space-x-2 mb-6">
             <Clock className="text-[#0b9c54]" size={18} />
             <h2 className="text-xs md:text-sm font-bold text-[#2c2a57] uppercase tracking-wider">Executive Authorization Ledger</h2>

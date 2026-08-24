@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { 
   CheckSquare, ShieldCheck, ThumbsUp, Inbox, Archive, Clock, 
-  Award, MessageSquare, AlertTriangle, FileText, ExternalLink, CheckCircle2 
+  Award, MessageSquare, AlertTriangle, FileText, ExternalLink, CheckCircle2, X 
 } from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI';
 
@@ -18,8 +18,11 @@ export default function ProjectManagerDashboard({ currentUser }) {
   const [vendorQuotes, setVendorQuotes] = useState([]);
   const [historyLogs, setHistoryLogs] = useState([]);
   
-  // 🎯 NEW: PO / Proforma Invoice Details State
+  // 🎯 PO / Proforma Invoice Details State
   const [poDetails, setPoDetails] = useState(null);
+
+  // 🎯 NEW: Inline Document Preview Modal State
+  const [previewDoc, setPreviewDoc] = useState(null);
 
   // Interactive States
   const [selectedBids, setSelectedBids] = useState({});
@@ -88,6 +91,16 @@ export default function ProjectManagerDashboard({ currentUser }) {
     } catch (err) { console.error("Error loading ticket specifications", err); }
   };
 
+  // 🎯 HELPER: Handles Opening Cloudinary Documents in Modal
+  const handlePreviewFile = (url, title) => {
+    if (!url) return;
+    let fullUrl = url;
+    if (url.startsWith('/')) {
+      fullUrl = `https://aarvi-procure-system.onrender.com${url}`;
+    }
+    setPreviewDoc({ url: fullUrl, title });
+  };
+
   const toggleBidSelection = (itemIndex, vendorName) => {
     setSelectedBids(prev => ({ ...prev, [itemIndex]: vendorName }));
   };
@@ -138,7 +151,7 @@ export default function ProjectManagerDashboard({ currentUser }) {
     }
   };
 
-  // 🎯 NEW: Handler for PM Proforma Invoice Approval
+  // 🎯 Handler for PM Proforma Invoice Approval
   const handleApprovePI = async () => {
     setLoading(true);
     try {
@@ -163,6 +176,42 @@ export default function ProjectManagerDashboard({ currentUser }) {
   return (
     <div className="space-y-6 relative">
       
+      {/* 🎯 SMOOTH INLINE DOCUMENT PREVIEW MODAL */}
+      {previewDoc && (
+        <div 
+          className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
+          onClick={() => setPreviewDoc(null)} // Click outside to close
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden relative"
+            onClick={(e) => e.stopPropagation()} // Prevent clicks inside from closing
+          >
+            <div className="bg-[#2c2a57] p-4 text-white flex justify-between items-center shrink-0 z-10">
+              <div className="flex items-center gap-2">
+                <FileText size={18} className="text-indigo-300" />
+                <h3 className="font-extrabold text-sm uppercase tracking-wider">{previewDoc.title}</h3>
+              </div>
+              <button onClick={() => setPreviewDoc(null)} className="text-slate-300 hover:text-white bg-white/10 p-1.5 rounded-full transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 bg-slate-100 relative overflow-auto custom-scrollbar">
+              {previewDoc.url.match(/\.(jpeg|jpg|gif|png)$/i) != null ? (
+                <div className="min-h-full flex items-center justify-center p-4">
+                  <img src={previewDoc.url} alt={previewDoc.title} className="max-w-full h-auto rounded-lg shadow-sm" />
+                </div>
+              ) : (
+                <iframe 
+                  src={previewDoc.url} 
+                  className="w-full h-full border-0"
+                  title="Document Preview"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* HEADER SECTION */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
@@ -273,16 +322,15 @@ export default function ProjectManagerDashboard({ currentUser }) {
                         </div>
                       </div>
 
+                      {/* 🎯 CHANGED TO BUTTON FOR INLINE VIEWER */}
                       {poDetails?.proforma_invoice_url ? (
-                        <a 
-                          href={poDetails.proforma_invoice_url} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-colors shadow-xs"
+                        <button 
+                          onClick={() => handlePreviewFile(poDetails.proforma_invoice_url, `Proforma Invoice #${poDetails.invoice_no}`)}
+                          className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-colors shadow-xs cursor-pointer"
                         >
                           <span>Preview PI PDF</span>
                           <ExternalLink size={14} />
-                        </a>
+                        </button>
                       ) : (
                         <span className="text-xs font-bold text-rose-500 italic bg-rose-50 px-3 py-1 rounded border border-rose-200">
                           Attachment Missing

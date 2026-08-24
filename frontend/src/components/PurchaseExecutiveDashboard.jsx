@@ -115,6 +115,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         }];
       });
       setQuotes(initialQuotes);
+      
+      // 🎯 MOBILE UX: Smooth scroll to detail view
+      setTimeout(() => {
+        document.getElementById('sourcing-detail-view')?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
     } catch (err) { console.error(err); }
   };
 
@@ -130,6 +135,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       
       const calcTotal = winningLines.reduce((acc, curr) => acc + (curr.net_amount_payable || curr.base_total_value || 0), 0);
       setSelectedHistoryTicket(prev => ({ ...prev, grand_total: calcTotal }));
+
+      // 🎯 MOBILE UX: Smooth scroll to document view
+      setTimeout(() => {
+        document.getElementById('history-detail-view')?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
     } catch (err) {
       console.error("Error loading finalized matrix", err);
     } finally {
@@ -381,7 +391,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const nextYear = currentYear + 1;
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="space-y-6 pb-12 sm:px-2 md:px-4 lg:px-0">
       
       {/* DEEP CSS ISOLATION FOR PDF EXPORT */}
       <style>{`
@@ -397,25 +407,25 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       `}</style>
 
       {/* HEADER TABS */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4 print:hidden">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-200 pb-5 gap-4 print:hidden">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Procurement Sourcing Hub</h1>
-          <p className="text-sm text-slate-500 font-medium">Attach competitive vendor bids and compile commercial comparison sheets</p>
+          <h1 className="text-xl md:text-2xl font-extrabold text-[#2c2a57] tracking-tight">Procurement Sourcing Hub</h1>
+          <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">Attach competitive vendor bids and compile commercial comparison sheets</p>
         </div>
-        <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 w-full md:w-auto">
-          <Button variant={activeTab === 'sourcing' ? 'primary' : 'ghost'} onClick={() => switchTab('sourcing')} className="text-xs py-1.5 flex-1 md:flex-none">
-            <ShoppingCart size={14} /> <span>Sourcing Inbox ({sourcingTickets.length})</span>
+        <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full lg:w-auto">
+          <Button variant={activeTab === 'sourcing' ? 'primary' : 'ghost'} onClick={() => switchTab('sourcing')} className="text-[11px] md:text-xs py-2 px-3 flex-1 lg:flex-none whitespace-nowrap">
+            <ShoppingCart size={14} className="mr-1.5 inline" /> <span>Sourcing Inbox ({sourcingTickets.length})</span>
           </Button>
-          <Button variant={activeTab === 'history' ? 'primary' : 'ghost'} onClick={() => switchTab('history')} className="text-xs py-1.5 flex-1 md:flex-none">
-            <FileCheck size={14} /> <span>Processing Ledger</span>
+          <Button variant={activeTab === 'history' ? 'primary' : 'ghost'} onClick={() => switchTab('history')} className="text-[11px] md:text-xs py-2 px-3 flex-1 lg:flex-none whitespace-nowrap">
+            <FileCheck size={14} className="mr-1.5 inline" /> <span>Processing Ledger</span>
           </Button>
         </div>
       </div>
 
       {alert && (
-        <div className={`p-4 rounded-xl flex items-center space-x-3 border ${alert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'} print:hidden`}>
+        <div className={`p-4 rounded-xl flex items-center space-x-3 border shadow-sm ${alert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'} print:hidden`}>
           {alert.type === 'success' ? <CheckCircle2 size={18} className="flex-shrink-0" /> : <AlertCircle size={18} className="flex-shrink-0" />}
-          <span className="font-semibold text-sm">{alert.message}</span>
+          <span className="font-semibold text-xs md:text-sm">{alert.message}</span>
         </div>
       )}
 
@@ -424,46 +434,48 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       {/* ============================================================== */}
       {activeTab === 'sourcing' && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
+          {/* TICKETS LIST */}
           <div className="xl:col-span-4 space-y-3">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Awaiting Vendor Bids</h2>
+            <h2 className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Awaiting Vendor Bids</h2>
             {sourcingTickets.length === 0 ? (
               <Card className="p-6 text-center text-slate-400 border-dashed border-2 text-sm bg-white">Queue cleared.</Card>
             ) : (
               sourcingTickets.map((t) => (
-                <div key={t.ticket_number} onClick={() => openSourcingTicket(t)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedTicket?.ticket_number === t.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+                <div key={t.ticket_number} onClick={() => openSourcingTicket(t)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedTicket?.ticket_number === t.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-3xs'}`}>
                   <div className="flex justify-between items-center mb-2">
-                    <span className="font-mono text-[#2c2a57] font-black text-sm">{t.ticket_number}</span>
+                    <span className="font-mono text-[#2c2a57] font-black text-xs md:text-sm">{t.ticket_number}</span>
                     <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase ${t.category === 'GOODS' ? 'bg-blue-100 text-blue-700' : t.category === 'VEHICLE' ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'}`}>{t.category}</span>
                   </div>
-                  <p className="text-xs font-semibold text-slate-600 truncate mb-2">{t.project_name}</p>
+                  <p className="text-[11px] md:text-xs font-semibold text-slate-600 truncate mb-2">{t.project_name}</p>
                   <StatusBadge status={t.status} />
                 </div>
               ))
             )}
           </div>
           
-          <div className="xl:col-span-8">
+          {/* TICKET DETAIL VIEW */}
+          <div id="sourcing-detail-view" className="xl:col-span-8 scroll-mt-24">
             {selectedTicket ? (
-              <div className="space-y-6">
+              <div className="space-y-6 animate-in fade-in duration-300">
                 <Card className="p-4 bg-slate-50 border-slate-200 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                   <div className="flex items-center space-x-3">
-                    <div className="bg-indigo-900/10 p-2 rounded-lg text-[#2c2a57]"><ShoppingCart size={18} /></div>
+                    <div className="bg-indigo-900/10 p-2.5 rounded-lg text-[#2c2a57] shrink-0"><ShoppingCart size={18} /></div>
                     <div>
-                      <h2 className="font-bold text-[#2c2a57] text-sm uppercase tracking-wider">{selectedTicket.category} Sourcing Specification Terminal</h2>
-                      <p className="text-xs text-slate-500 font-mono mt-0.5">{selectedTicket.ticket_number} • {selectedTicket.project_name}</p>
+                      <h2 className="font-bold text-[#2c2a57] text-xs md:text-sm uppercase tracking-wider">{selectedTicket.category} Sourcing Specification Terminal</h2>
+                      <p className="text-[10px] md:text-xs text-slate-500 font-mono mt-0.5">{selectedTicket.ticket_number} • {selectedTicket.project_name}</p>
                     </div>
                   </div>
                   <Button variant="success" onClick={handlePushToManagement} disabled={loading} className="text-xs py-2 shadow-sm w-full sm:w-auto">
-                    <Send size={14} /> <span>Submit Matrix</span>
+                    <Send size={14} className="mr-1.5 inline" /> <span>Submit Matrix</span>
                   </Button>
                 </Card>
 
                 <div className="space-y-5">
                   {items.map((item) => (
                     <Card key={item.item_index} className="overflow-hidden border-slate-200 shadow-xs">
-                      <div className="bg-slate-50 border-b border-slate-200 p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                      <div className="bg-slate-50 border-b border-slate-200 p-3 md:p-4 flex flex-col md:flex-row justify-between md:items-center gap-3">
                         <div>
-                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <div className="flex flex-wrap items-center gap-2 mb-1.5">
                             <span className="bg-[#2c2a57] text-white text-[10px] font-black px-2 py-0.5 rounded font-mono">Row {item.item_index}</span>
                             
                             {/* 🎯 EDITABLE QUANTITY BADGE */}
@@ -490,22 +502,22 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               <option value="Asset">🖥️ Asset</option>
                             </select>
                           </div>
-                          <h3 className="text-sm font-bold text-[#2c2a57] leading-tight mt-1">{item.product_description}</h3>
+                          <h3 className="text-xs md:text-sm font-bold text-[#2c2a57] leading-tight mt-1">{item.product_description}</h3>
                         </div>
                       </div>
 
                       <div className="p-3 sm:p-4 bg-white">
                         <div className="grid grid-cols-1 gap-4">
                           {(quotes[item.item_index] || []).map((quote, qIdx) => (
-                            <div key={qIdx} className="bg-slate-50/50 border border-slate-200 rounded-xl p-4 sm:p-5 relative group hover:border-slate-400 transition-all">
-                              <button onClick={() => removeQuoteBox(item.item_index, qIdx)} className="absolute top-3 right-3 text-slate-400 hover:text-rose-600 transition-colors p-1"><Trash2 size={15} /></button>
-                              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Option {qIdx + 1}</h4>
+                            <div key={qIdx} className="bg-slate-50/50 border border-slate-200 rounded-xl p-3 sm:p-5 relative group hover:border-slate-400 transition-all">
+                              <button onClick={() => removeQuoteBox(item.item_index, qIdx)} className="absolute top-2 right-2 md:top-3 md:right-3 text-slate-400 hover:text-rose-600 transition-colors p-1"><Trash2 size={14} md:size={15} /></button>
+                              <h4 className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Option {qIdx + 1}</h4>
                               
                               <div className="space-y-4">
-                                {/* Vendor Details Row */}
+                                {/* Vendor Details Row (Responsive Stacking) */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
                                     <input 
                                       list={`vendor-list-${item.item_index}-${qIdx}`}
                                       type="text" 
@@ -521,84 +533,84 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                         }
                                       }} 
                                       placeholder="Type to search or enter new..." 
-                                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all" 
+                                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all" 
                                     />
                                     <datalist id={`vendor-list-${item.item_index}-${qIdx}`}>
                                       {vendors.map(v => <option key={v.id} value={v.name} />)}
                                     </datalist>
                                   </div>
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Office Address</label>
-                                    <input type="text" value={quote.vendor_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_address', e.target.value)} placeholder="Full operating address..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Office Address</label>
+                                    <input type="text" value={quote.vendor_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_address', e.target.value)} placeholder="Full operating address..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                 </div>
 
-                                {/* Math & Contact Row */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                                {/* Math & Contact Row (Responsive Stacking) */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Phone/Cell</label>
-                                    <input type="text" value={quote.vendor_contact} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_contact', e.target.value)} placeholder="+91-987..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Phone/Cell</label>
+                                    <input type="text" value={quote.vendor_contact} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_contact', e.target.value)} placeholder="+91-987..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Email ID</label>
-                                    <input type="text" value={quote.vendor_email} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_email', e.target.value)} placeholder="sales@vendor.com" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Email ID</label>
+                                    <input type="email" value={quote.vendor_email} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_email', e.target.value)} placeholder="sales@vendor.com" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
 
                                   {/* Unit Price Input triggers Auto-Math */}
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.amountLabel} *</label>
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.amountLabel} *</label>
                                     <input 
                                       type="number" 
                                       value={quote.unit_price} 
                                       onChange={(e) => handleAmountChange(item.item_index, qIdx, e.target.value, quote.gst_percentage, item.quantity)} 
                                       placeholder="0.00" 
-                                      className="w-full bg-emerald-50 border border-emerald-300 rounded-lg px-3 py-2 text-xs font-bold text-emerald-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all" 
+                                      className="w-full bg-emerald-50 border border-emerald-300 rounded-lg px-3 py-2 text-[11px] md:text-xs font-bold text-emerald-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all" 
                                     />
                                   </div>
 
                                   {/* GST Input triggers Auto-Math */}
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#2c2a57] uppercase mb-1">GST Percentage (%)</label>
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">GST Percentage (%)</label>
                                     <input 
                                       type="number" 
                                       value={quote.gst_percentage} 
                                       onChange={(e) => handleAmountChange(item.item_index, qIdx, quote.unit_price, e.target.value, item.quantity)} 
-                                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" 
+                                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" 
                                     />
                                   </div>
                                 </div>
 
                                 {/* Delivery Info Row */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
                                   <div>
-                                    <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.addressLabel}</label>
-                                    <input type="text" value={quote.delivery_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'delivery_address', e.target.value)} placeholder={ui.addressPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.addressLabel}</label>
+                                    <input type="text" value={quote.delivery_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'delivery_address', e.target.value)} placeholder={ui.addressPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                   <div>
-                                    <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.contactLabel}</label>
-                                    <input type="text" value={quote.site_contact_person} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_person', e.target.value)} placeholder="Personnel reference name..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.contactLabel}</label>
+                                    <input type="text" value={quote.site_contact_person} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_person', e.target.value)} placeholder="Personnel reference name..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                   <div>
-                                    <label className="block text-[10px] font-bold text-indigo-700 uppercase mb-1">Contact Phone Number</label>
-                                    <input type="text" value={quote.site_contact_phone} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_phone', e.target.value)} placeholder="+91-886..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">Contact Phone Number</label>
+                                    <input type="text" value={quote.site_contact_phone} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_phone', e.target.value)} placeholder="+91-886..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                 </div>
 
                                 {/* Math Result & Terms Row */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                                   <div>
-                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
-                                    <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
+                                    <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
 
                                   {/* CALCULATED NET VALUE DISPLAY */}
                                   <div>
-                                    <label className="block text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
                                     <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner">
                                       <span className="text-sm font-black tracking-tight">
                                         ₹{(quote.net_amount_payable || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                       </span>
-                                      <span className="text-[10px] font-bold text-emerald-700/70 font-mono hidden sm:block">
+                                      <span className="text-[9px] sm:text-[10px] font-bold text-emerald-700/70 font-mono hidden sm:block">
                                         (Total Base: ₹{(quote.base_total_value || 0).toLocaleString('en-IN')})
                                       </span>
                                     </div>
@@ -608,26 +620,26 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 {/* Remarks Row */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <div>
-                                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Contract / Service Custom Clauses</label>
-                                    <input type="text" value={quote.special_terms} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'special_terms', e.target.value)} placeholder={ui.remarksPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">Contract / Service Custom Clauses</label>
+                                    <input type="text" value={quote.special_terms} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'special_terms', e.target.value)} placeholder={ui.remarksPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
                                   <div>
-                                    <label className="block text-[10px] font-bold text-amber-600 uppercase mb-1">Quality / Technical Remarks</label>
-                                    <input type="text" value={quote.quality_remarks || ''} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'quality_remarks', e.target.value)} placeholder="e.g. OEM 1-yr warranty active..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-amber-500 focus:ring-1 transition-all" />
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-amber-600 uppercase mb-1">Quality / Technical Remarks</label>
+                                    <input type="text" value={quote.quality_remarks || ''} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'quality_remarks', e.target.value)} placeholder="e.g. OEM 1-yr warranty active..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-amber-500 focus:ring-1 transition-all" />
                                   </div>
                                 </div>
 
                                 {/* ATTACHMENT CONTROLLER LAYER */}
                                 <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
                                   <div>
-                                    <label className="block text-[10px] font-bold text-indigo-600 uppercase mb-1">
+                                    <label className="block text-[9px] md:text-[10px] font-bold text-indigo-600 uppercase mb-1">
                                       Attach Supplier Quotation Document (Optional)
                                     </label>
-                                    <div className="flex items-center space-x-3 bg-white p-1.5 border border-slate-300 rounded-lg">
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-white p-2 border border-slate-300 rounded-lg">
                                       <input 
                                         type="file" 
                                         accept=".pdf,.doc,.docx"
-                                        className="text-xs font-medium text-slate-600 outline-none file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:uppercase file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer w-full"
+                                        className="text-[10px] sm:text-xs font-medium text-slate-600 outline-none file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[9px] file:sm:text-[10px] file:font-bold file:uppercase file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer w-full"
                                         onChange={async (e) => {
                                           const selectedFile = e.target.files[0];
                                           if (!selectedFile) return;
@@ -648,7 +660,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                         }}
                                       />
                                       {quote.file_url && (
-                                        <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md shrink-0 animate-pulse">
+                                        <span className="text-[9px] sm:text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md shrink-0 animate-pulse text-center w-full sm:w-auto">
                                           ✓ ATTACHED
                                         </span>
                                       )}
@@ -661,11 +673,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           ))}
                           
                           {/* Add Quote Option Button */}
-                          <div onClick={() => addQuoteBox(item.item_index)} className="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center text-slate-500 hover:text-[#0b9c54] hover:border-[#0b9c54]/50 hover:bg-[#0b9c54]/5 transition-all cursor-pointer min-h-[100px] py-4 group shadow-3xs">
+                          <div onClick={() => addQuoteBox(item.item_index)} className="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center text-slate-500 hover:text-[#0b9c54] hover:border-[#0b9c54]/50 hover:bg-[#0b9c54]/5 transition-all cursor-pointer min-h-[80px] sm:min-h-[100px] py-4 group shadow-3xs">
                             <div className="bg-white p-2 rounded-full shadow-sm group-hover:scale-110 transition-transform mb-2">
-                              <Plus size={18} className="text-slate-400 group-hover:text-[#0b9c54]" />
+                              <Plus size={16} sm:size={18} className="text-slate-400 group-hover:text-[#0b9c54]" />
                             </div>
-                            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider">Add Alternative Quote Option</span>
+                            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-center">Add Alternative Quote Option</span>
                           </div>
 
                         </div>
@@ -691,21 +703,21 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
           
           <div className="xl:col-span-4 space-y-3 print:hidden">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Quotation Processing Ledger</h2>
+            <h2 className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Quotation Processing Ledger</h2>
             {history.length === 0 ? (
               <Card className="p-6 text-center text-slate-400 border-dashed border-2 text-sm bg-white">No processed procurement runs located.</Card>
             ) : (
               history.map((ticket, i) => (
-                <div key={i} onClick={() => openHistoryTicket(ticket)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedHistoryTicket?.ticket_number === ticket.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+                <div key={i} onClick={() => openHistoryTicket(ticket)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedHistoryTicket?.ticket_number === ticket.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-3xs'}`}>
                   <div className="flex justify-between items-center mb-1">
-                    <span className="font-mono text-[#2c2a57] font-black text-sm">{ticket.ticket_number}</span>
+                    <span className="font-mono text-[#2c2a57] font-black text-xs md:text-sm">{ticket.ticket_number}</span>
                     <StatusBadge status={ticket.status} />
                   </div>
-                  <div className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-tight w-max mb-2">Cost Center: {ticket.project_code}</div>
-                  <p className="text-xs font-bold text-slate-600 truncate">{ticket.project_name}</p>
+                  <div className="text-[9px] md:text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-tight w-max mb-2">Cost Center: {ticket.project_code}</div>
+                  <p className="text-[11px] md:text-xs font-bold text-slate-600 truncate">{ticket.project_name}</p>
                   
                   {/* EXACT SEALING TIMESTAMP */}
-                  <div className="flex items-center space-x-1.5 mt-3 text-[10px] font-mono text-slate-600 bg-emerald-50/50 px-2 py-1.5 rounded-lg w-max border border-emerald-100">
+                  <div className="flex items-center space-x-1.5 mt-3 text-[9px] md:text-[10px] font-mono text-slate-600 bg-emerald-50/50 px-2 py-1.5 rounded-lg w-max border border-emerald-100">
                     <Clock size={12} className="text-[#0b9c54]" />
                     <span>Processed On: <strong className="text-slate-900">{ticket.action_date || "Date Unavailable"}</strong></span>
                   </div>
@@ -715,425 +727,430 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           </div>
 
           <div id="isolated-print-wrapper" className="xl:col-span-8 print:col-span-12">
-            {selectedHistoryTicket && historyPoItems.length > 0 ? (
-              <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative animate-in fade-in duration-200">
-                
-                <div className="bg-slate-900 text-white p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-3 print:hidden">
-                  <div className="flex items-center space-x-2.5">
-                    <Edit3 size={17} className="text-amber-400 animate-pulse" />
-                    <span className="text-[10px] sm:text-xs uppercase font-bold tracking-tight text-amber-50">Live Editable Canvas • Locked Data</span>
-                  </div>
-                  <button 
-                    onClick={handleDownloadPDF} 
-                    className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-2 px-5 py-2 text-xs font-bold shadow-xs w-full sm:w-auto"
-                  >
-                    <Download size={14} /> <span>Download Full PDF</span>
-                  </button>
-                </div>
-
-                <div id="printable-po" className="p-8 pb-16 space-y-6 font-sans bg-white select-text relative w-full h-auto overflow-visible text-justify">
+            <div id="history-detail-view" className="scroll-mt-24">
+              {selectedHistoryTicket && historyPoItems.length > 0 ? (
+                <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative animate-in fade-in duration-200">
                   
-                  <div className="hidden print:block print:fixed print:top-0 print:left-0 print:z-0 w-12 pt-3 pl-3">
-                    <img src={aarviLogo} alt="Aarvi running logo" className="w-full h-auto object-contain opacity-90" />
+                  <div className="bg-slate-900 text-white p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-3 print:hidden">
+                    <div className="flex items-center space-x-2.5">
+                      <Edit3 size={17} className="text-amber-400 animate-pulse" />
+                      <span className="text-[10px] sm:text-xs uppercase font-bold tracking-tight text-amber-50">Live Editable Canvas • Locked Data</span>
+                    </div>
+                    <button 
+                      onClick={handleDownloadPDF} 
+                      className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-2 px-5 py-2 text-xs font-bold shadow-xs w-full sm:w-auto"
+                    >
+                      <Download size={14} /> <span>Download Full PDF</span>
+                    </button>
                   </div>
 
-                  {/* ========================================================= */}
-                  {/* 📦 1. GOODS / MATERIALS PO */}
-                  {/* ========================================================= */}
-                  {selectedHistoryTicket.category === 'GOODS' && (
-                    <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
-                      {renderBrandedHeader("Purchase Order", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-PO`)}
+                  {/* 🎯 HORIZONTAL SCROLL WRAPPER FOR MOBILE PDF VIEW */}
+                  <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 print:p-0 print:border-none print:bg-white">
+                    <div id="printable-po" className="p-6 sm:p-8 pb-16 space-y-6 font-sans bg-white select-text relative w-full h-auto overflow-visible text-justify min-w-[800px] shadow-sm print:shadow-none print:min-w-0">
                       
-                      <div className="text-sm transition-all avoid-break" contentEditable="true">
-                        <p className="font-bold text-slate-900 uppercase">M/s. {primaryLine.vendor_name}</p>
-                        <p className="text-slate-600 leading-tight w-1/2">{primaryLine.vendor_address || "Address Not Provided"}</p>
-                        <p className="text-slate-600 font-mono mt-1">Cell No.: {primaryLine.vendor_contact || "N/A"}</p>
-                        <p className="text-slate-600 font-mono">EMAIL:- {primaryLine.vendor_email || "N/A"}</p>
+                      <div className="hidden print:block print:fixed print:top-0 print:left-0 print:z-0 w-12 pt-3 pl-3">
+                        <img src={aarviLogo} alt="Aarvi running logo" className="w-full h-auto object-contain opacity-90" />
                       </div>
-                      <div contentEditable="true" className="space-y-1 avoid-break">
-                        <p className="font-bold text-sm text-slate-900 mt-4">Subject: Purchase Order for {primaryLine.product_description?.split(' ')[0] || 'Materials'}.</p>
-                        <p className="text-xs text-slate-700 mt-2">Dear Sir,</p>
-                        <p className="text-xs text-slate-700">With reference to Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'recent submission'}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of {primaryLine.product_description || 'goods'} with your company.</p>
-                      </div>
-                      <div className="avoid-break mt-4">
-                        <table className="w-full text-left border-collapse border border-slate-400">
-                          <thead>
-                            <tr className="text-[10px] uppercase font-black bg-slate-50 border-b border-slate-400 text-slate-700">
-                              <th className="py-2 px-2 border-r border-slate-400 text-center w-12">Sr.No.</th>
-                              <th className="py-2 px-2 border-r border-slate-400">Description</th>
-                              <th className="py-2 px-2 border-r border-slate-400 text-center w-16">QUANTITY</th>
-                              <th className="py-2 px-2 border-r border-slate-400 text-right w-24">RATE UNIT</th>
-                              <th className="py-2 px-2 text-right w-28">Total Price in Rs.</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {historyPoItems.map((item, index) => (
-                              <tr key={index} className="border-b border-slate-300">
-                                <td className="py-2 px-2 border-r border-slate-400 text-center font-mono">0{index + 1}</td>
-                                <td className="py-2 px-2 border-r border-slate-400 font-bold text-slate-900" contentEditable="true">{item.product_description} {item.make_brand && `(${item.make_brand})`}</td>
-                                <td className="py-2 px-2 border-r border-slate-400 text-center font-mono font-bold" contentEditable="true">{item.quantity} Nos</td>
-                                <td className="py-2 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{((item.base_total_value) / (item.quantity || 1)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                                <td className="py-2 px-2 text-right font-mono font-bold text-slate-900" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                              </tr>
-                            ))}
-                            <tr className="border-t-2 border-slate-400 font-bold">
-                              <td colSpan="4" className="py-1.5 px-2 border-r border-slate-400 text-right">Basic Total Value</td>
-                              <td className="py-1.5 px-2 text-right font-mono text-sm" contentEditable="true">{historyPoItems.reduce((acc, curr) => acc + curr.base_total_value, 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                            </tr>
-                            <tr className="font-bold">
-                              <td colSpan="4" className="py-1.5 px-2 border-r border-slate-400 text-right">GST Adjustment</td>
-                              <td className="py-1.5 px-2 text-right font-mono text-slate-700" contentEditable="true">{(historyPoItems.reduce((acc, curr) => acc + curr.net_amount_payable, 0) - historyPoItems.reduce((acc, curr) => acc + curr.base_total_value, 0)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                            </tr>
-                            <tr className="font-black bg-slate-100 border-t border-slate-400 text-black">
-                              <td colSpan="4" className="py-2 px-2 border-r border-slate-400 text-right uppercase text-[10px]">Net Amount Payable</td>
-                              <td className="py-2 px-2 text-right font-mono text-base" contentEditable="true">{(selectedHistoryTicket.grand_total || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                            </tr>
-                            <tr>
-                              <td colSpan="5" className="py-2 px-3 italic font-semibold text-slate-700 border-t border-slate-400 text-center" contentEditable="true">
-                                (Rupees {convertNumberToWords(Math.round(selectedHistoryTicket.grand_total || 0))})
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="grid grid-cols-12 gap-2 text-[11px] leading-tight text-slate-800 mt-6 avoid-break" contentEditable="true">
-                        <div className="col-span-1 font-bold">a)</div>
-                        <div className="col-span-3 font-bold uppercase">TERMS OF PAYMENTS</div>
-                        <div className="col-span-8">{primaryLine.payment_terms || "100% Payment shall be paid after receipt of material at site."}</div>
-                        
-                        <div className="col-span-1 font-bold">b)</div>
-                        <div className="col-span-3 font-bold uppercase">DELIVERY</div>
-                        <div className="col-span-8">Time is an essence of this Purchase Order. The material has to be delivered within {primaryLine.time_of_delivery || "2-3 days"} from the date of issue of PO.</div>
-                        
-                        <div className="col-span-1 font-bold">c)</div>
-                        <div className="col-span-3 font-bold uppercase">PROJECT</div>
-                        <div className="col-span-8 font-bold">{selectedHistoryTicket.project_name}</div>
-                      </div>
-                      <p className="font-bold text-[11px] mt-4 avoid-break">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
-                      <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3">
-                        <p className="font-bold avoid-break">The placement of order is subject to the following Terms & Conditions:-</p>
-                        <p className="avoid-break"><strong>1. PRICE:</strong><br/>The cost of Purchase with GST as shown above is Rs. {(selectedHistoryTicket.grand_total || 0).toLocaleString('en-IN')}/- (Rupees {convertNumberToWords(Math.round(selectedHistoryTicket.grand_total || 0))}). This is a fixed-price order and no escalation is applicable.</p>
-                        <p className="avoid-break"><strong>2. QUALITY:</strong><br/>If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.</p>
-                        <p className="avoid-break"><strong>3. LIQUIDITY DAMAGE: (NOT APPLICABLE)</strong><br/>If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.</p>
-                        <p className="avoid-break"><strong>4. TAXES & DUTIES:</strong><br/>Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
-                        <p className="avoid-break"><strong>5. CORRESPONDENCE:</strong><br/>All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova,<br/>Marathon Nextgen Complex,<br/>G.K. Marg Lower Parel (W),<br/>Mumbai -400013.<br/>Tel: 022-40499999</p>
-                        <p className="avoid-break"><strong>6. REFERENCE:</strong><br/>Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'Recently Submitted'}.</p>
-                        <p className="avoid-break"><strong>7. BILLING:</strong><br/>Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
-                        <p className="avoid-break"><strong>8. DELIVERY ADDRESS:</strong><br/>Contract Person: {primaryLine.site_contact_person || "Site Coordinator"}, Contact No.: {primaryLine.site_contact_phone || "N/A"}.<br/><span className="font-bold uppercase">{selectedHistoryTicket.project_name}</span><br/>{primaryLine.delivery_address || "Address Pending"}</p>
-                        <p className="avoid-break"><strong>9. LEGAL COMPLIANCE:</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
-                        <p className="avoid-break">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.<br/><br/>Thanking you,<br/>Yours faithfully</p>
-                      </div>
-                    </div>
-                  )}
 
-                  {/* ========================================================= */}
-                  {/* 🚜 2. VEHICLE RENTAL PO */}
-                  {/* ========================================================= */}
-                  {selectedHistoryTicket.category === 'VEHICLE' && (
-                    <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
-                      {renderBrandedHeader("VEHICLE RENTAL CONTRACT", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-PO`)}
-                      
-                      <div className="text-sm transition-all avoid-break" contentEditable="true">
-                        <p className="font-bold text-slate-900">M/s. {primaryLine.vendor_name}</p>
-                        <p className="text-slate-600 leading-normal w-1/2">{primaryLine.vendor_address || "Address Reference Pending"}</p>
-                        <p className="text-slate-800 font-bold mt-4">Subject: Rental Contract for Hiring Vehicle for M/s. Aarvi Encon Ltd's - [{selectedHistoryTicket.project_name}]</p>
-                        <p className="mt-4 text-xs text-slate-800">Dear Sir,</p>
-                        <p className="text-xs mt-2">With reference to your quotation the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place order for Hiring Vehicle with you as per the terms & conditions mentioned in this contract.</p>
-                        <p className="text-xs mt-2">Mr. {primaryLine.vendor_name} hereinafter referred to as the "Contractor" of Vehicle, and M/s. Aarvi Encon Ltd hereinafter referred to as the "Client".</p>
-                      </div>
-                      <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break">Article 1</p>
-                      <p className="text-xs -mt-2 avoid-break">The subject of the present Contract is the vehicle owned by the Contractor having the following characteristics & providing services for the following sites as & when required:-</p>
-                      
-                      <div className="avoid-break mt-2">
-                        <table className="w-full text-left border-collapse border border-slate-400">
-                          <thead>
-                            <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
-                              <th className="py-2 px-2 border-r border-slate-400">Project Site Name</th>
-                              <th className="py-2 px-2 border-r border-slate-400">Vehicle Type</th>
-                              <th className="py-2 px-2 border-r border-slate-400 text-center">Qty (Nos)</th>
-                              <th className="py-2 px-2 border-r border-slate-400 text-right">Rate/Per Month</th>
-                              <th className="py-2 px-2 text-slate-900 w-1/3">Remarks</th>
-                            </tr>
-                          </thead>
-                          <tbody>
+                      {/* ========================================================= */}
+                      {/* 📦 1. GOODS / MATERIALS PO */}
+                      {/* ========================================================= */}
+                      {selectedHistoryTicket.category === 'GOODS' && (
+                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
+                          {renderBrandedHeader("Purchase Order", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-PO`)}
+                          
+                          <div className="text-sm transition-all avoid-break" contentEditable="true">
+                            <p className="font-bold text-slate-900 uppercase">M/s. {primaryLine.vendor_name}</p>
+                            <p className="text-slate-600 leading-tight w-1/2">{primaryLine.vendor_address || "Address Not Provided"}</p>
+                            <p className="text-slate-600 font-mono mt-1">Cell No.: {primaryLine.vendor_contact || "N/A"}</p>
+                            <p className="text-slate-600 font-mono">EMAIL:- {primaryLine.vendor_email || "N/A"}</p>
+                          </div>
+                          <div contentEditable="true" className="space-y-1 avoid-break">
+                            <p className="font-bold text-sm text-slate-900 mt-4">Subject: Purchase Order for {primaryLine.product_description?.split(' ')[0] || 'Materials'}.</p>
+                            <p className="text-xs text-slate-700 mt-2">Dear Sir,</p>
+                            <p className="text-xs text-slate-700">With reference to Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'recent submission'}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of {primaryLine.product_description || 'goods'} with your company.</p>
+                          </div>
+                          <div className="avoid-break mt-4">
+                            <table className="w-full text-left border-collapse border border-slate-400">
+                              <thead>
+                                <tr className="text-[10px] uppercase font-black bg-slate-50 border-b border-slate-400 text-slate-700">
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-12">Sr.No.</th>
+                                  <th className="py-2 px-2 border-r border-slate-400">Description</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-16">QUANTITY</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-24">RATE UNIT</th>
+                                  <th className="py-2 px-2 text-right w-28">Total Price in Rs.</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {historyPoItems.map((item, index) => (
+                                  <tr key={index} className="border-b border-slate-300">
+                                    <td className="py-2 px-2 border-r border-slate-400 text-center font-mono">0{index + 1}</td>
+                                    <td className="py-2 px-2 border-r border-slate-400 font-bold text-slate-900" contentEditable="true">{item.product_description} {item.make_brand && `(${item.make_brand})`}</td>
+                                    <td className="py-2 px-2 border-r border-slate-400 text-center font-mono font-bold" contentEditable="true">{item.quantity} Nos</td>
+                                    <td className="py-2 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{((item.base_total_value) / (item.quantity || 1)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                    <td className="py-2 px-2 text-right font-mono font-bold text-slate-900" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                  </tr>
+                                ))}
+                                <tr className="border-t-2 border-slate-400 font-bold">
+                                  <td colSpan="4" className="py-1.5 px-2 border-r border-slate-400 text-right">Basic Total Value</td>
+                                  <td className="py-1.5 px-2 text-right font-mono text-sm" contentEditable="true">{historyPoItems.reduce((acc, curr) => acc + curr.base_total_value, 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                </tr>
+                                <tr className="font-bold">
+                                  <td colSpan="4" className="py-1.5 px-2 border-r border-slate-400 text-right">GST Adjustment</td>
+                                  <td className="py-1.5 px-2 text-right font-mono text-slate-700" contentEditable="true">{(historyPoItems.reduce((acc, curr) => acc + curr.net_amount_payable, 0) - historyPoItems.reduce((acc, curr) => acc + curr.base_total_value, 0)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                </tr>
+                                <tr className="font-black bg-slate-100 border-t border-slate-400 text-black">
+                                  <td colSpan="4" className="py-2 px-2 border-r border-slate-400 text-right uppercase text-[10px]">Net Amount Payable</td>
+                                  <td className="py-2 px-2 text-right font-mono text-base" contentEditable="true">{(selectedHistoryTicket.grand_total || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                </tr>
+                                <tr>
+                                  <td colSpan="5" className="py-2 px-3 italic font-semibold text-slate-700 border-t border-slate-400 text-center" contentEditable="true">
+                                    (Rupees {convertNumberToWords(Math.round(selectedHistoryTicket.grand_total || 0))})
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="grid grid-cols-12 gap-2 text-[11px] leading-tight text-slate-800 mt-6 avoid-break" contentEditable="true">
+                            <div className="col-span-1 font-bold">a)</div>
+                            <div className="col-span-3 font-bold uppercase">TERMS OF PAYMENTS</div>
+                            <div className="col-span-8">{primaryLine.payment_terms || "100% Payment shall be paid after receipt of material at site."}</div>
+                            
+                            <div className="col-span-1 font-bold">b)</div>
+                            <div className="col-span-3 font-bold uppercase">DELIVERY</div>
+                            <div className="col-span-8">Time is an essence of this Purchase Order. The material has to be delivered within {primaryLine.time_of_delivery || "2-3 days"} from the date of issue of PO.</div>
+                            
+                            <div className="col-span-1 font-bold">c)</div>
+                            <div className="col-span-3 font-bold uppercase">PROJECT</div>
+                            <div className="col-span-8 font-bold">{selectedHistoryTicket.project_name}</div>
+                          </div>
+                          <p className="font-bold text-[11px] mt-4 avoid-break">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
+                          <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3">
+                            <p className="font-bold avoid-break">The placement of order is subject to the following Terms & Conditions:-</p>
+                            <p className="avoid-break"><strong>1. PRICE:</strong><br/>The cost of Purchase with GST as shown above is Rs. {(selectedHistoryTicket.grand_total || 0).toLocaleString('en-IN')}/- (Rupees {convertNumberToWords(Math.round(selectedHistoryTicket.grand_total || 0))}). This is a fixed-price order and no escalation is applicable.</p>
+                            <p className="avoid-break"><strong>2. QUALITY:</strong><br/>If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.</p>
+                            <p className="avoid-break"><strong>3. LIQUIDITY DAMAGE: (NOT APPLICABLE)</strong><br/>If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.</p>
+                            <p className="avoid-break"><strong>4. TAXES & DUTIES:</strong><br/>Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
+                            <p className="avoid-break"><strong>5. CORRESPONDENCE:</strong><br/>All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova,<br/>Marathon Nextgen Complex,<br/>G.K. Marg Lower Parel (W),<br/>Mumbai -400013.<br/>Tel: 022-40499999</p>
+                            <p className="avoid-break"><strong>6. REFERENCE:</strong><br/>Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'Recently Submitted'}.</p>
+                            <p className="avoid-break"><strong>7. BILLING:</strong><br/>Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
+                            <p className="avoid-break"><strong>8. DELIVERY ADDRESS:</strong><br/>Contract Person: {primaryLine.site_contact_person || "Site Coordinator"}, Contact No.: {primaryLine.site_contact_phone || "N/A"}.<br/><span className="font-bold uppercase">{selectedHistoryTicket.project_name}</span><br/>{primaryLine.delivery_address || "Address Pending"}</p>
+                            <p className="avoid-break"><strong>9. LEGAL COMPLIANCE:</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
+                            <p className="avoid-break">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.<br/><br/>Thanking you,<br/>Yours faithfully</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ========================================================= */}
+                      {/* 🚜 2. VEHICLE RENTAL PO */}
+                      {/* ========================================================= */}
+                      {selectedHistoryTicket.category === 'VEHICLE' && (
+                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
+                          {renderBrandedHeader("VEHICLE RENTAL CONTRACT", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-PO`)}
+                          
+                          <div className="text-sm transition-all avoid-break" contentEditable="true">
+                            <p className="font-bold text-slate-900">M/s. {primaryLine.vendor_name}</p>
+                            <p className="text-slate-600 leading-normal w-1/2">{primaryLine.vendor_address || "Address Reference Pending"}</p>
+                            <p className="text-slate-800 font-bold mt-4">Subject: Rental Contract for Hiring Vehicle for M/s. Aarvi Encon Ltd's - [{selectedHistoryTicket.project_name}]</p>
+                            <p className="mt-4 text-xs text-slate-800">Dear Sir,</p>
+                            <p className="text-xs mt-2">With reference to your quotation the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place order for Hiring Vehicle with you as per the terms & conditions mentioned in this contract.</p>
+                            <p className="text-xs mt-2">Mr. {primaryLine.vendor_name} hereinafter referred to as the "Contractor" of Vehicle, and M/s. Aarvi Encon Ltd hereinafter referred to as the "Client".</p>
+                          </div>
+                          <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break">Article 1</p>
+                          <p className="text-xs -mt-2 avoid-break">The subject of the present Contract is the vehicle owned by the Contractor having the following characteristics & providing services for the following sites as & when required:-</p>
+                          
+                          <div className="avoid-break mt-2">
+                            <table className="w-full text-left border-collapse border border-slate-400">
+                              <thead>
+                                <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
+                                  <th className="py-2 px-2 border-r border-slate-400">Project Site Name</th>
+                                  <th className="py-2 px-2 border-r border-slate-400">Vehicle Type</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center">Qty (Nos)</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right">Rate/Per Month</th>
+                                  <th className="py-2 px-2 text-slate-900 w-1/3">Remarks</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {historyPoItems.map((item, idx) => (
+                                  <tr key={idx} className="border-b border-slate-400">
+                                    <td className="py-3 px-2 border-r border-slate-400 font-bold" contentEditable="true">{selectedHistoryTicket.project_name}</td>
+                                    <td className="py-3 px-2 border-r border-slate-400 font-mono text-slate-900" contentEditable="true">{item.product_description}</td>
+                                    <td className="py-3 px-2 border-r border-slate-400 text-center font-mono" contentEditable="true">{item.quantity || 1}</td>
+                                    <td className="py-3 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                    <td className="py-3 px-2 text-slate-800 leading-tight" contentEditable="true">{item.special_terms || "24 hours, 9 seaters, working in all shifts, Diesel cost will be paid at actuals, 1 Ltr for 10 km, Driver and maintenance under Contractor scope."}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <p className="text-[11px] font-bold text-slate-900 mt-2">GST Extra as applicable</p>
+                          </div>
+                          <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded">
+                            <p className="font-bold text-[12px] avoid-break">NOTE: -</p>
+                            <p className="avoid-break">1. Duty hrs shall be as per site schedule.</p>
+                            <p className="avoid-break">2. Log Book will be maintained in attached prescribed form and will be signed by user for each trip.</p>
+                            <p className="avoid-break">3. No charges, rent for unexpired period of contractual period of the said contract will be payable by the "client", if your services are terminated before the said specified period of your contract.</p>
+                            <p className="avoid-break">4. The contract will automatically come to an end on expiry of the specified period and compensation, fees will not be payable to you by the "Client" on or after said contract period.</p>
+                            <p className="avoid-break">5. In case of any emergency include medical emergency, you are request to go serve as per the situation and as per the direction of local coordinator / authorized representative.</p>
+                            <p className="avoid-break">6. In case our main client call our personnel for any urgent work, you should be ready all the time with the driver & fuel with full condition.</p>
+                            <p className="avoid-break">7. Any change in petrol / diesel cost & insurance / taxes & levies if any, contractor has to bear the same; "client" will not pay, until the specified contract period.</p>
+                            <p className="avoid-break">8. In case of Non-availability of Vehicle / driver, The Contractor will arrange substitute driver / Vehicle in good condition on their Cost & risk.</p>
+                            <p className="avoid-break">9. The Contractor will take all sorts of insurances / fitness certificate / valid driver's license / RC book related to their service to the Client and Taxes & Insurance and government's related levies if any will be paid from time to time and location to location.</p>
+                            <p className="avoid-break">10. One set of all documents [including driver license] must be available in vehicle at all time & one set of all documents [including driver license] must be sent to our office, for our office records.</p>
+                            <p className="avoid-break">11. Tax will be deducted as per Government rules and regulations. Also note that, necessary documents required by any tax authorities, as a contractor, you have co-operate & support and provide the documents and share the details & documents to us for our office records.</p>
+                            <p className="avoid-break">12. If we found the contractor not paid the vehicle insurance / taxes & levies or any charges, as a client, we are forced to withdraw your service with immediate effect without assigning any reason, though the contract is valid.</p>
+                            <p className="avoid-break">13. During the contract period, local / central government or any governmental authorities, enforce taxes & levies or change of rules & regulations, as a contractor, you have to implement the same & share the details and document to us, as a proof & for our records.</p>
+                            <p className="avoid-break">14. Later, if we require more number of vehicles, within short notice, as a contractor, you have to provide the necessary support & service to the client without any interruption, on the above said terms & conditions.</p>
+                            <p className="avoid-break">15. In case of vendor changes driver, due to some problem, any damages / accidents / claims to the vehicle or third party or any property / assets, either directly or indirectly. If such claim comes during the contract period / later, all the cost should be paid by the vendor only. vendor must take sole responsibility of all things in nature, during the contract period.</p>
+                            <p className="avoid-break">16. Safety & security of our personnel's / authorized representative / our clients is very important & vendor takes utmost care during the said contract period. If any damages / accidents / claims to the vehicle or third party or any property / assets, either directly or indirectly. If such claim comes during the contract period / later, all the cost should be paid by the vendor only. vendor must take sole responsibility of all things in nature, during the contract period.</p>
+                            
+                            <div className="pt-4 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 2</p>
+                              <p className="mt-1">Duration of contract: The contract is valid from {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `01.04.${currentYear}`} to {primaryLine.contract_end_date ? new Date(primaryLine.contract_end_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `31.03.${nextYear}`}. (Extendable or reducible).<br/>This contract is valid as per the client / site requirement of the Vehicles. At the end of requirement period both parties should agree on the discontinuation of the service & the rental contract stands automatically get cancelled & void. Client can give One day Notice to cancel the services.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 3</p>
+                              <p className="mt-1">The monthly rental rate shall be as above.</p>
+                            </div>
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 4</p>
+                              <p className="mt-1">The Contractor shall be responsible for any and all tax liabilities, either related to ownership of the vehicle or deriving from the rental contract, in accordance with the legislation of Government of India from time to time and location to location.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 5</p>
+                              <p className="mt-1">The Client shall not be responsible for any damages caused by third parties, viz., violent public demonstration, or natural disaster and any breakdown of the vehicle.<br/>The Contractor shall repair immediately, if any and all damages caused during the said contract period and the cost / replacement / stand by vehicle cost will be paid you & the services should not affect the Client business, anyway.</p>
+                            </div>
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 6</p>
+                              <p className="mt-1">The vehicle is to be delivered in good condition; driver and all documents related to the vehicle shall be in order.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 7</p>
+                              <p className="mt-1">The present contract shall be terminated by both parties after mutual understanding [OR]<br/>At the end of the period stated in article 2 of the present contract by decision of either party, provided written notice is given Seven days in advance.<br/>The contract shall be lawfully terminated and without any form of mutual compensation in case of conflict, looting and all episodes of unrest or all cases producing a situation in which the security of Client's mission in India will be no longer guaranteed.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 8</p>
+                              <p className="mt-1">Payment will be released after 5 days from submission of bills, after receipt of Correct Original invoice along with necessary log sheets and the same will be sent to our Mumbai office for further processing.<br/><br/><strong>BILLING:</strong><br/>Bill to be submitted in 2 sets by 7th of every month. Original Bill to be submitted to Head Office in Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>(a) LOG Book Certified by Site In-charge, Bills certified by site incharge<br/>(b) P.O. Acceptance Copy<br/>TDS will be deducted as per government rules and deposited.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 9</p>
+                              <p className="mt-1">Vendor's driver all the time must maintain the speed limits as per the local conditions & local government rules & regulations and he should not violate the traffic rules, if he violate such rules & regulations; client is not responsible for any damages / accidents/claims to the vehicle or third party or any property / assets, either directly or indirectly. If such claim comes during the contract period / later, all the cost should be paid by the vendor only.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 10</p>
+                              <p className="mt-1">Vendor's authorized driver [with valid driving license only permitted to drive vehicle all the time during the said contract period. If we found other than vendor's authorized driver, driving the vehicle, client is not responsible for any damages / accidents / claims to the vehicle or third party or any property/assets, either directly or indirectly. If such claim comes during the contract period / later, all the cost should be paid by the vendor only.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 11</p>
+                              <p className="mt-1">For whatsoever reason, the Company's Total Liability arising out of the said services to be rendered under this Contract/your any other actions at work place and beyond, covering death, partial or minor disability, Medical shall borne by the vendor & client is not responsible for the same.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 12</p>
+                              <p className="mt-1">Any disputes or differences arising between the Client and Contractor with respect to this contract and contract terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 13</p>
+                              <p className="mt-1">Service Tax / GST: Kindly submit / register with Service Tax department. Aarvi to reimburse the same at actual on producing surplus challan. In case, you are not registered, Client to return 18% which will be reimbursed on receipt of Service Tax Proof.</p>
+                            </div>
+                            
+                            <p className="pt-6 avoid-break">Please acknowledge the duplicate copy of this letter as an acceptance of this contract.</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ========================================================= */}
+                      {/* 🏢 3. GUEST HOUSE ACCOMMODATION */}
+                      {/* ========================================================= */}
+                      {selectedHistoryTicket.category === 'ACCOMMODATION' && (
+                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
+                          {renderBrandedHeader("GUEST HOUSE RENTAL CONTRACT", `AEL/${primaryLine.vendor_name?.split(' ')[0]?.toUpperCase() || 'GH'}-PO`)}
+                          
+                          <div className="text-sm transition-all avoid-break" contentEditable="true">
+                            <p className="font-bold text-slate-900">M/s. {primaryLine.vendor_name}</p>
+                            <p className="text-slate-600 leading-normal w-1/2">{primaryLine.vendor_address || "Address Pending"}</p>
+                            <p className="text-slate-800 font-bold mt-4">Subject: Rental Contract for Guest House for M/s. Aarvi Encon Ltd's - [{selectedHistoryTicket.project_name}]</p>
+                            <p className="mt-4 text-xs text-slate-800">Dear Sir,</p>
+                            <p className="text-xs mt-2">With reference to your quotation of the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order to rent a Guest House with you as per the terms & conditions mentioned in this contract.</p>
+                            <p className="text-xs mt-2">Mr. {primaryLine.vendor_name}, hereinafter referred to as the "Contractor" of the Guest House and M/s. Aarvi Encon Ltd, hereinafter referred to as the "Client".</p>
+                          </div>
+                          <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break">Article 1</p>
+                          <p className="text-xs -mt-2 avoid-break">The subject of the present Contract is the Guest House owned by the Contractor, having the following characteristics & providing service for the following sites as & when required:-</p>
+                          
+                          <div className="avoid-break mt-2">
+                            <table className="w-full text-left border-collapse border border-slate-400">
+                              <thead>
+                                <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
+                                  <th className="py-2 px-2 border-r border-slate-400">Project Site Name</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-12">Qty</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-12">UOM</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-24">Rate/Month/<br/>Per Room (Rs)</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-24">Total</th>
+                                  <th className="py-2 px-2 text-slate-900 w-1/3">Remarks</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {historyPoItems.map((item, idx) => (
+                                  <tr key={idx} className="border-b border-slate-400">
+                                    <td className="py-3 px-2 border-r border-slate-400 font-bold" contentEditable="true">{selectedHistoryTicket.project_name}</td>
+                                    <td className="py-3 px-2 border-r border-slate-400 text-center font-mono" contentEditable="true">{item.quantity ? `0${item.quantity}` : "01"}</td>
+                                    <td className="py-3 px-2 border-r border-slate-400 text-center font-mono" contentEditable="true">Nos</td>
+                                    <td className="py-3 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{(item.base_total_value / (item.quantity || 1)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                    <td className="py-3 px-2 border-r border-slate-400 text-right font-mono font-bold" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                    <td className="py-3 px-2 text-slate-800 leading-tight" contentEditable="true">
+                                      {item.special_terms || `1) Monthly Rent Per Month: INR ${(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}\n2) 7BHK\n3) Electricity bill for Aarvi Scope`}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <p className="text-[11px] text-slate-900 mt-2 font-bold">NOTE: -<br/>1. All rooms and washrooms should be properly available and in a hygienic condition at the time of shifting candidates.</p>
+                          </div>
+                          <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded">
+                            <div className="avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 2</p>
+                              <p className="mt-1">Duration of contract: The contract is valid from {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-05-${currentYear}`} to {primaryLine.contract_end_date ? new Date(primaryLine.contract_end_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-5-${nextYear}`} (12 Months). (Extendable or reducible).<br/>This contract is valid as per the client/site requirement of the Guest House. At the end of the requirement period both parties should agree on the discontinuation of the service & the rental contract automatically gets canceled & void. Client & Contractor can give a day's Notice to cancel the services.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 3</p>
+                              <p className="mt-1">The monthly rental rate shall be as above, GST extra as applicable.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 4</p>
+                              <p className="mt-1">The Contractor shall be responsible for any and all tax liabilities, either related to ownership of the Guest House or deriving from the rental contract, in accordance with the legislation of the Government of India from time to time and location to location.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 5</p>
+                              <p className="mt-1">The Client shall not be responsible for any damages caused by third parties, viz., violent public demonstration, natural disaster, and any breakdown of the Guest House.<br/>The Contractor shall repair immediately any and all damages caused during the said contract period and the cost/replacement / stand-by Guest House will be paid to you & the services should not affect the Client's business, anyway.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 6</p>
+                              <p className="mt-1">The present contract shall be terminated by both parties after mutual understanding [OR]<br/>At the end of the period stated in article 2 of the present contract by decision of either party, provided written notice is given a days in advance.<br/>The contract shall be lawfully terminated and without any form of mutual compensation in case of conflict, looting, and all episodes of unrest or all cases producing a situation in which the security of the Client's mission in India will be no longer guaranteed.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 7</p>
+                              <p className="mt-1">Payment will be released by 10th of each month on submission of Original Invoice is to be submitted, along with the log sheet duly signed and stamped.<br/><br/><strong>BILLING:</strong><br/>Bill is to be submitted in 2 sets by the 7th of every month. Original Bill to be submitted to Head Office in Mumbai with a copy of Bill to Site for Certification / Verification along with following documents:<br/>(a) Register Book<br/>(b) P.O. Acceptance Copy<br/>TDS will be deducted as per government rules and deposited.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 8</p>
+                              <p className="mt-1">For whatsoever reason, the Company's Total Liability arising out of the said services to be rendered under this Contract/you're any other actions at the workplace and beyond, covering death, partial or minor disability, Medical shall be borne by the vendor & client is not responsible for the same.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 9</p>
+                              <p className="mt-1">Any disputes or differences arising between the Client and Contractor with respect to this contract and contract terms & conditions or any other matter connected with or incidental there to, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
+                            </div>
+                            
+                            <div className="pt-2 avoid-break">
+                              <p className="font-bold text-[12px] underline">Article 10</p>
+                              <p className="mt-1">Service Tax / GST: Kindly submit/register with the Service Tax department. Aarvi is to reimburse the same at the actual on producing surplus challan. In case, you are not registered, the Client is to return 18% which will be reimbursed on receipt of Service Tax Proof.</p>
+                            </div>
+                            
+                            <p className="pt-6 avoid-break">Please acknowledge the duplicate copy of this letter as an acceptance of this contract.</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ========================================================= */}
+                      {/* 🍱 4. FOOD SUPPLY PO */}
+                      {/* ========================================================= */}
+                      {selectedHistoryTicket.category === 'FOOD' && (
+                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
+                          {renderBrandedHeader("Purchase Order", `AEL/${primaryLine.vendor_name?.split(' ')[0]?.toUpperCase() || 'FOOD'}-PO`)}
+                          
+                          <div className="text-sm transition-all mt-6 avoid-break" contentEditable="true">
+                            <p className="font-bold text-slate-900">Mr. {primaryLine.vendor_name}</p>
+                            <p className="text-slate-600 leading-normal">{primaryLine.vendor_address || "Address Pending"}</p>
+                            <p className="text-slate-800 mt-6">Dear Sir,</p>
+                            <p className="text-slate-900 font-bold mt-2">Subject: Purchase Order for Food.</p>
+                            <p className="text-[12px] mt-4 leading-relaxed">With reference to your Quotation, dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `26.05.${currentYear}`}, and the subsequent discussion with our Mr Kishor Nikam (BUSINESS DEVELOPMENT), we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order for the supply of Food as mentioned below:-</p>
+                          </div>
+                          <div className="pl-6 py-6 font-bold text-[13px] text-slate-900 space-y-4 border-l-4 border-slate-300 ml-4 my-6 avoid-break" contentEditable="true">
                             {historyPoItems.map((item, idx) => (
-                              <tr key={idx} className="border-b border-slate-400">
-                                <td className="py-3 px-2 border-r border-slate-400 font-bold" contentEditable="true">{selectedHistoryTicket.project_name}</td>
-                                <td className="py-3 px-2 border-r border-slate-400 font-mono text-slate-900" contentEditable="true">{item.product_description}</td>
-                                <td className="py-3 px-2 border-r border-slate-400 text-center font-mono" contentEditable="true">{item.quantity || 1}</td>
-                                <td className="py-3 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                                <td className="py-3 px-2 text-slate-800 leading-tight" contentEditable="true">{item.special_terms || "24 hours, 9 seaters, working in all shifts, Diesel cost will be paid at actuals, 1 Ltr for 10 km, Driver and maintenance under Contractor scope."}</td>
-                              </tr>
+                              <p key={idx}>{item.product_description} Rate Rs. {item.unit_price || item.base_total_value}/- {item.special_terms || 'per meal'}.</p>
                             ))}
-                          </tbody>
-                        </table>
-                        <p className="text-[11px] font-bold text-slate-900 mt-2">GST Extra as applicable</p>
-                      </div>
-                      <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded">
-                        <p className="font-bold text-[12px] avoid-break">NOTE: -</p>
-                        <p className="avoid-break">1. Duty hrs shall be as per site schedule.</p>
-                        <p className="avoid-break">2. Log Book will be maintained in attached prescribed form and will be signed by user for each trip.</p>
-                        <p className="avoid-break">3. No charges, rent for unexpired period of contractual period of the said contract will be payable by the "client", if your services are terminated before the said specified period of your contract.</p>
-                        <p className="avoid-break">4. The contract will automatically come to an end on expiry of the specified period and compensation, fees will not be payable to you by the "Client" on or after said contract period.</p>
-                        <p className="avoid-break">5. In case of any emergency include medical emergency, you are request to go serve as per the situation and as per the direction of local coordinator / authorized representative.</p>
-                        <p className="avoid-break">6. In case our main client call our personnel for any urgent work, you should be ready all the time with the driver & fuel with full condition.</p>
-                        <p className="avoid-break">7. Any change in petrol / diesel cost & insurance / taxes & levies if any, contractor has to bear the same; "client" will not pay, until the specified contract period.</p>
-                        <p className="avoid-break">8. In case of Non-availability of Vehicle / driver, The Contractor will arrange substitute driver / Vehicle in good condition on their Cost & risk.</p>
-                        <p className="avoid-break">9. The Contractor will take all sorts of insurances / fitness certificate / valid driver's license / RC book related to their service to the Client and Taxes & Insurance and government's related levies if any will be paid from time to time and location to location.</p>
-                        <p className="avoid-break">10. One set of all documents [including driver license] must be available in vehicle at all time & one set of all documents [including driver license] must be sent to our office, for our office records.</p>
-                        <p className="avoid-break">11. Tax will be deducted as per Government rules and regulations. Also note that, necessary documents required by any tax authorities, as a contractor, you have co-operate & support and provide the documents and share the details & documents to us for our office records.</p>
-                        <p className="avoid-break">12. If we found the contractor not paid the vehicle insurance / taxes & levies or any charges, as a client, we are forced to withdraw your service with immediate effect without assigning any reason, though the contract is valid.</p>
-                        <p className="avoid-break">13. During the contract period, local / central government or any governmental authorities, enforce taxes & levies or change of rules & regulations, as a contractor, you have to implement the same & share the details and document to us, as a proof & for our records.</p>
-                        <p className="avoid-break">14. Later, if we require more number of vehicles, within short notice, as a contractor, you have to provide the necessary support & service to the client without any interruption, on the above said terms & conditions.</p>
-                        <p className="avoid-break">15. In case of vendor changes driver, due to some problem, any damages / accidents / claims to the vehicle or third party or any property / assets, either directly or indirectly. If such claim comes during the contract period / later, all the cost should be paid by the vendor only. vendor must take sole responsibility of all things in nature, during the contract period.</p>
-                        <p className="avoid-break">16. Safety & security of our personnel's / authorized representative / our clients is very important & vendor takes utmost care during the said contract period. If any damages / accidents / claims to the vehicle or third party or any property / assets, either directly or indirectly. If such claim comes during the contract period / later, all the cost should be paid by the vendor only. vendor must take sole responsibility of all things in nature, during the contract period.</p>
-                        
-                        <div className="pt-4 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 2</p>
-                          <p className="mt-1">Duration of contract: The contract is valid from {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `01.04.${currentYear}`} to {primaryLine.contract_end_date ? new Date(primaryLine.contract_end_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `31.03.${nextYear}`}. (Extendable or reducible).<br/>This contract is valid as per the client / site requirement of the Vehicles. At the end of requirement period both parties should agree on the discontinuation of the service & the rental contract stands automatically get cancelled & void. Client can give One day Notice to cancel the services.</p>
+                            {historyPoItems.length === 1 && (
+                               <p>Sunday Rate Rs. {historyPoItems[0].unit_price ? historyPoItems[0].unit_price + 40 : 300}/- per meal Special Dinner.</p>
+                            )}
+                          </div>
+                          <div className="text-[12px] space-y-2 mt-4 avoid-break" contentEditable="true">
+                            <p><strong>Terms of payment:-</strong> {primaryLine.payment_terms || "100% payment to be made against submission of Invoices"}</p>
+                            <p><strong>Project Name:</strong> {selectedHistoryTicket.project_name}</p>
+                            <p><strong>Our GST Registration no.:</strong> 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.</p>
+                          </div>
+                          <div contentEditable="true" className="pt-6 text-[12px] leading-relaxed text-slate-800 space-y-4">
+                            <p className="font-bold underline mb-4 avoid-break">The placement of work Order is subject to the following Terms & Conditions:-</p>
+                            
+                            <div className="avoid-break">
+                              <p><strong>1. TAXES & DUTIES:-</strong><br/>Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
+                            </div>
+                            
+                            <div className="avoid-break">
+                              <p><strong>2. CORRESPONDENCE:-</strong><br/>All the correspondence pertaining to this order is to be made to: -<br/>M/s.AarviEnconLtd.<br/>B-1/603, 6th Floor, Marathon Innova,<br/>Marathon Nextgen Complex,<br/>G.K. Marg., Lower Parel (W),<br/>Mumbai 400013.<br/>Tel: 022-40499999</p>
+                            </div>
+                            
+                            <div className="avoid-break">
+                              <p><strong>3. BILLING:-</strong><br/>Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>A) P.O. Acceptance Copy.<br/>B) Tax Invoice</p>
+                            </div>
+                            
+                            <div className="avoid-break">
+                              <p><strong>4. REFERENCE:-</strong><br/>Email Quotation, dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `26.05.${currentYear}`}.</p>
+                            </div>
+                            
+                            <div className="avoid-break">
+                              <p><strong>5. LEGAL COMPLIANCE:-</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and the jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
+                            </div>
+                            
+                            <p className="pt-4 avoid-break">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.</p>
+                          </div>
                         </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 3</p>
-                          <p className="mt-1">The monthly rental rate shall be as above.</p>
-                        </div>
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 4</p>
-                          <p className="mt-1">The Contractor shall be responsible for any and all tax liabilities, either related to ownership of the vehicle or deriving from the rental contract, in accordance with the legislation of Government of India from time to time and location to location.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 5</p>
-                          <p className="mt-1">The Client shall not be responsible for any damages caused by third parties, viz., violent public demonstration, or natural disaster and any breakdown of the vehicle.<br/>The Contractor shall repair immediately, if any and all damages caused during the said contract period and the cost / replacement / stand by vehicle cost will be paid you & the services should not affect the Client business, anyway.</p>
-                        </div>
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 6</p>
-                          <p className="mt-1">The vehicle is to be delivered in good condition; driver and all documents related to the vehicle shall be in order.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 7</p>
-                          <p className="mt-1">The present contract shall be terminated by both parties after mutual understanding [OR]<br/>At the end of the period stated in article 2 of the present contract by decision of either party, provided written notice is given Seven days in advance.<br/>The contract shall be lawfully terminated and without any form of mutual compensation in case of conflict, looting and all episodes of unrest or all cases producing a situation in which the security of Client's mission in India will be no longer guaranteed.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 8</p>
-                          <p className="mt-1">Payment will be released after 5 days from submission of bills, after receipt of Correct Original invoice along with necessary log sheets and the same will be sent to our Mumbai office for further processing.<br/><br/><strong>BILLING:</strong><br/>Bill to be submitted in 2 sets by 7th of every month. Original Bill to be submitted to Head Office in Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>(a) LOG Book Certified by Site In-charge, Bills certified by site incharge<br/>(b) P.O. Acceptance Copy<br/>TDS will be deducted as per government rules and deposited.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 9</p>
-                          <p className="mt-1">Vendor's driver all the time must maintain the speed limits as per the local conditions & local government rules & regulations and he should not violate the traffic rules, if he violate such rules & regulations; client is not responsible for any damages / accidents/claims to the vehicle or third party or any property / assets, either directly or indirectly. If such claim comes during the contract period / later, all the cost should be paid by the vendor only.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 10</p>
-                          <p className="mt-1">Vendor's authorized driver [with valid driving license only permitted to drive vehicle all the time during the said contract period. If we found other than vendor's authorized driver, driving the vehicle, client is not responsible for any damages / accidents / claims to the vehicle or third party or any property/assets, either directly or indirectly. If such claim comes during the contract period / later, all the cost should be paid by the vendor only.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 11</p>
-                          <p className="mt-1">For whatsoever reason, the Company's Total Liability arising out of the said services to be rendered under this Contract/your any other actions at work place and beyond, covering death, partial or minor disability, Medical shall borne by the vendor & client is not responsible for the same.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 12</p>
-                          <p className="mt-1">Any disputes or differences arising between the Client and Contractor with respect to this contract and contract terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 13</p>
-                          <p className="mt-1">Service Tax / GST: Kindly submit / register with Service Tax department. Aarvi to reimburse the same at actual on producing surplus challan. In case, you are not registered, Client to return 18% which will be reimbursed on receipt of Service Tax Proof.</p>
-                        </div>
-                        
-                        <p className="pt-6 avoid-break">Please acknowledge the duplicate copy of this letter as an acceptance of this contract.</p>
-                      </div>
-                    </div>
-                  )}
+                      )}
 
-                  {/* ========================================================= */}
-                  {/* 🏢 3. GUEST HOUSE ACCOMMODATION */}
-                  {/* ========================================================= */}
-                  {selectedHistoryTicket.category === 'ACCOMMODATION' && (
-                    <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
-                      {renderBrandedHeader("GUEST HOUSE RENTAL CONTRACT", `AEL/${primaryLine.vendor_name?.split(' ')[0]?.toUpperCase() || 'GH'}-PO`)}
-                      
-                      <div className="text-sm transition-all avoid-break" contentEditable="true">
-                        <p className="font-bold text-slate-900">M/s. {primaryLine.vendor_name}</p>
-                        <p className="text-slate-600 leading-normal w-1/2">{primaryLine.vendor_address || "Address Pending"}</p>
-                        <p className="text-slate-800 font-bold mt-4">Subject: Rental Contract for Guest House for M/s. Aarvi Encon Ltd's - [{selectedHistoryTicket.project_name}]</p>
-                        <p className="mt-4 text-xs text-slate-800">Dear Sir,</p>
-                        <p className="text-xs mt-2">With reference to your quotation of the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order to rent a Guest House with you as per the terms & conditions mentioned in this contract.</p>
-                        <p className="text-xs mt-2">Mr. {primaryLine.vendor_name}, hereinafter referred to as the "Contractor" of the Guest House and M/s. Aarvi Encon Ltd, hereinafter referred to as the "Client".</p>
-                      </div>
-                      <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break">Article 1</p>
-                      <p className="text-xs -mt-2 avoid-break">The subject of the present Contract is the Guest House owned by the Contractor, having the following characteristics & providing service for the following sites as & when required:-</p>
-                      
-                      <div className="avoid-break mt-2">
-                        <table className="w-full text-left border-collapse border border-slate-400">
-                          <thead>
-                            <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
-                              <th className="py-2 px-2 border-r border-slate-400">Project Site Name</th>
-                              <th className="py-2 px-2 border-r border-slate-400 text-center w-12">Qty</th>
-                              <th className="py-2 px-2 border-r border-slate-400 text-center w-12">UOM</th>
-                              <th className="py-2 px-2 border-r border-slate-400 text-right w-24">Rate/Month/<br/>Per Room (Rs)</th>
-                              <th className="py-2 px-2 border-r border-slate-400 text-right w-24">Total</th>
-                              <th className="py-2 px-2 text-slate-900 w-1/3">Remarks</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {historyPoItems.map((item, idx) => (
-                              <tr key={idx} className="border-b border-slate-400">
-                                <td className="py-3 px-2 border-r border-slate-400 font-bold" contentEditable="true">{selectedHistoryTicket.project_name}</td>
-                                <td className="py-3 px-2 border-r border-slate-400 text-center font-mono" contentEditable="true">{item.quantity ? `0${item.quantity}` : "01"}</td>
-                                <td className="py-3 px-2 border-r border-slate-400 text-center font-mono" contentEditable="true">Nos</td>
-                                <td className="py-3 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{(item.base_total_value / (item.quantity || 1)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                                <td className="py-3 px-2 border-r border-slate-400 text-right font-mono font-bold" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                                <td className="py-3 px-2 text-slate-800 leading-tight" contentEditable="true">
-                                  {item.special_terms || `1) Monthly Rent Per Month: INR ${(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}\n2) 7BHK\n3) Electricity bill for Aarvi Scope`}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        <p className="text-[11px] text-slate-900 mt-2 font-bold">NOTE: -<br/>1. All rooms and washrooms should be properly available and in a hygienic condition at the time of shifting candidates.</p>
-                      </div>
-                      <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded">
-                        <div className="avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 2</p>
-                          <p className="mt-1">Duration of contract: The contract is valid from {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-05-${currentYear}`} to {primaryLine.contract_end_date ? new Date(primaryLine.contract_end_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-5-${nextYear}`} (12 Months). (Extendable or reducible).<br/>This contract is valid as per the client/site requirement of the Guest House. At the end of the requirement period both parties should agree on the discontinuation of the service & the rental contract automatically gets canceled & void. Client & Contractor can give a day's Notice to cancel the services.</p>
+                      {/* ========================================================= */}
+                      {/* 🎯 UNIVERSAL 2-COLUMN SIGNATURE STRIP */}
+                      {/* ========================================================= */}
+                      <div className="pt-16 mt-16 flex justify-between items-end text-xs font-sans relative z-10 avoid-break" contentEditable="false">
+                        <div className="w-64 text-left space-y-1">
+                          <p className="text-[11px] text-slate-800 mb-10">Yours faithfully<br/><strong>For {selectedHistoryTicket.category === 'GOODS' || selectedHistoryTicket.category === 'FOOD' ? 'M/s. AARVI ENCON LTD.' : 'AARVI ENCON LIMITED'}</strong></p>
+                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2">Authorized Signatory</span>
                         </div>
                         
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 3</p>
-                          <p className="mt-1">The monthly rental rate shall be as above, GST extra as applicable.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 4</p>
-                          <p className="mt-1">The Contractor shall be responsible for any and all tax liabilities, either related to ownership of the Guest House or deriving from the rental contract, in accordance with the legislation of the Government of India from time to time and location to location.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 5</p>
-                          <p className="mt-1">The Client shall not be responsible for any damages caused by third parties, viz., violent public demonstration, natural disaster, and any breakdown of the Guest House.<br/>The Contractor shall repair immediately any and all damages caused during the said contract period and the cost/replacement / stand-by Guest House will be paid to you & the services should not affect the Client's business, anyway.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 6</p>
-                          <p className="mt-1">The present contract shall be terminated by both parties after mutual understanding [OR]<br/>At the end of the period stated in article 2 of the present contract by decision of either party, provided written notice is given a days in advance.<br/>The contract shall be lawfully terminated and without any form of mutual compensation in case of conflict, looting, and all episodes of unrest or all cases producing a situation in which the security of the Client's mission in India will be no longer guaranteed.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 7</p>
-                          <p className="mt-1">Payment will be released by 10th of each month on submission of Original Invoice is to be submitted, along with the log sheet duly signed and stamped.<br/><br/><strong>BILLING:</strong><br/>Bill is to be submitted in 2 sets by the 7th of every month. Original Bill to be submitted to Head Office in Mumbai with a copy of Bill to Site for Certification / Verification along with following documents:<br/>(a) Register Book<br/>(b) P.O. Acceptance Copy<br/>TDS will be deducted as per government rules and deposited.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 8</p>
-                          <p className="mt-1">For whatsoever reason, the Company's Total Liability arising out of the said services to be rendered under this Contract/you're any other actions at the workplace and beyond, covering death, partial or minor disability, Medical shall be borne by the vendor & client is not responsible for the same.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 9</p>
-                          <p className="mt-1">Any disputes or differences arising between the Client and Contractor with respect to this contract and contract terms & conditions or any other matter connected with or incidental there to, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
-                        </div>
-                        
-                        <div className="pt-2 avoid-break">
-                          <p className="font-bold text-[12px] underline">Article 10</p>
-                          <p className="mt-1">Service Tax / GST: Kindly submit/register with the Service Tax department. Aarvi is to reimburse the same at the actual on producing surplus challan. In case, you are not registered, the Client is to return 18% which will be reimbursed on receipt of Service Tax Proof.</p>
-                        </div>
-                        
-                        <p className="pt-6 avoid-break">Please acknowledge the duplicate copy of this letter as an acceptance of this contract.</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ========================================================= */}
-                  {/* 🍱 4. FOOD SUPPLY PO */}
-                  {/* ========================================================= */}
-                  {selectedHistoryTicket.category === 'FOOD' && (
-                    <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
-                      {renderBrandedHeader("Purchase Order", `AEL/${primaryLine.vendor_name?.split(' ')[0]?.toUpperCase() || 'FOOD'}-PO`)}
-                      
-                      <div className="text-sm transition-all mt-6 avoid-break" contentEditable="true">
-                        <p className="font-bold text-slate-900">Mr. {primaryLine.vendor_name}</p>
-                        <p className="text-slate-600 leading-normal">{primaryLine.vendor_address || "Address Pending"}</p>
-                        <p className="text-slate-800 mt-6">Dear Sir,</p>
-                        <p className="text-slate-900 font-bold mt-2">Subject: Purchase Order for Food.</p>
-                        <p className="text-[12px] mt-4 leading-relaxed">With reference to your Quotation, dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `26.05.${currentYear}`}, and the subsequent discussion with our Mr Kishor Nikam (BUSINESS DEVELOPMENT), we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order for the supply of Food as mentioned below:-</p>
-                      </div>
-                      <div className="pl-6 py-6 font-bold text-[13px] text-slate-900 space-y-4 border-l-4 border-slate-300 ml-4 my-6 avoid-break" contentEditable="true">
-                        {historyPoItems.map((item, idx) => (
-                          <p key={idx}>{item.product_description} Rate Rs. {item.unit_price || item.base_total_value}/- {item.special_terms || 'per meal'}.</p>
-                        ))}
-                        {historyPoItems.length === 1 && (
-                           <p>Sunday Rate Rs. {historyPoItems[0].unit_price ? historyPoItems[0].unit_price + 40 : 300}/- per meal Special Dinner.</p>
+                        {selectedHistoryTicket.category === 'FOOD' && (
+                          <div className="text-[10px] font-mono font-black text-slate-400 select-none tracking-widest self-end pb-1 hidden sm:block">
+                            AEL-04-IMSF-PURCH-004
+                          </div>
                         )}
-                      </div>
-                      <div className="text-[12px] space-y-2 mt-4 avoid-break" contentEditable="true">
-                        <p><strong>Terms of payment:-</strong> {primaryLine.payment_terms || "100% payment to be made against submission of Invoices"}</p>
-                        <p><strong>Project Name:</strong> {selectedHistoryTicket.project_name}</p>
-                        <p><strong>Our GST Registration no.:</strong> 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.</p>
-                      </div>
-                      <div contentEditable="true" className="pt-6 text-[12px] leading-relaxed text-slate-800 space-y-4">
-                        <p className="font-bold underline mb-4 avoid-break">The placement of work Order is subject to the following Terms & Conditions:-</p>
-                        
-                        <div className="avoid-break">
-                          <p><strong>1. TAXES & DUTIES:-</strong><br/>Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
-                        </div>
-                        
-                        <div className="avoid-break">
-                          <p><strong>2. CORRESPONDENCE:-</strong><br/>All the correspondence pertaining to this order is to be made to: -<br/>M/s.AarviEnconLtd.<br/>B-1/603, 6th Floor, Marathon Innova,<br/>Marathon Nextgen Complex,<br/>G.K. Marg., Lower Parel (W),<br/>Mumbai 400013.<br/>Tel: 022-40499999</p>
-                        </div>
-                        
-                        <div className="avoid-break">
-                          <p><strong>3. BILLING:-</strong><br/>Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>A) P.O. Acceptance Copy.<br/>B) Tax Invoice</p>
-                        </div>
-                        
-                        <div className="avoid-break">
-                          <p><strong>4. REFERENCE:-</strong><br/>Email Quotation, dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `26.05.${currentYear}`}.</p>
-                        </div>
-                        
-                        <div className="avoid-break">
-                          <p><strong>5. LEGAL COMPLIANCE:-</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and the jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
-                        </div>
-                        
-                        <p className="pt-4 avoid-break">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.</p>
-                      </div>
-                    </div>
-                  )}
 
-                  {/* ========================================================= */}
-                  {/* 🎯 UNIVERSAL 2-COLUMN SIGNATURE STRIP */}
-                  {/* ========================================================= */}
-                  <div className="pt-16 mt-16 flex justify-between items-end text-xs font-sans relative z-10 avoid-break" contentEditable="false">
-                    <div className="w-64 text-left space-y-1">
-                      <p className="text-[11px] text-slate-800 mb-10">Yours faithfully<br/><strong>For {selectedHistoryTicket.category === 'GOODS' || selectedHistoryTicket.category === 'FOOD' ? 'M/s. AARVI ENCON LTD.' : 'AARVI ENCON LIMITED'}</strong></p>
-                      <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2">Authorized Signatory</span>
-                    </div>
-                    
-                    {selectedHistoryTicket.category === 'FOOD' && (
-                      <div className="text-[10px] font-mono font-black text-slate-400 select-none tracking-widest self-end pb-1">
-                        AEL-04-IMSF-PURCH-004
+                        <div className="w-64 text-right space-y-1">
+                          <p className="text-[11px] text-slate-800 mb-10 text-center">{selectedHistoryTicket.category === 'GOODS' ? 'Signature & Seal of the Supplier' : 'Signature & seal of the contractor'}<br/>{selectedHistoryTicket.category === 'GOODS' ? 'Accepted & Agreed of the above Said Terms and Conditions' : 'accepted & agreed of the above said terms & conditions'}</p>
+                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2 text-center">Accepted by {selectedHistoryTicket.category === 'GOODS' ? 'Supplier' : 'Contractor'}</span>
+                        </div>
                       </div>
-                    )}
 
-                    <div className="w-64 text-right space-y-1">
-                      <p className="text-[11px] text-slate-800 mb-10 text-center">{selectedHistoryTicket.category === 'GOODS' ? 'Signature & Seal of the Supplier' : 'Signature & seal of the contractor'}<br/>{selectedHistoryTicket.category === 'GOODS' ? 'Accepted & Agreed of the above Said Terms and Conditions' : 'accepted & agreed of the above said terms & conditions'}</p>
-                      <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2 text-center">Accepted by {selectedHistoryTicket.category === 'GOODS' ? 'Supplier' : 'Contractor'}</span>
                     </div>
                   </div>
-
+                </Card>
+              ) : (
+                <div className="h-64 border border-dashed border-slate-300 rounded-xl bg-white flex flex-col items-center justify-center text-slate-400 text-sm p-6 text-center">
+                  <FileCheck size={35} className="mb-3 text-slate-300" />
+                  <h3 className="font-bold text-[#2c2a57] uppercase tracking-widest text-xs mb-1">Matrix Vault</h3>
+                  <p className="text-xs text-slate-500 max-w-sm">Select a processed procurement run from the ledger to view its finalized printable document.</p>
                 </div>
-              </Card>
-            ) : (
-              <div className="h-64 border border-dashed border-slate-300 rounded-xl bg-white flex flex-col items-center justify-center text-slate-400 text-sm p-6 text-center">
-                <FileCheck size={35} className="mb-3 text-slate-300" />
-                <h3 className="font-bold text-[#2c2a57] uppercase tracking-widest text-xs mb-1">Matrix Vault</h3>
-                <p className="text-xs text-slate-500 max-w-sm">Select a processed procurement run from the ledger to view its finalized printable document.</p>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
