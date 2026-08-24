@@ -84,7 +84,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     return () => { isMounted = false; clearTimeout(timer); };
   }, [fetchLedgerPOs]);
 
-  // 🎯 NEW: Fetch History Log when expanding a row to see GRN Discrepancy details
+  // 🎯 Fetch History Log when expanding a row to see exact GRN details and proof files
   const toggleExpandRow = async (poNumber, ticketNumber) => {
     const isCurrentlyExpanded = !!expandedRows[poNumber];
     setExpandedRows(prev => ({ ...prev, [poNumber]: !isCurrentlyExpanded }));
@@ -449,9 +449,11 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                     const taxForm = taxInvoiceForms[po.po_number] || {};
                     const poFileForm = poFileForms[po.po_number] || {};
                     
-                    // 🎯 Check if row contains a discrepancy or shortage
+                    // 🎯 Check GRN Status
                     const isDiscrepancy = po.status === 'Material Discrepancy Raised';
                     const isShortage = po.status === 'Partially Delivered';
+                    const isDelivered = po.status === 'Delivered - GRN Logged';
+                    const hasGrn = isDiscrepancy || isShortage || isDelivered;
 
                     // Extract the specific GRN log if available
                     const poLogs = rowLogs[po.po_number] || [];
@@ -463,7 +465,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
 
                     return (
                       <React.Fragment key={po.po_number}>
-                        <tr className={`transition-colors ${isExpanded ? 'bg-indigo-50/20' : 'hover:bg-slate-50/40'} ${isDiscrepancy ? 'bg-rose-50/40 hover:bg-rose-50/60' : isShortage ? 'bg-amber-50/40 hover:bg-amber-50/60' : ''}`}>
+                        <tr className={`transition-colors ${isExpanded ? 'bg-indigo-50/20' : 'hover:bg-slate-50/40'} ${isDiscrepancy ? 'bg-rose-50/40 hover:bg-rose-50/60' : isShortage ? 'bg-amber-50/40 hover:bg-amber-50/60' : isDelivered ? 'bg-emerald-50/40 hover:bg-emerald-50/60' : ''}`}>
                           
                           {/* Col 1: Manifest Expand */}
                           <td className="p-4 text-center align-top">
@@ -634,20 +636,25 @@ export default function MasterPOLedgerDesk({ currentUser }) {
 
                         {/* EXANDED MATERIAL MANIFEST ROW */}
                         {isExpanded && (
-                          <tr className={`border-b-2 border-slate-200 ${isDiscrepancy ? 'bg-rose-50/20' : isShortage ? 'bg-amber-50/20' : 'bg-slate-50/40'}`}>
+                          <tr className={`border-b-2 border-slate-200 ${isDiscrepancy ? 'bg-rose-50/20' : isShortage ? 'bg-amber-50/20' : isDelivered ? 'bg-emerald-50/20' : 'bg-slate-50/40'}`}>
                             <td colSpan="6" className="p-4 pl-16">
                               
-                              {/* 🎯 DYNAMIC GRN DISCREPANCY AUDIT BANNER */}
-                              {(isDiscrepancy || isShortage) && grnLogEntry && (
-                                <div className={`mb-4 p-4 rounded-xl border ${isDiscrepancy ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
+                              {/* 🎯 DYNAMIC GRN DISCREPANCY & CLEAN DELIVERY AUDIT BANNER */}
+                              {hasGrn && grnLogEntry && (
+                                <div className={`mb-4 p-4 rounded-xl border ${isDiscrepancy ? 'bg-rose-50 border-rose-200' : isShortage ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
                                   <div className="flex items-center space-x-2 mb-2">
-                                    {isDiscrepancy ? <ShieldAlert size={18} className="text-rose-600" /> : <AlertOctagon size={18} className="text-amber-600" />}
-                                    <h4 className={`text-xs font-black uppercase tracking-wider ${isDiscrepancy ? 'text-rose-800' : 'text-amber-800'}`}>
+                                    {isDiscrepancy ? <ShieldAlert size={18} className="text-rose-600" /> : 
+                                     isShortage ? <AlertOctagon size={18} className="text-amber-600" /> :
+                                     <CheckCircle2 size={18} className="text-emerald-600" />}
+                                    <h4 className={`text-xs font-black uppercase tracking-wider ${isDiscrepancy ? 'text-rose-800' : isShortage ? 'text-amber-800' : 'text-emerald-800'}`}>
                                       {grnLogEntry.action_taken}
                                     </h4>
                                   </div>
                                   <div className="bg-white p-3 rounded-lg border border-slate-200/60 shadow-3xs space-y-1">
-                                    <p className="text-xs text-slate-800"><span className="font-bold text-slate-500 mr-2">Site Inspector Remarks:</span>{grnLogEntry.remarks.split(' | Proof')[0]}</p>
+                                    <p className="text-xs text-slate-800">
+                                      <span className="font-bold text-slate-500 mr-2">Site Inspector Remarks:</span>
+                                      {grnLogEntry.remarks.split(' | Proof')[0]}
+                                    </p>
                                     <div className="flex justify-between items-end mt-2 pt-2 border-t border-slate-100">
                                       <p className="text-[10px] text-slate-400 font-mono">Logged by {grnLogEntry.user_name} on {grnLogEntry.timestamp}</p>
                                       {grnLogEntry.remarks.includes('Proof File:') && (
