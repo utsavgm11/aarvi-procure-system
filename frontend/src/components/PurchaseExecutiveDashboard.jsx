@@ -1,7 +1,11 @@
 // src/components/PurchaseExecutiveDashboard.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { ShoppingCart, FileCheck, CheckCircle2, Clock, Trash2, Send, Plus, Download, Edit3, FileText, AlertCircle } from 'lucide-react';
+import { 
+  ShoppingCart, FileCheck, CheckCircle2, Clock, Trash2, Send, Plus, 
+  Download, Edit3, FileText, AlertCircle, ShieldAlert, Truck, ExternalLink, 
+  MessageSquare, X, AlertOctagon 
+} from 'lucide-react';
 import { Card, Button, StatusBadge } from './ui/SharedUI';
 
 // 🎯 REQUIRED ASSETS FOR DOCUMENT RENDERING
@@ -21,6 +25,10 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const [history, setHistory] = useState([]);
   const [selectedHistoryTicket, setSelectedHistoryTicket] = useState(null);
   const [historyPoItems, setHistoryPoItems] = useState([]); 
+  const [historyLogs, setHistoryLogs] = useState([]); // 🎯 NEW: Audit logs for GRN details
+
+  // Modal Preview State
+  const [previewDoc, setPreviewDoc] = useState(null);
 
   // Shared State
   const [selectedTicket, setSelectedTicket] = useState(null);
@@ -116,17 +124,17 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       });
       setQuotes(initialQuotes);
       
-      // 🎯 MOBILE UX: Smooth scroll to detail view
       setTimeout(() => {
         document.getElementById('sourcing-detail-view')?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
     } catch (err) { console.error(err); }
   };
 
-  // --- TICKET OPENING LOGIC (HISTORY LEDGER) ---
+  // 🎯 TICKET OPENING LOGIC (HISTORY LEDGER - INCLUDES GRN LOGS)
   const openHistoryTicket = async (ticket) => {
     setSelectedHistoryTicket(ticket);
     setHistoryPoItems([]);
+    setHistoryLogs([]);
     setLoading(true);
     try {
       const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/quotations`);
@@ -136,7 +144,10 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       const calcTotal = winningLines.reduce((acc, curr) => acc + (curr.net_amount_payable || curr.base_total_value || 0), 0);
       setSelectedHistoryTicket(prev => ({ ...prev, grand_total: calcTotal }));
 
-      // 🎯 MOBILE UX: Smooth scroll to document view
+      // Fetch Audit Logs to retrieve GRN remarks & proof URLs
+      const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
+      setHistoryLogs(histRes.data);
+
       setTimeout(() => {
         document.getElementById('history-detail-view')?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
@@ -145,6 +156,12 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePreviewFile = (url, title) => {
+    if (!url) return;
+    let fullUrl = url.startsWith('/') ? `https://aarvi-procure-system.onrender.com${url}` : url;
+    setPreviewDoc({ url: fullUrl, title });
   };
 
   // --- SOURCING LOGIC ---
@@ -156,13 +173,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     });
   };
 
-  // 🎯 AUTOMATED MATH CALCULATION HANDLER
   const handleAmountChange = (itemIndex, quoteIndex, newUnit, newGst, qty) => {
     const unitVal = parseFloat(newUnit) || 0;
     const gstVal = parseFloat(newGst) || 0;
     const quantity = parseFloat(qty) || 1;
     
-    // Core Math: (Unit Price * Quantity) + GST%
     const base = unitVal * quantity;
     const net = base + (base * (gstVal / 100));
     
@@ -179,7 +194,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     });
   };
 
-  // 🎯 DYNAMIC QUANTITY UPDATER
   const handleItemQuantityChange = (indexToUpdate, newQuantity) => {
     const qty = parseInt(newQuantity) || 1;
 
@@ -327,7 +341,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   };
   const ui = getContextualUiSettings();
 
-  // PDF / DOCUMENT FUNCTIONS FOR HISTORY VIEW
   const handleDownloadPDF = () => {
     if (!pdfEngineReady && !window.html2pdf) {
       alert("PDF engine is still loading. Please wait a moment.");
@@ -390,9 +403,42 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const currentYear = new Date().getFullYear();
   const nextYear = currentYear + 1;
 
+  // 🎯 Extract GRN Action Log
+  const grnLogEntry = historyLogs.find(l => 
+    l.action_taken.includes("Material Delivered") || 
+    l.action_taken.includes("Partial Delivery") || 
+    l.action_taken.includes("CRITICAL ALERT")
+  );
+
   return (
     <div className="space-y-6 pb-12 sm:px-2 md:px-4 lg:px-0">
       
+      {/* 🎯 DOCUMENT PREVIEW MODAL */}
+      {previewDoc && (
+        <div 
+          className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
+          onClick={() => setPreviewDoc(null)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-[#2c2a57] p-4 text-white flex justify-between items-center shrink-0 z-10">
+              <div className="flex items-center gap-2">
+                <FileText size={18} className="text-indigo-300" />
+                <h3 className="font-extrabold text-sm uppercase tracking-wider">{previewDoc.title}</h3>
+              </div>
+              <button onClick={() => setPreviewDoc(null)} className="text-slate-300 hover:text-white bg-white/10 p-1.5 rounded-full transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 bg-slate-100 relative overflow-auto custom-scrollbar">
+              <iframe src={previewDoc.url} className="w-full h-full border-0" title="Document Preview" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DEEP CSS ISOLATION FOR PDF EXPORT */}
       <style>{`
         .avoid-break, p, tr, td, h1, h2, h3, table {
@@ -673,13 +719,10 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           ))}
                           
                           {/* Add Quote Option Button */}
-                          <div onClick={() => addQuoteBox(item.item_index)} className="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center text-slate-500 hover:text-[#0b9c54] hover:border-[#0b9c54]/50 hover:bg-[#0b9c54]/5 transition-all cursor-pointer min-h-[80px] sm:min-h-[100px] py-4 group shadow-3xs">
-                            <div className="bg-white p-2 rounded-full shadow-sm group-hover:scale-110 transition-transform mb-2">
-                              <Plus size={16} sm:size={18} className="text-slate-400 group-hover:text-[#0b9c54]" />
-                            </div>
-                            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-center">Add Alternative Quote Option</span>
+                          <div onClick={() => addQuoteBox(item.item_index)} className="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center text-slate-500 hover:text-[#0b9c54] hover:border-[#0b9c54]/50 cursor-pointer py-4 shadow-3xs">
+                            <Plus size={18} className="mb-1" />
+                            <span className="text-[10px] sm:text-xs font-bold uppercase">Add Alternative Quote Option</span>
                           </div>
-
                         </div>
                       </div>
                     </Card>
@@ -727,7 +770,66 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           </div>
 
           <div id="isolated-print-wrapper" className="xl:col-span-8 print:col-span-12">
-            <div id="history-detail-view" className="scroll-mt-24">
+            <div id="history-detail-view" className="scroll-mt-24 space-y-6">
+              
+              {/* 🎯 NEW: GRN & DISCREPANCY STATUS BANNER */}
+              {selectedHistoryTicket && (
+                <>
+                  {selectedHistoryTicket.status === 'Material Discrepancy Raised' && (
+                    <Card className="p-4 bg-rose-50 border-rose-200 text-rose-900 space-y-2 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2.5">
+                          <ShieldAlert size={20} className="text-rose-600 shrink-0" />
+                          <h3 className="font-black text-xs md:text-sm uppercase tracking-wider">CRITICAL ALERT: Site Discrepancy Logged</h3>
+                        </div>
+                        <span className="text-[10px] font-black bg-rose-200 text-rose-800 px-2 py-0.5 rounded uppercase">Defect Flagged</span>
+                      </div>
+                      <p className="text-xs text-rose-800 leading-relaxed">
+                        The site coordinator flagged a defect or missing shipment during inspection.
+                      </p>
+                      {historyLogs.find(l => l.action_taken.includes("CRITICAL ALERT")) && (
+                        <div className="bg-white p-3 rounded-lg border border-rose-200 text-xs space-y-1 mt-2">
+                          <p className="font-bold text-slate-800">Site Log: <span className="font-normal text-slate-700">{historyLogs.find(l => l.action_taken.includes("CRITICAL ALERT")).remarks}</span></p>
+                          <p className="text-[10px] text-slate-400 font-mono">Logged by: {historyLogs.find(l => l.action_taken.includes("CRITICAL ALERT")).user_name} on {historyLogs.find(l => l.action_taken.includes("CRITICAL ALERT")).timestamp}</p>
+                        </div>
+                      )}
+                    </Card>
+                  )}
+
+                  {selectedHistoryTicket.status === 'Partially Delivered' && (
+                    <Card className="p-4 bg-amber-50 border-amber-200 text-amber-900 space-y-2 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2.5">
+                          <Clock size={20} className="text-amber-600 shrink-0" />
+                          <h3 className="font-black text-xs md:text-sm uppercase tracking-wider">Partial Delivery Logged</h3>
+                        </div>
+                        <span className="text-[10px] font-black bg-amber-200 text-amber-800 px-2 py-0.5 rounded uppercase">Short Delivery</span>
+                      </div>
+                      <p className="text-xs text-amber-800">
+                        Site has received a partial quantity. Top-up / balance dispatch required.
+                      </p>
+                      {historyLogs.find(l => l.action_taken.includes("Partial Delivery")) && (
+                        <div className="bg-white p-3 rounded-lg border border-amber-200 text-xs space-y-1 mt-2">
+                          <p className="font-bold text-slate-800">Site Log: <span className="font-normal text-slate-700">{historyLogs.find(l => l.action_taken.includes("Partial Delivery")).remarks}</span></p>
+                        </div>
+                      )}
+                    </Card>
+                  )}
+
+                  {selectedHistoryTicket.status === 'Delivered - GRN Logged' && (
+                    <Card className="p-4 bg-emerald-50 border-emerald-200 text-emerald-900 flex items-center justify-between shadow-xs">
+                      <div className="flex items-center space-x-2.5">
+                        <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
+                        <div>
+                          <h3 className="font-black text-xs md:text-sm uppercase tracking-wider">100% Goods Received & Verified</h3>
+                          <p className="text-xs text-emerald-700">Site coordinator confirmed clean receipt of all materials.</p>
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+                </>
+              )}
+
               {selectedHistoryTicket && historyPoItems.length > 0 ? (
                 <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative animate-in fade-in duration-200">
                   
@@ -1150,6 +1252,34 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                   <p className="text-xs text-slate-500 max-w-sm">Select a processed procurement run from the ledger to view its finalized printable document.</p>
                 </div>
               )}
+
+              {/* 🎯 AUDIT LOGS TRAIL SECTION */}
+              {selectedHistoryTicket && historyLogs.length > 0 && (
+                <Card className="p-4 space-y-4 bg-white border-slate-200">
+                  <div className="flex items-center space-x-2 text-slate-500 font-bold text-xs uppercase tracking-wider">
+                    <MessageSquare size={14} /> <span>Complete Requisition Audit Log</span>
+                  </div>
+                  <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1 custom-scrollbar divide-y divide-slate-100">
+                    {historyLogs.map((log, lIdx) => (
+                      <div key={lIdx} className="pt-2 first:pt-0 space-y-1 text-xs">
+                        <div className="flex justify-between items-center text-[10px] font-bold">
+                          <span className="text-[#2c2a57]">{log.user_name}</span>
+                          <span className="text-slate-400 font-mono">{log.timestamp}</span>
+                        </div>
+                        <p className={`text-[11px] font-bold ${log.action_taken.includes("CRITICAL ALERT") ? "text-rose-600" : "text-indigo-700"}`}>
+                          {log.action_taken}
+                        </p>
+                        {log.remarks && (
+                          <p className={`text-xs font-medium p-2 rounded border mt-1 ${log.action_taken.includes("CRITICAL ALERT") ? "bg-rose-50 border-rose-200 text-rose-800" : "bg-slate-50 border-slate-200 text-slate-700"}`}>
+                            {log.remarks}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
             </div>
           </div>
         </div>
