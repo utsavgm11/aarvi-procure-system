@@ -1643,56 +1643,70 @@ def approve_proforma_invoice(
 # -------------------------------------------------------------------
 @app.get("/api/accounts/pending-disbursement", response_model=List[dict])
 def get_pending_disbursement_pos(db: Session = Depends(get_db)):
-    orders = db.query(
-        models.PurchaseOrder, 
-        models.MaterialTicket
-    ).join(
-        models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number
-    ).filter(
-        models.MaterialTicket.status.in_(["PI Approved - Sent to Accounts", "Partially Disbursed", "Dispatched"])
-    ).order_by(models.PurchaseOrder.generated_at.desc()).all()
+    # 1. Fetch tickets across all relevant Accounts & Disbursement lifecycle stages
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status.in_([
+            "PI Approved - Sent to Accounts", 
+            "Partially Disbursed", 
+            "Dispatched", 
+            "Partially Delivered", 
+            "Material Discrepancy Raised", 
+            "Delivered - GRN Logged"
+        ])
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
     
     response = []
-    for po_obj, ticket_obj in orders:
+    for ticket_obj in tickets:
+        # 2. Safely look up Purchase Order entity if generated
+        po_obj = db.query(models.PurchaseOrder).filter(
+            models.PurchaseOrder.ticket_number == ticket_obj.ticket_number
+        ).first()
+        
+        # 3. Retrieve winning quotes or fallback to any attached bid
         winning_quotes = db.query(models.Quotation).filter(
-            models.Quotation.ticket_number == po_obj.ticket_number,
+            models.Quotation.ticket_number == ticket_obj.ticket_number,
             models.Quotation.is_selected == True
         ).all()
-        grand_total = sum(q.total_amount for q in winning_quotes)
-        primary_quote = winning_quotes[0] if winning_quotes else None
-        primary_vendor = primary_quote.vendor_name if primary_quote else "N/A"
         
-        already_disbursed = float(getattr(po_obj, 'disbursed_amount', 0) or 0)
+        if not winning_quotes:
+            winning_quotes = db.query(models.Quotation).filter(
+                models.Quotation.ticket_number == ticket_obj.ticket_number
+            ).all()
+            
+        grand_total = sum(q.total_amount for q in winning_quotes) if winning_quotes else 0.0
+        primary_quote = winning_quotes[0] if winning_quotes else None
+        primary_vendor = primary_quote.vendor_name if primary_quote else "Pending Vendor Linking"
+        
+        already_disbursed = float(getattr(po_obj, 'disbursed_amount', 0) or 0) if po_obj else 0.0
         remaining_balance = grand_total - already_disbursed
-
-        # 🎯 Include in queue if there's still an outstanding balance or pending initial disbursement
-        if remaining_balance > 1.0 or ticket_obj.status == "PI Approved - Sent to Accounts":
-            response.append({
-                "po_number": po_obj.po_number,
-                "ticket_number": po_obj.ticket_number,
-                "project_name": ticket_obj.project_name,
-                "project_code": ticket_obj.project_code,
-                "vendor_name": primary_vendor,
-                "vendor_email": getattr(primary_quote, 'vendor_email', 'N/A') if primary_quote else 'N/A',
-                "vendor_contact": getattr(primary_quote, 'vendor_contact', 'N/A') if primary_quote else 'N/A',
-                "grand_total": float(grand_total),
-                "disbursed_amount": already_disbursed,
-                "remaining_balance": float(max(0.0, remaining_balance)),
-                "status": ticket_obj.status,
-                "po_pdf_url": getattr(po_obj, 'pdf_url', None),
-                "signed_po_url": getattr(po_obj, 'signed_po_url', None),
-                "invoice_no": getattr(po_obj, 'invoice_no', '') or '',
-                "invoice_date": getattr(po_obj, 'invoice_date', '') or '',
-                "invoice_remark": getattr(po_obj, 'invoice_remark', '') or '',
-                "payment_terms": getattr(po_obj, 'invoice_duration', '') or '100% Payable',
-                "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None),
-                "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '',
-                "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '',
-                "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None),
-                "utr_no": getattr(po_obj, 'utr_no', '') or '',
-                "payment_date": getattr(po_obj, 'payment_date', '') or '',
-                "payment_remark": getattr(po_obj, 'payment_remark', '') or ''
-            })
+        
+        response.append({
+            "po_number": po_obj.po_number if po_obj else f"PO-{ticket_obj.ticket_number.split('-')[-1]}",
+            "ticket_number": ticket_obj.ticket_number,
+            "project_name": ticket_obj.project_name,
+            "project_code": ticket_obj.project_code,
+            "vendor_name": primary_vendor,
+            "vendor_email": getattr(primary_quote, 'vendor_email', 'N/A') if primary_quote else 'N/A',
+            "vendor_contact": getattr(primary_quote, 'vendor_contact', 'N/A') if primary_quote else 'N/A',
+            "grand_total": float(grand_total),
+            "disbursed_amount": already_disbursed,
+            "remaining_balance": float(max(0.0, remaining_balance)),
+            "status": ticket_obj.status,
+            "po_pdf_url": getattr(po_obj, 'pdf_url', None) if po_obj else None,
+            "signed_po_url": getattr(po_obj, 'signed_po_url', None) if po_obj else None,
+            "invoice_no": getattr(po_obj, 'invoice_no', '') or '' if po_obj else '',
+            "invoice_date": getattr(po_obj, 'invoice_date', '') or '' if po_obj else '',
+            "invoice_remark": getattr(po_obj, 'invoice_remark', '') or '' if po_obj else '',
+            "payment_terms": getattr(po_obj, 'invoice_duration', '') or '100% Payable' if po_obj else '100% Payable',
+            "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None) if po_obj else None,
+            "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '' if po_obj else '',
+            "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '' if po_obj else '',
+            "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None) if po_obj else None,
+            "utr_no": getattr(po_obj, 'utr_no', '') or '' if po_obj else '',
+            "payment_date": getattr(po_obj, 'payment_date', '') or '' if po_obj else '',
+            "payment_remark": getattr(po_obj, 'payment_remark', '') or '' if po_obj else ''
+        })
+        
     return response
 
 @app.put("/api/purchase-orders/{po_number}/disbursement")
