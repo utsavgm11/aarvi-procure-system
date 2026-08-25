@@ -1673,7 +1673,8 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
                 models.Quotation.ticket_number == ticket_obj.ticket_number
             ).all()
             
-        grand_total = sum(q.total_amount for q in winning_quotes) if winning_quotes else 0.0
+        # FIX: Explicitly cast sum to float and guard against None values
+        grand_total = float(sum(q.total_amount or 0 for q in winning_quotes)) if winning_quotes else 0.0
         primary_quote = winning_quotes[0] if winning_quotes else None
         primary_vendor = primary_quote.vendor_name if primary_quote else "Pending Vendor Linking"
         
@@ -1688,7 +1689,7 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
             "vendor_name": primary_vendor,
             "vendor_email": getattr(primary_quote, 'vendor_email', 'N/A') if primary_quote else 'N/A',
             "vendor_contact": getattr(primary_quote, 'vendor_contact', 'N/A') if primary_quote else 'N/A',
-            "grand_total": float(grand_total),
+            "grand_total": grand_total,
             "disbursed_amount": already_disbursed,
             "remaining_balance": float(max(0.0, remaining_balance)),
             "status": ticket_obj.status,
@@ -1710,7 +1711,7 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
     return response
 
 
-    
+
 
 @app.put("/api/purchase-orders/{po_number}/disbursement")
 async def process_po_disbursement(
