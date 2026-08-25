@@ -5,9 +5,9 @@ import {
   FileCheck, Search, ChevronDown, ChevronUp, Landmark, Layers3, 
   Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
   UploadCloud, Paperclip, Trash2, FileText, CheckCircle2,
-  ShieldAlert, AlertOctagon
+  ShieldAlert, AlertOctagon, Wallet ,ExternalLink
 } from 'lucide-react';
-import { Card, Button } from './ui/SharedUI';
+import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
 
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
@@ -19,7 +19,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [selectedPoForView, setSelectedPoForView] = useState(null);
   const [poItems, setPoItems] = useState([]);
   
-  // 🎯 NEW: Store dynamically fetched history logs for expanded rows
+  // Store dynamically fetched history logs for expanded rows
   const [rowLogs, setRowLogs] = useState({});
 
   // Filter Dropdown Selection States
@@ -84,7 +84,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     return () => { isMounted = false; clearTimeout(timer); };
   }, [fetchLedgerPOs]);
 
-  // 🎯 Fetch History Log when expanding a row to see exact GRN details and proof files
+  // Fetch History Log when expanding a row to see exact GRN details and Payment history
   const toggleExpandRow = async (poNumber, ticketNumber) => {
     const isCurrentlyExpanded = !!expandedRows[poNumber];
     setExpandedRows(prev => ({ ...prev, [poNumber]: !isCurrentlyExpanded }));
@@ -175,7 +175,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice`, formData, { headers: { 'Content-Type': 'multipart/form-data'} });
       setEditingInvoices(prev => ({ ...prev, [poNumber]: false }));
       fetchLedgerPOs(); 
-    } catch (err) { alert("Failed to commit manual PI data and attachment to the backend engine."); }
+    } catch (err) { alert("Failed to save Proforma Invoice details."); }
   };
 
   const handleSaveTaxInvoiceDetails = async (poNumber) => {
@@ -189,7 +189,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/tax-invoice`, formData, { headers: { 'Content-Type': 'multipart/form-data'} });
       setEditingTaxInvoices(prev => ({ ...prev, [poNumber]: false }));
       fetchLedgerPOs(); 
-    } catch (err) { alert("Failed to commit final Tax Invoice data to the backend engine."); }
+    } catch (err) { alert("Failed to save Final Tax Invoice."); }
   };
 
   // --- Delete API Calls ---
@@ -198,7 +198,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     try {
       await axios.delete(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice-file`);
       fetchLedgerPOs();
-    } catch (err) { alert("Failed to delete attachment from server."); }
+    } catch (err) { alert("Failed to delete attachment."); }
   };
 
   const openPoDocumentSection = async (po) => {
@@ -206,7 +206,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     try {
       const res = await axios.get(`${API_BASE_URL}/requisitions/${po.ticket_number}/quotations`);
       setPoItems(res.data.filter(q => q.is_selected === true));
-    } catch (err) { console.error("Error generating PO template rows injection", err); }
+    } catch (err) { console.error("Error generating PO template", err); }
   };
 
   // --- Metrics & Search Logic ---
@@ -271,17 +271,17 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const uniqueProjectFilterOptions = useMemo(() => ['ALL', ...new Set(ledgerList.map(po => po.project_code))], [ledgerList]);
 
   return (
-    <div className="space-y-6 relative sm:px-2 md:px-4 lg:px-0">
+    <div className="space-y-6 relative sm:px-2 md:px-4 lg:px-0 pb-12">
       
       {/* SECTION VIEW A: DOCUMENT PREVIEW */}
       {selectedPoForView ? (
         <div className="space-y-4 animate-in fade-in duration-200 pb-10">
           <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <button onClick={() => setSelectedPoForView(null)} className="flex items-center space-x-2 text-sm font-bold text-slate-500 hover:text-[#2c2a57] transition-colors">
-              <ArrowLeft size={16} /> <span>Return to Master Ledger Desk</span>
+              <ArrowLeft size={16} /> <span>Return to Ledger</span>
             </button>
             <Button variant="primary" onClick={() => window.print()} className="shadow-sm bg-[#0b9c54] hover:bg-emerald-600">
-              <Printer size={16} className="mr-2 hidden sm:inline" /> <span>Print / Save as PDF</span>
+              <Printer size={16} className="mr-2 hidden sm:inline" /> <span>Print Document</span>
             </Button>
           </div>
 
@@ -348,30 +348,31 @@ export default function MasterPOLedgerDesk({ currentUser }) {
         <>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
             <div>
-              <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Spend Analytics & PO Registry</h1>
-              <p className="text-sm text-slate-500 font-medium">Automatic spend extraction records linked with physical manual invoice filing systems.</p>
+              <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Master PO & Spend Ledger</h1>
+              <p className="text-sm text-slate-500 font-medium">Track all authorized purchases, monitor deliveries, and review financial payments.</p>
             </div>
           </div>
 
+          {/* 📊 ANALYTICS CARDS */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             <Card className="p-4 flex items-center space-x-4 border-l-4 border-emerald-500 bg-white shadow-2xs">
               <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600"><Landmark size={20} /></div>
               <div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Evaluated Outflow</p>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Spent</p>
                 <h3 className="text-xl font-black text-slate-900 mt-0.5">₹{analyticsMetrics.totalSpend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</h3>
               </div>
             </Card>
 
             <Card className="p-4 flex items-center justify-between bg-white shadow-2xs border border-slate-200">
               <div className="space-y-1.5 flex-1 pr-2">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Financial Flag Ratio</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Reimbursable Breakdown</p>
                 <div className="space-y-1">
                   <div className="text-xs font-bold text-slate-700 flex justify-between">
                     <span className="text-cyan-600">Reimbursable:</span>
                     <span>₹{analyticsMetrics.reimbursableTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} ({analyticsMetrics.reimbursablePercentage.toFixed(1)}%)</span>
                   </div>
                   <div className="text-xs font-bold text-slate-700 flex justify-between">
-                    <span className="text-amber-600">Non-Reimbursable:</span>
+                    <span className="text-amber-600">Company Cost:</span>
                     <span>₹{analyticsMetrics.nonReimbursableTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} ({analyticsMetrics.nonReimbursablePercentage.toFixed(1)}%)</span>
                   </div>
                 </div>
@@ -384,16 +385,17 @@ export default function MasterPOLedgerDesk({ currentUser }) {
 
             <Card className="p-4 grid grid-cols-2 gap-2 bg-white shadow-2xs border border-slate-200">
               <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><FileCheck size={12} /> Active POs</p>
-                <h4 className="text-base font-black text-slate-800 mt-1">{filteredLedger.length} Rows</h4>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><FileCheck size={12} /> Active Orders</p>
+                <h4 className="text-base font-black text-slate-800 mt-1">{filteredLedger.length}</h4>
               </div>
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><Layers3 size={12} /> Sites Served</p>
-                <h4 className="text-base font-black text-slate-800 mt-1">{analyticsMetrics.uniqueSitesCount} Codes</h4>
+                <h4 className="text-base font-black text-slate-800 mt-1">{analyticsMetrics.uniqueSitesCount}</h4>
               </div>
             </Card>
           </div>
 
+          {/* 🔍 SEARCH & FILTERS */}
           <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
@@ -401,7 +403,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                 type="text" 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search across codes, products, or vendors..." 
+                placeholder="Search PO number, vendor, or project..." 
                 className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-1.5 text-xs text-slate-800 outline-none focus:border-[#2c2a57] shadow-3xs"
               />
             </div>
@@ -424,271 +426,453 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             </div>
           </div>
 
-          <Card className="overflow-hidden border-slate-200 shadow-sm bg-white">
-            {/* 🎯 MOBILE RESPONSIVE WRAPPER */}
+          {/* 📱 MOBILE RESPONSIVE CARDS (Hidden on larger screens) */}
+          <div className="md:hidden space-y-4">
+            {filteredLedger.length === 0 ? (
+               <Card className="p-8 text-center text-slate-400 text-sm border-dashed border-2">No orders match your search.</Card>
+            ) : (
+              filteredLedger.map((po) => {
+                const isExpanded = !!expandedRows[po.po_number];
+                const total = po.grand_total || 0;
+                const paid = po.disbursed_amount || 0;
+                const pending = Math.max(0, total - paid);
+                const progressPct = total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : 0;
+                
+                const isDiscrepancy = po.status === 'Material Discrepancy Raised';
+                const isShortage = po.status === 'Partially Delivered';
+                const isDelivered = po.status === 'Delivered - GRN Logged';
+
+                return (
+                  <Card key={po.po_number} className="p-4 space-y-4 bg-white border-slate-200">
+                    <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+                      <div>
+                        <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{po.ticket_number}</div>
+                      </div>
+                      <StatusBadge status={po.status} />
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5">Project</span>
+                        <span className="font-bold text-slate-800 line-clamp-1">{po.project_code}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5">Vendor</span>
+                        <span className="font-bold text-slate-800 line-clamp-1">{po.vendor_name}</span>
+                      </div>
+                      
+                      {/* Financials Mobile */}
+                      <div className="col-span-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                        <div className="flex justify-between items-center text-xs mb-1">
+                          <span className="font-bold text-slate-600">Total Amount:</span>
+                          <span className="font-mono font-black text-slate-900">₹{total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        {/* Progress Bar */}
+                        <div className="w-full bg-slate-200 rounded-full h-1.5 my-2">
+                          <div className={`h-1.5 rounded-full ${progressPct === 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${progressPct}%` }}></div>
+                        </div>
+                        <div className="flex justify-between text-[10px] font-bold">
+                          <span className="text-emerald-600">Paid: ₹{paid.toLocaleString('en-IN')}</span>
+                          <span className="text-rose-500">Pending: ₹{pending.toLocaleString('en-IN')}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button 
+                      onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} 
+                      className="w-full py-2 flex items-center justify-center gap-2 text-xs font-bold text-[#2c2a57] bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200"
+                    >
+                      {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>} 
+                      {isExpanded ? "Hide Details & Documents" : "View Details & Documents"}
+                    </button>
+
+                    {/* EXPANDED MOBILE VIEW */}
+                    {isExpanded && (
+                      <div className="pt-2 space-y-4 border-t border-slate-200 animate-in fade-in">
+                        
+                        {/* GRN Banner */}
+                        {(isDiscrepancy || isShortage || isDelivered) && (
+                           <div className={`p-3 rounded-xl border ${isDiscrepancy ? 'bg-rose-50 border-rose-200' : isShortage ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                              <span className={`text-[10px] font-black uppercase ${isDiscrepancy ? 'text-rose-800' : isShortage ? 'text-amber-800' : 'text-emerald-800'}`}>Delivery Status</span>
+                              <p className="text-xs font-medium text-slate-800 mt-1">{rowLogs[po.po_number]?.find(l => l.action_taken.includes("Delivered") || l.action_taken.includes("ALERT"))?.remarks.split(' | ')[0]}</p>
+                           </div>
+                        )}
+
+                        {/* Documents Section */}
+                        <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                           <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Documents</span>
+                           <div className="flex flex-col gap-2">
+                              {po.signed_po_url ? (
+                                <a href={po.signed_po_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 px-3 py-2 rounded-lg hover:bg-indigo-50 flex justify-between items-center">
+                                  <span>✍️ Signed PO</span><ExternalLink size={12}/>
+                                </a>
+                              ) : (
+                                <button onClick={() => openPoDocumentSection(po)} className="text-[10px] font-bold text-slate-700 bg-white border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-100 flex justify-between items-center">
+                                  <span>📄 View System PO</span><ExternalLink size={12}/>
+                                </button>
+                              )}
+                           </div>
+                        </div>
+
+                        {/* Ordered Items */}
+                        <div className="space-y-2">
+                          <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Ordered Items</span>
+                          <div className="flex flex-col gap-2">
+                            {(po.items || []).map((item, idx) => (
+                              <div key={idx} className="bg-white border border-slate-200 p-2.5 rounded-lg flex justify-between items-center text-xs shadow-3xs">
+                                <span className="font-bold text-slate-700 truncate pr-2">{item.desc}</span>
+                                <span className="font-mono font-black text-[#0b9c54] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">Qty: {item.qty}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Payment History */}
+                        <div className="space-y-2">
+                          <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Payment History</span>
+                          <div className="flex flex-col gap-2">
+                            {(rowLogs[po.po_number] || [])
+                              .filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"))
+                              .map((log, idx) => (
+                                <div key={idx} className="bg-white p-2.5 border border-slate-200 rounded-lg text-[10px] shadow-3xs">
+                                  <p className="font-bold text-slate-800">{log.remarks.split(' | ')[0]}</p>
+                                  <p className="text-[9px] text-slate-400 mt-1 font-mono">{log.timestamp.split(' ')[0]}</p>
+                                  {log.remarks.includes('Proof File:') && (
+                                    <a href={log.remarks.split('Proof File: ')[1]} target="_blank" rel="noopener noreferrer" className="mt-2 text-indigo-600 bg-indigo-50 px-2 py-1 rounded inline-flex items-center gap-1 font-bold">
+                                      <Paperclip size={10} /> View Bank Receipt
+                                    </a>
+                                  )}
+                                </div>
+                              ))}
+                            {(rowLogs[po.po_number] || []).filter(l => l.action_taken.includes("Disbursement")).length === 0 && (
+                               <p className="text-xs text-slate-400 italic p-2 border border-dashed rounded text-center">No payments recorded yet.</p>
+                            )}
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
+                  </Card>
+                );
+              })
+            )}
+          </div>
+
+          {/* 💻 DESKTOP RESPONSIVE TABLE (Hidden on Mobile) */}
+          <Card className="hidden md:block overflow-hidden border-slate-200 shadow-sm bg-white">
             <div className="overflow-x-auto custom-scrollbar">
               <table className="w-full text-left border-collapse min-w-[1200px]">
                 <thead>
-                  <tr className="text-[10px] uppercase font-black tracking-wider text-slate-400 bg-slate-50 border-b border-slate-200">
-                    <th className="p-4 w-12 text-center">Manifest</th>
-                    <th className="p-4 w-44">Requisition Context</th>
-                    <th className="p-4 w-48">Project Scope Context</th>
-                    <th className="p-4 w-52">Vendor Matrix</th>
-                    <th className="p-4 text-right w-32">Landed Cost</th>
-                    <th className="p-4 bg-slate-100/60 text-[#2c2a57] font-extrabold w-[380px]">3-Way Document Vault</th>
+                  <tr className="text-[10px] uppercase font-black tracking-wider text-slate-500 bg-slate-50 border-b border-slate-200">
+                    <th className="p-4 w-12 text-center"></th>
+                    <th className="p-4 w-44">Order Info</th>
+                    <th className="p-4 w-48">Project</th>
+                    <th className="p-4 w-52">Vendor</th>
+                    <th className="p-4 w-56">Financials</th>
+                    <th className="p-4 w-[380px]">Documents</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
-                  {filteredLedger.map((po) => {
-                    const isExpanded = !!expandedRows[po.po_number];
-                    const isEditingPI = !!editingInvoices[po.po_number];
-                    const isEditingTax = !!editingTaxInvoices[po.po_number];
-                    const isEditingPO = !!editingPOs[po.po_number];
-                    
-                    const piForm = invoiceForms[po.po_number] || {};
-                    const taxForm = taxInvoiceForms[po.po_number] || {};
-                    const poFileForm = poFileForms[po.po_number] || {};
-                    
-                    // 🎯 Check GRN Status
-                    const isDiscrepancy = po.status === 'Material Discrepancy Raised';
-                    const isShortage = po.status === 'Partially Delivered';
-                    const isDelivered = po.status === 'Delivered - GRN Logged';
-                    const hasGrn = isDiscrepancy || isShortage || isDelivered;
+                  {filteredLedger.length === 0 ? (
+                     <tr>
+                        <td colSpan="6" className="p-8 text-center text-slate-400 text-sm">No orders match your search.</td>
+                     </tr>
+                  ) : (
+                    filteredLedger.map((po) => {
+                      const isExpanded = !!expandedRows[po.po_number];
+                      const isEditingPI = !!editingInvoices[po.po_number];
+                      const isEditingTax = !!editingTaxInvoices[po.po_number];
+                      const isEditingPO = !!editingPOs[po.po_number];
+                      
+                      const piForm = invoiceForms[po.po_number] || {};
+                      const taxForm = taxInvoiceForms[po.po_number] || {};
+                      const poFileForm = poFileForms[po.po_number] || {};
+                      
+                      // Check GRN Status
+                      const isDiscrepancy = po.status === 'Material Discrepancy Raised';
+                      const isShortage = po.status === 'Partially Delivered';
+                      const isDelivered = po.status === 'Delivered - GRN Logged';
+                      const hasGrn = isDiscrepancy || isShortage || isDelivered;
 
-                    // Extract the specific GRN log if available
-                    const poLogs = rowLogs[po.po_number] || [];
-                    const grnLogEntry = poLogs.find(l => 
-                      l.action_taken.includes("Material Delivered") || 
-                      l.action_taken.includes("Partial Delivery") || 
-                      l.action_taken.includes("CRITICAL ALERT")
-                    );
+                      // Extract the specific GRN log if available
+                      const poLogs = rowLogs[po.po_number] || [];
+                      const grnLogEntry = poLogs.find(l => 
+                        l.action_taken.includes("Material Delivered") || 
+                        l.action_taken.includes("Partial Delivery") || 
+                        l.action_taken.includes("CRITICAL ALERT")
+                      );
 
-                    return (
-                      <React.Fragment key={po.po_number}>
-                        <tr className={`transition-colors ${isExpanded ? 'bg-indigo-50/20' : 'hover:bg-slate-50/40'} ${isDiscrepancy ? 'bg-rose-50/40 hover:bg-rose-50/60' : isShortage ? 'bg-amber-50/40 hover:bg-amber-50/60' : isDelivered ? 'bg-emerald-50/40 hover:bg-emerald-50/60' : ''}`}>
-                          
-                          {/* Col 1: Manifest Expand */}
-                          <td className="p-4 text-center align-top">
-                            <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className={`p-1 border rounded shadow-3xs transition-colors ${isExpanded ? 'bg-[#2c2a57] text-white border-[#2c2a57]' : 'text-slate-400 bg-white hover:text-[#2c2a57]'}`}>
-                              {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                            </button>
-                          </td>
-                          
-                          {/* Col 2: Context */}
-                          <td className="p-4 space-y-1 align-top">
-                            <div className={`font-mono font-black text-sm ${isDiscrepancy ? 'text-rose-700' : 'text-[#2c2a57]'}`}>{po.po_number}</div>
-                            <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-mono mt-1"><Calendar size={10} className="text-[#0b9c54]" /> <span>PO Sealed: <strong>{po.generated_at}</strong></span></div>
-                          </td>
-                          
-                          {/* Col 3: Project Scope */}
-                          <td className="p-4 space-y-1 align-top">
-                            <div><strong className="text-slate-900">{po.project_code}</strong></div>
-                            <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
-                            <div className={`mt-1.5 text-[9px] font-bold px-2 py-0.5 rounded w-max uppercase tracking-wider ${
-                              isDiscrepancy ? 'bg-rose-100 text-rose-800 border border-rose-200 animate-pulse' : 
-                              isShortage ? 'bg-amber-100 text-amber-800 border border-amber-200' : 
-                              po.status === 'Dispatched' || po.status.includes('Delivered') ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 
-                              'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                            }`}>
-                              {po.status}
-                            </div>
-                          </td>
+                      // Financial Progress Math
+                      const total = po.grand_total || 0;
+                      const paid = po.disbursed_amount || 0;
+                      const pending = Math.max(0, total - paid);
+                      const progressPct = total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : 0;
 
-                          {/* Col 4: Vendor */}
-                          <td className="p-4 space-y-0.5 leading-tight align-top">
-                            <div className="font-extrabold text-slate-800 uppercase line-clamp-2 pr-2" title={po.vendor_name}>{po.vendor_name}</div>
-                          </td>
-                          
-                          {/* Col 5: Total */}
-                          <td className="p-4 text-right font-mono font-black text-slate-900 text-sm pr-6 align-top">
-                            ₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          
-                          {/* Col 6: 3-WAY DOCUMENT VAULT & UPLOADER */}
-                          <td className="p-3 bg-slate-50/40 border-l border-slate-200 align-top">
-                            <div className="flex flex-col gap-2 relative">
-                              
-                              {/* DOC 1: SYSTEM / SIGNED PO */}
-                              {isEditingPO && isPurchaseExecutive ? (
-                                <div className="border border-indigo-300 bg-indigo-50/30 p-2.5 rounded-xl shadow-md animate-in fade-in space-y-2 z-10">
-                                  <div className="flex justify-between items-center mb-1">
-                                    <span className="text-[9px] font-black uppercase tracking-widest text-indigo-700">Upload Signed PO</span>
-                                    <button onClick={() => toggleEditPO(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
+                      return (
+                        <React.Fragment key={po.po_number}>
+                          <tr className={`transition-colors ${isExpanded ? 'bg-indigo-50/10' : 'hover:bg-slate-50/60'}`}>
+                            
+                            {/* Expand Button */}
+                            <td className="p-4 text-center align-top">
+                              <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className={`p-1.5 border rounded-lg shadow-3xs transition-colors ${isExpanded ? 'bg-[#2c2a57] text-white border-[#2c2a57]' : 'text-slate-400 bg-white hover:text-[#2c2a57]'}`}>
+                                {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                              </button>
+                            </td>
+                            
+                            {/* Order Info */}
+                            <td className="p-4 space-y-1 align-top">
+                              <div className={`font-mono font-black text-sm ${isDiscrepancy ? 'text-rose-700' : 'text-[#2c2a57]'}`}>{po.po_number}</div>
+                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">{po.ticket_number}</div>
+                              <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-mono mt-1.5">
+                                <Calendar size={10} className="text-[#0b9c54]" /> <span>{po.generated_at.split(' ')[0]}</span>
+                              </div>
+                            </td>
+                            
+                            {/* Project Scope */}
+                            <td className="p-4 space-y-1 align-top">
+                              <div><strong className="text-slate-900">{po.project_code}</strong></div>
+                              <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
+                              <div className={`mt-2 text-[9px] font-bold px-2 py-0.5 rounded w-max uppercase tracking-wider ${
+                                isDiscrepancy ? 'bg-rose-100 text-rose-800 border border-rose-200 animate-pulse' : 
+                                isShortage ? 'bg-amber-100 text-amber-800 border border-amber-200' : 
+                                isDelivered ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 
+                                'bg-slate-100 text-slate-700 border border-slate-200'
+                              }`}>
+                                {po.status}
+                              </div>
+                            </td>
+
+                            {/* Vendor */}
+                            <td className="p-4 space-y-0.5 leading-tight align-top">
+                              <div className="font-extrabold text-slate-800 uppercase line-clamp-2 pr-2" title={po.vendor_name}>{po.vendor_name}</div>
+                              <div className="text-[9px] font-mono text-slate-400 mt-1 truncate max-w-[150px]">{po.vendor_email}</div>
+                            </td>
+                            
+                            {/* Financials with Mini-Tracker */}
+                            <td className="p-4 align-top pr-6">
+                               <div className="flex justify-between items-center text-xs mb-1">
+                                  <span className="font-black text-slate-900">₹{total.toLocaleString('en-IN')}</span>
+                               </div>
+                               {/* Progress Bar */}
+                               <div className="w-full bg-slate-200 rounded-full h-1.5 my-1.5 overflow-hidden">
+                                  <div className={`h-1.5 rounded-full transition-all duration-500 ${progressPct === 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${progressPct}%` }}></div>
+                               </div>
+                               <div className="flex justify-between text-[9px] font-bold mt-1">
+                                  <span className="text-emerald-600">Paid: ₹{paid.toLocaleString('en-IN')}</span>
+                                  <span className="text-rose-500">Pending: ₹{pending.toLocaleString('en-IN')}</span>
+                               </div>
+                            </td>
+                            
+                            {/* Documents (Vault & Uploaders) */}
+                            <td className="p-3 bg-slate-50/50 border-l border-slate-200 align-top">
+                              <div className="flex flex-col gap-2 relative">
+                                
+                                {/* 1. Signed PO */}
+                                {isEditingPO && isPurchaseExecutive ? (
+                                  <div className="border border-indigo-300 bg-white p-2.5 rounded-xl shadow-md space-y-2 z-10">
+                                    <div className="flex justify-between items-center mb-1">
+                                      <span className="text-[9px] font-black uppercase text-indigo-700">Upload Signed PO</span>
+                                      <button onClick={() => toggleEditPO(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
+                                    </div>
+                                    <div className="flex items-center justify-between mt-1 pt-1 border-t border-slate-100">
+                                      <label className="cursor-pointer text-[9px] font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 flex items-center">
+                                        <input type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" onChange={(e) => handlePoFileChange(po.po_number, e)} className="hidden" />
+                                        <UploadCloud size={10} className="mr-1"/> {poFileForm.file ? "Change File" : "Attach File"}
+                                      </label>
+                                      <button onClick={() => handleSaveSignedPo(po.po_number)} className="bg-[#2c2a57] hover:bg-indigo-900 text-white font-bold text-[9px] px-3 py-1 rounded">Submit</button>
+                                    </div>
                                   </div>
-                                  <div className="flex items-center justify-between mt-1 pt-1 border-t border-indigo-200/50">
-                                    <label className="cursor-pointer text-[9px] font-bold text-indigo-700 bg-white border border-indigo-200 px-2 py-1 rounded hover:bg-indigo-100 flex items-center shadow-3xs">
-                                      <input type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" onChange={(e) => handlePoFileChange(po.po_number, e)} className="hidden" />
-                                      <UploadCloud size={10} className="mr-1"/> {poFileForm.file ? "Change File" : "Attach Signed PO"}
-                                    </label>
-                                    <button onClick={() => handleSaveSignedPo(po.po_number)} className="bg-[#2c2a57] hover:bg-indigo-900 text-white font-bold text-[9px] px-3 py-1 rounded shadow-3xs transition-colors">Submit</button>
+                                ) : (
+                                  <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs group">
+                                    <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#2c2a57]"/> Order Document</span>
+                                    <div className="flex items-center gap-1.5">
+                                      <button onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-1.5 py-0.5 bg-slate-100 rounded">View PO</button>
+                                      {po.signed_po_url ? (
+                                        <a href={po.signed_po_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-700 hover:underline px-1.5 py-0.5 bg-emerald-50 rounded">Signed</a>
+                                      ) : (
+                                        isPurchaseExecutive && <button onClick={() => toggleEditPO(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:border-indigo-400 bg-slate-50">+ Add Signed</button>
+                                      )}
+                                    </div>
                                   </div>
-                                  {poFileForm.file && <p className="text-[9px] font-bold text-emerald-600 truncate mt-1">📄 {poFileForm.file.name}</p>}
-                                </div>
-                              ) : (
-                                <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs hover:border-[#2c2a57] transition-all group">
-                                  <div className="flex items-center gap-1.5">
-                                    <FileText size={12} className="text-[#2c2a57]"/>
-                                    <span className="text-[10px] font-bold text-slate-600">PO Document</span>
+                                )}
+
+                                {/* 2. Proforma Invoice (PI) */}
+                                {isEditingPI && isPurchaseExecutive ? (
+                                  <div className="border border-amber-300 bg-white p-2.5 rounded-xl shadow-md space-y-2 z-10">
+                                    <div className="flex justify-between items-center mb-1">
+                                      <span className="text-[9px] font-black uppercase text-amber-600">Upload Proforma (PI)</span>
+                                      <button onClick={() => toggleEditInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <input type="text" value={piForm.invoice_no} onChange={(e) => handleInputChange(po.po_number, 'invoice_no', e.target.value)} placeholder="Inv No." className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] w-1/2 outline-none" />
+                                      <input type="text" value={piForm.invoice_date} onChange={(e) => handleInputChange(po.po_number, 'invoice_date', e.target.value)} placeholder="DD-MM-YYYY" className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] w-1/2 outline-none" />
+                                    </div>
+                                    <div className="flex gap-2 mt-1">
+                                      <input type="text" value={piForm.payment_terms} onChange={(e) => handleInputChange(po.po_number, 'payment_terms', e.target.value)} placeholder="Payment Terms" className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] outline-none" />
+                                    </div>
+                                    <div className="flex items-center justify-between mt-1 pt-2 border-t border-slate-100">
+                                      <label className="cursor-pointer text-[9px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded hover:bg-amber-100 flex items-center">
+                                        <input type="file" accept=".pdf,.png,.jpg" onChange={(e) => handleFileChange(po.po_number, e)} className="hidden" />
+                                        <UploadCloud size={10} className="mr-1"/> Attach PI
+                                      </label>
+                                      <button onClick={() => handleSaveInvoiceDetails(po.po_number)} className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-4 py-1.5 rounded">Submit</button>
+                                    </div>
                                   </div>
-                                  <div className="flex items-center gap-1.5">
-                                    <button onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-1.5 py-0.5 bg-indigo-50 rounded transition-colors">
-                                      📄 View PO
-                                    </button>
-                                    {po.signed_po_url ? (
-                                      <a href={po.signed_po_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-700 hover:underline px-1.5 py-0.5 bg-emerald-50 rounded flex items-center gap-1">
-                                        <CheckCircle2 size={10} /> Signed PO
-                                      </a>
+                                ) : (
+                                  <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs group">
+                                    <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-amber-500"/> Proforma Invoice</span>
+                                    {po.proforma_invoice_url ? (
+                                      <div className="flex items-center gap-1.5">
+                                        <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-amber-600 hover:underline px-2 py-0.5 bg-amber-50 rounded">View PI</a>
+                                        {isPurchaseExecutive && (
+                                          <button onClick={() => handleDeleteInvoiceFile(po.po_number)} className="text-slate-300 hover:text-rose-500 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={12}/></button>
+                                        )}
+                                      </div>
                                     ) : (
-                                      isPurchaseExecutive && (
-                                        <button onClick={() => toggleEditPO(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:border-indigo-400 bg-slate-50 transition-colors">
-                                          + Add Signed PO
-                                        </button>
-                                      )
+                                      isPurchaseExecutive ? (
+                                        <button onClick={() => toggleEditInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-amber-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 bg-slate-50">+ Add PI</button>
+                                      ) : <span className="text-[9px] text-slate-400 italic">Not Uploaded</span>
                                     )}
                                   </div>
-                                </div>
-                              )}
+                                )}
 
-                              {/* DOC 2: PROFORMA INVOICE (Advance Payment) */}
-                              {isEditingPI && isPurchaseExecutive ? (
-                                <div className="border border-amber-300 bg-amber-50/30 p-2.5 rounded-xl shadow-md animate-in fade-in space-y-2 z-10">
-                                  <div className="flex justify-between items-center mb-1">
-                                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-600">Upload Proforma (PI)</span>
-                                    <button onClick={() => toggleEditInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
-                                  </div>
-                                  
-                                  <div className="flex gap-2">
-                                    <input type="text" value={piForm.invoice_no} onChange={(e) => handleInputChange(po.po_number, 'invoice_no', e.target.value)} placeholder="Invoice No." className="bg-white border border-amber-200 focus:ring-1 focus:ring-amber-400 rounded-md px-2 py-1.5 text-[10px] w-1/2 font-mono outline-none shadow-3xs" />
-                                    <input type="text" value={piForm.invoice_date} onChange={(e) => handleInputChange(po.po_number, 'invoice_date', e.target.value)} placeholder="DD-MM-YYYY" className="bg-white border border-amber-200 focus:ring-1 focus:ring-amber-400 rounded-md px-2 py-1.5 text-[10px] w-1/2 font-mono outline-none shadow-3xs" />
-                                  </div>
-                                  
-                                  <div className="flex gap-2 mt-2">
-                                    <input type="text" value={piForm.payment_terms} onChange={(e) => handleInputChange(po.po_number, 'payment_terms', e.target.value)} placeholder="Payment Terms" className="w-full bg-white border border-amber-200 focus:ring-1 focus:ring-amber-400 rounded-md px-2 py-1.5 text-[10px] outline-none shadow-3xs" />
-                                  </div>
-
-                                  <div className="flex items-center justify-between mt-1 pt-2 border-t border-amber-200/50">
-                                    <label className="cursor-pointer text-[9px] font-bold text-amber-700 bg-white border border-amber-200 px-2 py-1 rounded hover:bg-amber-100 flex items-center shadow-3xs">
-                                      <input type="file" accept=".pdf,.png,.jpg" onChange={(e) => handleFileChange(po.po_number, e)} className="hidden" />
-                                      <UploadCloud size={10} className="mr-1"/> {piForm.file ? "Change File" : "Attach PI"}
-                                    </label>
-                                    <button onClick={() => handleSaveInvoiceDetails(po.po_number)} className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-4 py-1.5 rounded shadow-3xs transition-colors">Submit</button>
-                                  </div>
-                                  {piForm.file && <p className="text-[9px] font-bold text-emerald-600 truncate mt-1">📄 {piForm.file.name}</p>}
-                                </div>
-                              ) : (
-                                <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs hover:border-amber-400 transition-all group">
-                                  <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-amber-500"/> Proforma Invoice (PI)</span>
-                                  {po.proforma_invoice_url ? (
-                                    <div className="flex items-center gap-1.5">
-                                      <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-amber-600 hover:underline px-2 py-0.5 bg-amber-50 rounded">📄 View PI</a>
-                                      {isPurchaseExecutive && (
-                                        <button onClick={() => handleDeleteInvoiceFile(po.po_number)} className="text-slate-300 hover:text-rose-500 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete PI"><Trash2 size={12}/></button>
-                                      )}
+                                {/* 3. Final Tax Invoice */}
+                                {isEditingTax && isPurchaseExecutive ? (
+                                  <div className="border border-emerald-300 bg-white p-2.5 rounded-xl shadow-md space-y-2 z-10">
+                                    <div className="flex justify-between items-center mb-1">
+                                      <span className="text-[9px] font-black uppercase text-emerald-600">Upload Final Tax Invoice</span>
+                                      <button onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
                                     </div>
-                                  ) : (
-                                    isPurchaseExecutive ? (
-                                      <button onClick={() => toggleEditInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-amber-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:border-amber-400 bg-slate-50 transition-colors">+ Add PI</button>
-                                    ) : <span className="text-[9px] text-slate-400 italic">Not Uploaded</span>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* DOC 3: TAX INVOICE (Final Document) */}
-                              {isEditingTax && isPurchaseExecutive ? (
-                                <div className="border border-emerald-300 bg-emerald-50/30 p-2.5 rounded-xl shadow-md animate-in fade-in space-y-2 z-10">
-                                  <div className="flex justify-between items-center mb-1">
-                                    <span className="text-[9px] font-black uppercase tracking-widest text-emerald-600">Upload Final Tax Invoice</span>
-                                    <button onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
+                                    <div className="flex gap-2">
+                                      <input type="text" value={taxForm.tax_invoice_no} onChange={(e) => handleTaxInputChange(po.po_number, 'tax_invoice_no', e.target.value)} placeholder="Tax Inv No." className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] w-1/2 outline-none" />
+                                      <input type="text" value={taxForm.tax_invoice_date} onChange={(e) => handleTaxInputChange(po.po_number, 'tax_invoice_date', e.target.value)} placeholder="DD-MM-YYYY" className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] w-1/2 outline-none" />
+                                    </div>
+                                    <div className="flex items-center justify-between mt-1 pt-1 border-t border-slate-100">
+                                      <label className="cursor-pointer text-[9px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded hover:bg-emerald-100 flex items-center">
+                                        <input type="file" accept=".pdf,.png,.jpg" onChange={(e) => handleTaxFileChange(po.po_number, e)} className="hidden" />
+                                        <UploadCloud size={10} className="mr-1"/> Attach Tax Inv
+                                      </label>
+                                      <button onClick={() => handleSaveTaxInvoiceDetails(po.po_number)} className="bg-[#0b9c54] text-white font-bold text-[9px] px-4 py-1.5 rounded">Submit</button>
+                                    </div>
                                   </div>
-                                  <div className="flex gap-2">
-                                    <input type="text" value={taxForm.tax_invoice_no} onChange={(e) => handleTaxInputChange(po.po_number, 'tax_invoice_no', e.target.value)} placeholder="Tax Inv No." className="bg-white border border-emerald-200 focus:ring-1 focus:ring-emerald-400 rounded-md px-2 py-1 text-[10px] w-1/2 font-mono outline-none" />
-                                    <input type="text" value={taxForm.tax_invoice_date} onChange={(e) => handleTaxInputChange(po.po_number, 'tax_invoice_date', e.target.value)} placeholder="DD-MM-YYYY" className="bg-white border border-emerald-200 focus:ring-1 focus:ring-emerald-400 rounded-md px-2 py-1 text-[10px] w-1/2 font-mono outline-none" />
-                                  </div>
-                                  <div className="flex items-center justify-between mt-1 pt-1 border-t border-emerald-200/50">
-                                    <label className="cursor-pointer text-[9px] font-bold text-emerald-700 bg-white border border-emerald-200 px-2 py-1 rounded hover:bg-emerald-100 flex items-center shadow-3xs">
-                                      <input type="file" accept=".pdf,.png,.jpg" onChange={(e) => handleTaxFileChange(po.po_number, e)} className="hidden" />
-                                      <UploadCloud size={10} className="mr-1"/> {taxForm.file ? "Change File" : "Attach Tax Inv"}
-                                    </label>
-                                    <button onClick={() => handleSaveTaxInvoiceDetails(po.po_number)} className="bg-[#0b9c54] hover:bg-emerald-600 text-white font-bold text-[9px] px-4 py-1.5 rounded shadow-3xs transition-colors">Submit Final</button>
-                                  </div>
-                                  {taxForm.file && <p className="text-[9px] font-bold text-emerald-600 truncate mt-1">📄 {taxForm.file.name}</p>}
-                                </div>
-                              ) : (
-                                <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs hover:border-[#0b9c54] transition-all group">
-                                  <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#0b9c54]"/> Final Tax Invoice</span>
-                                  {po.tax_invoice_url ? (
-                                    <div className="flex items-center gap-1.5">
+                                ) : (
+                                  <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs group">
+                                    <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#0b9c54]"/> Final Tax Invoice</span>
+                                    {po.tax_invoice_url ? (
                                       <a href={po.tax_invoice_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-700 hover:underline px-2 py-0.5 bg-emerald-50 rounded flex items-center gap-1">
-                                        <CheckCircle2 size={10}/> View Tax Inv
+                                        View
                                       </a>
-                                    </div>
-                                  ) : (
-                                    isPurchaseExecutive ? (
-                                      <button onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-emerald-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:border-emerald-400 bg-slate-50 transition-colors">+ Add Tax Inv</button>
-                                    ) : <span className="text-[9px] text-slate-400 italic">Not Uploaded</span>
-                                  )}
-                                </div>
-                              )}
-                              
-                            </div>
-                          </td>
-                        </tr>
-
-                        {/* EXANDED MATERIAL MANIFEST ROW */}
-                        {isExpanded && (
-                          <tr className={`border-b-2 border-slate-200 ${isDiscrepancy ? 'bg-rose-50/20' : isShortage ? 'bg-amber-50/20' : isDelivered ? 'bg-emerald-50/20' : 'bg-slate-50/40'}`}>
-                            <td colSpan="6" className="p-4 pl-16">
-                              
-                              {/* 🎯 DYNAMIC GRN DISCREPANCY & CLEAN DELIVERY AUDIT BANNER */}
-                              {hasGrn && grnLogEntry && (
-                                <div className={`mb-4 p-4 rounded-xl border ${isDiscrepancy ? 'bg-rose-50 border-rose-200' : isShortage ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
-                                  <div className="flex items-center space-x-2 mb-2">
-                                    {isDiscrepancy ? <ShieldAlert size={18} className="text-rose-600" /> : 
-                                     isShortage ? <AlertOctagon size={18} className="text-amber-600" /> :
-                                     <CheckCircle2 size={18} className="text-emerald-600" />}
-                                    <h4 className={`text-xs font-black uppercase tracking-wider ${isDiscrepancy ? 'text-rose-800' : isShortage ? 'text-amber-800' : 'text-emerald-800'}`}>
-                                      {grnLogEntry.action_taken}
-                                    </h4>
+                                    ) : (
+                                      isPurchaseExecutive ? (
+                                        <button onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-emerald-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 bg-slate-50">+ Add Tax Inv</button>
+                                      ) : <span className="text-[9px] text-slate-400 italic">Not Uploaded</span>
+                                    )}
                                   </div>
-                                  <div className="bg-white p-3 rounded-lg border border-slate-200/60 shadow-3xs space-y-1">
-                                    <p className="text-xs text-slate-800">
-                                      <span className="font-bold text-slate-500 mr-2">Site Inspector Remarks:</span>
-                                      {grnLogEntry.remarks.split(' | Proof')[0]}
-                                    </p>
-                                    <div className="flex justify-between items-end mt-2 pt-2 border-t border-slate-100">
-                                      <p className="text-[10px] text-slate-400 font-mono">Logged by {grnLogEntry.user_name} on {grnLogEntry.timestamp}</p>
-                                      {grnLogEntry.remarks.includes('Proof File:') && (
-                                        <a href={grnLogEntry.remarks.split('Proof File: ')[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-600 hover:underline flex items-center gap-1">
-                                          View Attached Proof <Paperclip size={10} />
-                                        </a>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-
-                              <div className="flex items-center space-x-2 text-[10px] font-black uppercase text-slate-400 tracking-wider mb-2.5">
-                                <span>Material Manifest Components</span>
-                              </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                                {(po.items || []).map((item, idx) => (
-                                  <div key={idx} className="bg-white border border-slate-200 px-3 py-2 rounded-xl flex justify-between items-center shadow-3xs hover:border-[#2c2a57]/30 transition-colors">
-                                    <div className="truncate pr-4 flex flex-col">
-                                      <span className="font-bold text-slate-700 truncate" title={item.desc}>{item.desc}</span>
-                                      {item.is_reimbursable && (
-                                        <span className="text-[9px] text-cyan-600 font-extrabold uppercase mt-0.5">✓ Reimbursable Asset</span>
-                                      )}
-                                    </div>
-                                    <span className="font-mono font-black text-[#0b9c54] bg-emerald-50 px-2 py-0.5 rounded text-[10px] flex-shrink-0 border border-emerald-100">Qty: {item.qty}</span>
-                                  </div>
-                                ))}
+                                )}
+                                
                               </div>
                             </td>
                           </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
+
+                          {/* 🎯 EXPANDED SPLIT-PANE ROW (Desktop) */}
+                          {isExpanded && (
+                            <tr className="bg-slate-50/80 border-b-2 border-slate-200">
+                              <td colSpan="6" className="p-6 pl-20">
+                                
+                                {/* Top Banner: GRN Status */}
+                                {hasGrn && grnLogEntry && (
+                                  <div className={`mb-6 p-4 rounded-xl border flex items-start gap-4 shadow-3xs ${isDiscrepancy ? 'bg-rose-50 border-rose-200' : isShortage ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                                    <div className={`p-2 rounded-full mt-1 ${isDiscrepancy ? 'bg-rose-100 text-rose-600' : isShortage ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                      {isDiscrepancy ? <ShieldAlert size={24} /> : isShortage ? <AlertOctagon size={24} /> : <CheckCircle2 size={24} />}
+                                    </div>
+                                    <div className="flex-1">
+                                      <h4 className={`text-sm font-black uppercase tracking-wider ${isDiscrepancy ? 'text-rose-800' : isShortage ? 'text-amber-800' : 'text-emerald-800'}`}>
+                                        {grnLogEntry.action_taken}
+                                      </h4>
+                                      <p className="text-xs text-slate-700 mt-1 font-medium">{grnLogEntry.remarks.split(' | Proof')[0]}</p>
+                                      <div className="flex items-center gap-4 mt-3">
+                                        <span className="text-[10px] text-slate-500 font-mono bg-white px-2 py-1 rounded border border-slate-200">Inspector: {grnLogEntry.user_name} ({grnLogEntry.timestamp.split(' ')[0]})</span>
+                                        {grnLogEntry.remarks.includes('Proof File:') && (
+                                          <a href={grnLogEntry.remarks.split('Proof File: ')[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1 transition-colors">
+                                            <Paperclip size={12} /> View Inspector's Photo Proof
+                                          </a>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* 50/50 Split Grid: Items & Payments */}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                  
+                                  {/* Left Pane: Ordered Items */}
+                                  <div className="space-y-3">
+                                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-200 pb-2">Ordered Items</h4>
+                                    <div className="flex flex-col gap-2">
+                                      {(po.items || []).map((item, idx) => (
+                                        <div key={idx} className="bg-white border border-slate-200 px-4 py-2.5 rounded-xl flex justify-between items-center shadow-3xs transition-colors hover:border-[#2c2a57]/30">
+                                          <div className="truncate pr-4 flex flex-col">
+                                            <span className="font-bold text-slate-700 truncate" title={item.desc}>{item.desc}</span>
+                                            {item.is_reimbursable && (
+                                              <span className="text-[9px] text-cyan-600 font-extrabold uppercase mt-0.5">✓ Reimbursable</span>
+                                            )}
+                                          </div>
+                                          <span className="font-mono font-black text-[#0b9c54] bg-emerald-50 px-3 py-1 rounded-lg text-xs border border-emerald-100">Qty: {item.qty}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {/* Right Pane: Payment History */}
+                                  <div className="space-y-3">
+                                    <div className="flex justify-between items-end border-b border-slate-200 pb-2">
+                                      <h4 className="text-[10px] font-black uppercase text-indigo-400 tracking-widest">Payment Ledger</h4>
+                                      <span className="text-[10px] font-bold text-slate-500">Balance: <span className="text-rose-500 font-mono">₹{pending.toLocaleString('en-IN')}</span></span>
+                                    </div>
+                                    <div className="flex flex-col gap-2">
+                                      {(rowLogs[po.po_number] || [])
+                                        .filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"))
+                                        .map((log, idx) => {
+                                          const logText = log.remarks.split(' | Proof')[0];
+                                          const isFinal = logText.toLowerCase().includes("final") || logText.toLowerCase().includes("100%");
+                                          return (
+                                            <div key={idx} className="bg-white p-3 border border-slate-200 rounded-xl shadow-3xs flex flex-col gap-2">
+                                              <div className="flex justify-between items-start">
+                                                <div className="flex gap-2">
+                                                  <span className={`mt-1 h-2 w-2 rounded-full ${isFinal ? 'bg-emerald-500' : 'bg-amber-400'}`}></span>
+                                                  <div>
+                                                    <p className="font-bold text-xs text-slate-800 leading-snug">{logText}</p>
+                                                    <p className="text-[10px] font-mono text-slate-400 mt-1">Date: {log.timestamp.split(' ')[0]} • Exec: {log.user_name}</p>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                              {log.remarks.includes('Proof File:') && (
+                                                <div className="flex justify-end pt-2 border-t border-slate-50">
+                                                  <a href={log.remarks.split('Proof File: ')[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1.5 transition-colors">
+                                                    <Wallet size={12} /> View Bank Transfer Receipt
+                                                  </a>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                      })}
+                                      {(rowLogs[po.po_number] || []).filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment")).length === 0 && (
+                                         <div className="p-4 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400 text-[11px] font-bold">
+                                            No payments have been recorded yet.
+                                         </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>

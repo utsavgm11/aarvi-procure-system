@@ -13,22 +13,17 @@ import Login from './components/Login';
 import ITAdminDashboard from './components/ITAdminDashboard'; 
 import PODistributionDashboard from './components/PODistributionDashboard'; 
 import MasterPOLedgerDesk from './components/MasterPOLedgerDesk'; 
-
-// 🎯 NEW: Import the Accounts & Disbursement Desk
 import AccountsDesk from './components/AccountsDesk';
-
-// 🎯 NEW: Import the Direct Procurement / Fast-Track Portal
 import ManagerRequestPortal from './components/ManagerRequestPortal';
 
 // 🎯 Smart Root Router Landing Check Wrapper
-// Instantly calculates where a user should land based on their active role
 const getRoleHomePath = (role) => {
   switch (role) {
     case 'Site Coordinator':   return '/field-workspace';
     case 'Site Manager':       return '/vetting-gateway';
     case 'Purchase Executive': return '/sourcing-hub';
     case 'Project Manager':    return '/commercial-approvals';
-    case 'Accounts':           return '/accounts-desk'; // 🎯 Added Accounts landing path
+    case 'Accounts':           return '/accounts-desk'; 
     case 'Accounts Executive': return '/accounts-desk'; 
     case 'Finance Manager':    return '/accounts-desk'; 
     case 'IT Manager':         return '/direct-procurement';
@@ -36,6 +31,15 @@ const getRoleHomePath = (role) => {
     case 'Admin':              return '/admin';
     default:                   return '/dashboard'; // Fallback
   }
+};
+
+// 🛡️ STRICT ROLE-BASED ROUTE GUARD
+// Bounces unauthorized users back to their native dashboard if they manually alter the URL
+const RoleRoute = ({ allowedRoles, userRole, children }) => {
+  if (!allowedRoles.includes(userRole)) {
+    return <Navigate to={getRoleHomePath(userRole)} replace />;
+  }
+  return children;
 };
 
 function App() {
@@ -50,49 +54,101 @@ function App() {
     return <Login onLoginSuccess={(profile) => setUserSession(profile)} />;
   }
 
+  const currentRole = userSession.role;
+
   return (
     <Router>
       <Routes>
         <Route path="/" element={<Layout userSession={userSession} setUserSession={setUserSession} />}>
           
           {/* ⚡ BASE REDIRECTOR: Automatically pushes the user to their unique dashboard path */}
-          <Route index element={<Navigate to={getRoleHomePath(userSession.role)} replace />} />
+          <Route index element={<Navigate to={getRoleHomePath(currentRole)} replace />} />
           
           {/* ========================================== */}
           {/* 🎯 EXPLICIT NAMED ROLE DASHBOARD ROUTES */}
           {/* ========================================== */}
-          <Route path="field-workspace" element={<SiteCoordinatorDashboard currentUser={userSession} />} />
-          <Route path="vetting-gateway" element={<SiteManagerDashboard currentUser={userSession} />} />
-          <Route path="sourcing-hub" element={<PurchaseExecutiveDashboard currentUser={userSession} />} />
-          <Route path="commercial-approvals" element={<ProjectManagerDashboard currentUser={userSession} />} />
-          <Route path="corporate-approvals" element={<DirectorDashboard currentUser={userSession} />} />
+          
+          <Route path="field-workspace" element={
+            <RoleRoute allowedRoles={['Site Coordinator']} userRole={currentRole}>
+              <SiteCoordinatorDashboard currentUser={userSession} />
+            </RoleRoute>
+          } />
+          
+          <Route path="vetting-gateway" element={
+            <RoleRoute allowedRoles={['Site Manager', 'Project Manager']} userRole={currentRole}>
+              <SiteManagerDashboard currentUser={userSession} />
+            </RoleRoute>
+          } />
+          
+          <Route path="sourcing-hub" element={
+            <RoleRoute allowedRoles={['Purchase Executive']} userRole={currentRole}>
+              <PurchaseExecutiveDashboard currentUser={userSession} />
+            </RoleRoute>
+          } />
+          
+          <Route path="commercial-approvals" element={
+            <RoleRoute allowedRoles={['Project Manager']} userRole={currentRole}>
+              <ProjectManagerDashboard currentUser={userSession} />
+            </RoleRoute>
+          } />
+          
+          <Route path="corporate-approvals" element={
+            <RoleRoute allowedRoles={['Director']} userRole={currentRole}>
+              <DirectorDashboard currentUser={userSession} />
+            </RoleRoute>
+          } />
           
           {/* 🎯 ACCOUNTS DEPARTMENT WORKSPACE */}
-          <Route path="accounts-desk" element={<AccountsDesk currentUser={userSession} />} />
+          <Route path="accounts-desk" element={
+            <RoleRoute allowedRoles={['Accounts', 'Accounts Executive', 'Finance Manager']} userRole={currentRole}>
+              <AccountsDesk currentUser={userSession} />
+            </RoleRoute>
+          } />
 
-          {/* ⚡ FAST-TRACK ROUTES (Accessible by Project Managers & IT Managers) */}
-          <Route path="direct-procurement" element={<ManagerRequestPortal currentUser={userSession} />} />
-          <Route path="direct-request" element={<ManagerRequestPortal currentUser={userSession} />} />
+          {/* ⚡ FAST-TRACK ROUTES */}
+          <Route path="direct-procurement" element={
+            <RoleRoute allowedRoles={['Project Manager', 'IT Manager', 'Director']} userRole={currentRole}>
+              <ManagerRequestPortal currentUser={userSession} />
+            </RoleRoute>
+          } />
+          
+          <Route path="direct-request" element={
+            <RoleRoute allowedRoles={['Project Manager', 'IT Manager', 'Director']} userRole={currentRole}>
+              <ManagerRequestPortal currentUser={userSession} />
+            </RoleRoute>
+          } />
 
           {/* ========================================== */}
           {/* 🛠️ GLOBAL SHARED / UTILITY ROUTES */}
           {/* ========================================== */}
           
-          {/* Project Manager Technical Vetting Sub-Route Mapping */}
-          {/* Maps to the SiteManager interface so PMs can conduct technical validations */}
-          <Route path="vetting" element={<SiteManagerDashboard currentUser={userSession} />} />
+          <Route path="vetting" element={
+            <RoleRoute allowedRoles={['Project Manager']} userRole={currentRole}>
+              <SiteManagerDashboard currentUser={userSession} />
+            </RoleRoute>
+          } />
 
-          {/* PO Distribution Workspace Catch Route */}
-          <Route path="pos" element={<PODistributionDashboard currentUser={userSession} />} />
+          <Route path="pos" element={
+            <RoleRoute allowedRoles={['Purchase Executive', 'Project Manager', 'Director']} userRole={currentRole}>
+              <PODistributionDashboard currentUser={userSession} />
+            </RoleRoute>
+          } />
           
-          {/* Master PO Ledger Analytics Catch Route */}
-          <Route path="po-ledger" element={<MasterPOLedgerDesk currentUser={userSession} />} />
+          <Route path="po-ledger" element={
+            <MasterPOLedgerDesk currentUser={userSession} />
+          } />
 
-          {/* Vendor Master Directory Route */}
-          <Route path="vendors" element={<VendorMasterDesk />} />
+          <Route path="vendors" element={
+            <RoleRoute allowedRoles={['Purchase Executive', 'Project Manager', 'Director', 'Admin']} userRole={currentRole}>
+              <VendorMasterDesk />
+            </RoleRoute>
+          } />
 
-          {/* IT Admin Control Center Path Mapping */}
-          <Route path="admin" element={<ITAdminDashboard />} />
+          <Route path="admin" element={
+            <RoleRoute allowedRoles={['Admin']} userRole={currentRole}>
+              <ITAdminDashboard />
+            </RoleRoute>
+          } />
 
           {/* Fallback Paths */}
           <Route path="inbox" element={<div className="text-center py-20 text-slate-500 font-medium mt-10">Manager Inbox Grid Gateway Coming Soon...</div>} />

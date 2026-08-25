@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
   Landmark, Search, Calendar, FileText, UploadCloud, CheckCircle2, 
   Clock, ExternalLink, Paperclip, ShieldCheck, ArrowRight, X, Building2,
-  Filter, CheckSquare, Download, Wallet, AlertCircle, Printer
+  Filter, CheckSquare, Download, Wallet, AlertCircle, Printer, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
 
@@ -20,6 +20,10 @@ export default function AccountsDesk({ currentUser }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' or 'history'
   const [selectedPo, setSelectedPo] = useState(null);
+  
+  // 🎯 Payment Ledger Expansion State
+  const [expandedRows, setExpandedRows] = useState({});
+  const [rowLogs, setRowLogs] = useState({});
 
   // 🎯 Modals State
   const [previewDoc, setPreviewDoc] = useState(null); // For Cloudinary PDFs/Images
@@ -54,6 +58,22 @@ export default function AccountsDesk({ currentUser }) {
     }, 0);
     return () => { isMounted = false; clearTimeout(timer); };
   }, [fetchAccountsOrders]);
+
+  // 🎯 HELPER: Fetch History Log when expanding a row to see multi-payment ledger details
+  const toggleExpandRow = async (poNumber, ticketNumber) => {
+    const isCurrentlyExpanded = !!expandedRows[poNumber];
+    setExpandedRows(prev => ({ ...prev, [poNumber]: !isCurrentlyExpanded }));
+    
+    // Only fetch if opening and logs don't exist yet
+    if (!isCurrentlyExpanded && !rowLogs[poNumber]) {
+      try {
+        const res = await axios.get(`${API_BASE_URL}/requisitions/${ticketNumber}/history`);
+        setRowLogs(prev => ({ ...prev, [poNumber]: res.data }));
+      } catch (err) {
+        console.error("Failed to fetch row history logs", err);
+      }
+    }
+  };
 
   // 🎯 HELPER: Smart calculation of payable amount based on text terms (e.g. "50% Advance")
   const calculatePayableNow = (termsStr, grandTotal) => {
@@ -92,13 +112,14 @@ export default function AccountsDesk({ currentUser }) {
 
   const openDisbursementModal = (po) => {
     setSelectedPo(po);
-    setUtrNo(po.utr_no || '');
-    setPaymentDate(po.payment_date || new Date().toISOString().split('T')[0]);
-    setPaymentRemark(po.payment_remark || '');
+    setUtrNo('');
+    // Ensure we only grab the date portion YYYY-MM-DD
+    setPaymentDate(new Date().toISOString().split('T')[0]);
+    setPaymentRemark('');
     
-    // Auto-calculate the amount if not previously disbursed
-    const calculatedPayable = po.disbursed_amount > 0 
-      ? po.disbursed_amount 
+    // Auto-calculate the amount defaulting to remaining balance
+    const calculatedPayable = (po.remaining_balance && po.remaining_balance > 0) 
+      ? po.remaining_balance 
       : calculatePayableNow(po.payment_terms, po.grand_total);
       
     setDisbursedAmount(calculatedPayable);
@@ -111,6 +132,10 @@ export default function AccountsDesk({ currentUser }) {
       setAlert({ type: 'error', message: "Bank UTR / Transaction Reference No. is mandatory." });
       return;
     }
+    if (disbursedAmount <= 0) {
+      setAlert({ type: 'error', message: "Payment amount must be greater than zero." });
+      return;
+    }
 
     setSubmitting(true);
     const formData = new FormData();
@@ -118,6 +143,7 @@ export default function AccountsDesk({ currentUser }) {
     formData.append('payment_date', paymentDate);
     formData.append('payment_remark', paymentRemark);
     formData.append('disbursed_amount', disbursedAmount);
+    
     if (paymentFile) {
       formData.append('file', paymentFile);
     }
@@ -127,11 +153,12 @@ export default function AccountsDesk({ currentUser }) {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 
-      setAlert({ type: 'success', message: `Payment UTR ${utrNo} recorded successfully! Order marked as Dispatched.` });
+      setAlert({ type: 'success', message: `Payment UTR ${utrNo} recorded successfully!` });
       setTimeout(() => {
+        const fullPaymentCleared = disbursedAmount >= (selectedPo.remaining_balance || selectedPo.grand_total);
         setSelectedPo(null);
         fetchAccountsOrders();
-        setActiveTab('history');
+        if (fullPaymentCleared) setActiveTab('history');
       }, 1500);
     } catch (err) {
       setAlert({ type: 'error', message: "Failed to submit payment disbursement details." });
@@ -148,21 +175,22 @@ export default function AccountsDesk({ currentUser }) {
         po.vendor_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         po.project_name.toLowerCase().includes(searchQuery.toLowerCase());
       
+      // Include "Partially Disbursed" in pending tab
       const matchesTab = activeTab === 'pending' 
-        ? po.status === 'PI Approved - Sent to Accounts' 
+        ? (po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed')
         : po.status === 'Dispatched';
 
       return matchesSearch && matchesTab;
     });
   }, [orders, searchQuery, activeTab]);
 
-  const pendingCount = useMemo(() => orders.filter(o => o.status === 'PI Approved - Sent to Accounts').length, [orders]);
+  const pendingCount = useMemo(() => orders.filter(o => o.status === 'PI Approved - Sent to Accounts' || o.status === 'Partially Disbursed').length, [orders]);
   const completedCount = useMemo(() => orders.filter(o => o.status === 'Dispatched').length, [orders]);
 
   return (
-    <div className="space-y-6 relative pb-10">
+    <div className="space-y-6 relative pb-10 sm:px-2 md:px-4 lg:px-0">
       
-      {/* 🎯 1. SMOOTH INLINE DOCUMENT PREVIEW MODAL (Cloudinary Iframes) */}
+      {/* 🎯 1. SMOOTH INLINE DOCUMENT PREVIEW MODAL */}
       {previewDoc && (
         <div 
           className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
@@ -216,7 +244,7 @@ export default function AccountsDesk({ currentUser }) {
               </div>
               <div className="flex items-center gap-3">
                 <Button variant="ghost" onClick={() => window.print()} className="text-xs bg-white/10 hover:bg-white/20 text-white border-0 py-1.5 px-3">
-                  <Printer size={14} className="mr-1.5" /> Print
+                  <Printer size={14} className="mr-1.5 inline" /> Print
                 </Button>
                 <button onClick={() => setSelectedSystemPo(null)} className="text-slate-300 hover:text-white bg-white/10 p-1.5 rounded-full transition-colors">
                   <X size={16} />
@@ -282,8 +310,6 @@ export default function AccountsDesk({ currentUser }) {
                     </tr>
                   </tbody>
                 </table>
-
-                {/* Terms */}
                 <div className="text-xs space-y-2 mt-8 text-slate-700">
                   <p><strong className="text-slate-900 uppercase">Payment Terms:</strong> {selectedSystemPo.payment_terms || "100% Payable on Delivery"}</p>
                   <p><strong className="text-slate-900 uppercase">Billing Status:</strong> Proforma Invoice Generated</p>
@@ -297,23 +323,23 @@ export default function AccountsDesk({ currentUser }) {
       {/* HEADER SECTION */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Accounts & Disbursement Desk</h1>
-          <p className="text-sm text-slate-500 font-medium">Verify PM-approved Proforma Invoices, execute bank transfers, and log payment receipts.</p>
+          <h1 className="text-xl md:text-2xl font-extrabold text-[#2c2a57] tracking-tight">Accounts & Disbursement Desk</h1>
+          <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">Verify Proforma Invoices, execute partial or full bank transfers, and log receipts.</p>
         </div>
         <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
           <Button 
             variant={activeTab === 'pending' ? 'primary' : 'ghost'} 
             onClick={() => setActiveTab('pending')} 
-            className="text-xs py-2 flex-1 md:flex-none flex items-center justify-center gap-1.5"
+            className="text-[11px] md:text-xs py-2 px-3 flex-1 md:flex-none whitespace-nowrap"
           >
-            <Wallet size={14} /> <span>Pending Payments ({pendingCount})</span>
+            <Wallet size={14} className="mr-1.5 inline" /> <span>Pending Payments ({pendingCount})</span>
           </Button>
           <Button 
             variant={activeTab === 'history' ? 'primary' : 'ghost'} 
             onClick={() => setActiveTab('history')} 
-            className="text-xs py-2 flex-1 md:flex-none flex items-center justify-center gap-1.5"
+            className="text-[11px] md:text-xs py-2 px-3 flex-1 md:flex-none whitespace-nowrap"
           >
-            <CheckSquare size={14} /> <span>Disbursed Ledger ({completedCount})</span>
+            <CheckSquare size={14} className="mr-1.5 inline" /> <span>Cleared Ledger ({completedCount})</span>
           </Button>
         </div>
       </div>
@@ -348,18 +374,18 @@ export default function AccountsDesk({ currentUser }) {
       {/* SEARCH BAR */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
         <div className="flex-1 relative">
-          <Search className="absolute left-3 top-3 text-slate-400" size={15} />
+          <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
           <input 
             type="text" 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search PO number, vendor, or project name..." 
-            className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-800 outline-none focus:border-[#2c2a57] shadow-3xs"
+            className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-1.5 text-xs text-slate-800 outline-none focus:border-[#2c2a57] shadow-3xs"
           />
         </div>
       </div>
 
-      {/* MOBILE RESPONSIVE CARD VIEW (Hidden on md and up) */}
+      {/* 📱 MOBILE RESPONSIVE CARD VIEW (Hidden on md and up) */}
       <div className="md:hidden space-y-4">
         {filteredOrders.length === 0 ? (
           <Card className="p-8 text-center text-slate-400 text-sm border-dashed border-2">
@@ -367,40 +393,70 @@ export default function AccountsDesk({ currentUser }) {
           </Card>
         ) : (
           filteredOrders.map((po) => {
-            const targetPayable = calculatePayableNow(po.payment_terms, po.grand_total);
+            const isPartiallyPaid = po.status === 'Partially Disbursed';
+            const isExpanded = !!expandedRows[po.po_number];
+            const logs = rowLogs[po.po_number] || [];
+            // Filter logs to find payment related entries
+            const paymentLogs = logs.filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"));
 
             return (
-              <Card key={po.po_number} className="p-4 space-y-4 bg-white border-slate-200">
+              <Card key={po.po_number} className={`p-4 space-y-4 bg-white border-slate-200 ${isPartiallyPaid ? 'border-l-4 border-l-amber-500' : ''}`}>
                 <div className="flex justify-between items-start border-b border-slate-100 pb-3">
                   <div>
                     <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
                     <div className="text-[10px] text-slate-400 font-mono mt-0.5">{po.ticket_number}</div>
                   </div>
-                  <StatusBadge status={po.status} />
+                  <div className="flex flex-col items-end gap-2">
+                    <StatusBadge status={po.status} />
+                    {isPartiallyPaid && (
+                      <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded">
+                        View Payment Ledger {isExpanded ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div>
+                  <div className="col-span-2">
                     <span className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5">Vendor</span>
                     <span className="font-bold text-slate-800 line-clamp-1">{po.vendor_name}</span>
                   </div>
-                  <div>
-                    <span className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5">Project</span>
-                    <span className="font-bold text-slate-800 line-clamp-1">{po.project_code}</span>
-                  </div>
                   
                   {/* Financial Breakdown Mobile */}
-                  <div className="col-span-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-1">
+                  <div className="col-span-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-1 mt-1">
                     <div className="flex justify-between items-center text-xs">
                       <span className="font-bold text-slate-500">Total PO Value:</span>
                       <span className="font-mono font-bold text-slate-800">₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </div>
-                    <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/60">
-                      <span className="font-bold text-[#0b9c54]">Payable Now ({po.payment_terms || '100%'}):</span>
-                      <span className="font-mono font-black text-[#0b9c54] text-sm">₹{targetPayable.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                    </div>
+                    {po.disbursed_amount > 0 && (
+                      <div className="flex justify-between items-center text-xs text-emerald-600 font-bold">
+                        <span>Already Paid:</span>
+                        <span className="font-mono">₹{po.disbursed_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+                    {(po.remaining_balance > 0 || !po.disbursed_amount) && (
+                      <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/60">
+                        <span className="font-bold text-rose-600">Balance Pending:</span>
+                        <span className="font-mono font-black text-rose-600 text-sm">₹{(po.remaining_balance || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                {/* Expanded Payment Ledger Mobile */}
+                {isExpanded && isPartiallyPaid && (
+                  <div className="bg-amber-50/50 p-3 rounded-lg border border-amber-100 space-y-2">
+                    <span className="text-[9px] font-black uppercase text-amber-800 tracking-wider">Payment History Audit</span>
+                    <div className="space-y-2">
+                      {paymentLogs.map((log, idx) => (
+                        <div key={idx} className="bg-white p-2 border border-slate-200 rounded text-[10px] space-y-1">
+                          <p className="font-bold text-slate-700">{log.remarks}</p>
+                          <p className="text-[9px] font-mono text-slate-400">Logged on: {log.timestamp}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Document Links Mobile */}
                 <div className="border-t border-slate-100 pt-3 space-y-2">
@@ -454,22 +510,14 @@ export default function AccountsDesk({ currentUser }) {
                 </div>
 
                 <div className="pt-2">
-                  {po.status === 'PI Approved - Sent to Accounts' ? (
+                  {po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed' ? (
                     <Button variant="primary" onClick={() => openDisbursementModal(po)} className="w-full text-xs py-2 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs">
-                      Process Payment
+                      {isPartiallyPaid ? "Clear Remaining Balance" : "Process Advance Payment"}
                     </Button>
                   ) : (
                     <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-center space-y-1">
-                      <span className="text-[11px] font-bold text-emerald-700 block">UTR: {po.utr_no}</span>
-                      <span className="text-[9px] font-bold text-emerald-600 block">Disbursed: ₹{(po.disbursed_amount || po.grand_total).toLocaleString('en-IN')}</span>
-                      {po.payment_advice_url && (
-                        <button 
-                          onClick={() => handlePreview(po.payment_advice_url, `Payment Receipt - ${po.utr_no}`)}
-                          className="text-indigo-600 font-bold text-[10px] inline-block hover:underline mt-1"
-                        >
-                          📄 View Payment Receipt
-                        </button>
-                      )}
+                      <span className="text-[11px] font-bold text-emerald-700 block">Final UTR: {po.utr_no}</span>
+                      <span className="text-[9px] font-bold text-emerald-600 block">100% Cleared: ₹{(po.disbursed_amount || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </div>
                   )}
                 </div>
@@ -479,9 +527,9 @@ export default function AccountsDesk({ currentUser }) {
         )}
       </div>
 
-      {/* DESKTOP TABLE VIEW (Hidden on small screens) */}
+      {/* 💻 DESKTOP TABLE VIEW (Hidden on small screens) */}
       <Card className="hidden md:block overflow-hidden border-slate-200 shadow-sm bg-white">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto custom-scrollbar">
           <table className="w-full text-left border-collapse min-w-[1100px]">
             <thead>
               <tr className="text-[10px] uppercase font-black tracking-wider text-slate-400 bg-slate-50 border-b border-slate-200">
@@ -503,136 +551,145 @@ export default function AccountsDesk({ currentUser }) {
                 </tr>
               ) : (
                 filteredOrders.map((po) => {
-                  const targetPayable = calculatePayableNow(po.payment_terms, po.grand_total);
+                  const isPartiallyPaid = po.status === 'Partially Disbursed';
+                  const isExpanded = !!expandedRows[po.po_number];
+                  const logs = rowLogs[po.po_number] || [];
+                  const paymentLogs = logs.filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"));
 
                   return (
-                    <tr key={po.po_number} className="hover:bg-slate-50/50 transition-colors">
-                      
-                      {/* PO / Ticket Code */}
-                      <td className="p-4 align-top">
-                        <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{po.ticket_number}</div>
-                      </td>
-                      
-                      {/* Project Scope */}
-                      <td className="p-4 align-top">
-                        <div className="font-bold text-slate-800">{po.project_code}</div>
-                        <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
-                      </td>
-                      
-                      {/* Vendor Details */}
-                      <td className="p-4 align-top">
-                        <div className="font-extrabold text-slate-800 uppercase line-clamp-1" title={po.vendor_name}>{po.vendor_name}</div>
-                        <div className="text-[10px] font-mono text-slate-500 truncate">{po.vendor_contact} | {po.vendor_email}</div>
-                      </td>
-                      
-                      {/* 🎯 FINANCIAL BREAKDOWN */}
-                      <td className="p-4 text-right font-mono align-top bg-slate-50/30 space-y-1">
-                        <div>
-                          <span className="text-[9px] font-bold text-slate-400 uppercase block">Total PO:</span>
-                          <span className="font-extrabold text-slate-800">₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                        <div className="pt-1 border-t border-slate-200/60">
-                          <span className="text-[9px] font-bold text-[#0b9c54] uppercase block">Payable Now:</span>
-                          <span className="font-black text-[#0b9c54] text-sm">₹{targetPayable.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      </td>
-                      
-                      {/* 🎯 DOCUMENT VAULT & TERMS */}
-                      <td className="p-4 align-top space-y-2 border-l border-slate-100">
-                        {/* Terms Badge */}
-                        <div className="inline-block bg-indigo-50 border border-indigo-200 rounded px-2 py-0.5 text-[10px] font-black text-indigo-800 truncate max-w-full" title={po.payment_terms}>
-                          Terms: {po.payment_terms || '100% Payable'}
-                        </div>
-
-                        {/* Document Badges */}
-                        <div className="flex flex-col gap-1.5">
-                          {/* 1. Signed PO / System PO */}
-                          {po.signed_po_url ? (
-                            <button 
-                              onClick={() => handlePreview(po.signed_po_url, `Signed PO - ${po.po_number}`)} 
-                              className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left"
-                            >
-                              <span className="font-bold text-slate-700 flex items-center gap-1">✍️ Signed PO</span>
-                              <ExternalLink size={10} className="text-indigo-400 flex-shrink-0" />
-                            </button>
-                          ) : (
-                            <button 
-                              onClick={() => openSystemPoView(po)} 
-                              className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left"
-                            >
-                              <span className="font-bold text-slate-700 flex items-center gap-1">📄 System PO</span>
-                              <span className="text-[9px] font-black text-indigo-600 uppercase">View</span>
+                    <React.Fragment key={po.po_number}>
+                      <tr className={`hover:bg-slate-50/50 transition-colors ${isPartiallyPaid ? 'bg-amber-50/20' : ''} ${isExpanded ? 'bg-indigo-50/20' : ''}`}>
+                        
+                        <td className="p-4 align-top">
+                          <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
+                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">{po.ticket_number}</div>
+                          {isPartiallyPaid && (
+                            <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className="mt-2 text-[9px] font-black uppercase flex items-center gap-1 text-amber-600 bg-white border border-amber-200 px-1.5 py-0.5 rounded hover:bg-amber-100">
+                              {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />} Payment Ledger
                             </button>
                           )}
-
-                          {/* 2. Proforma Invoice (PI) */}
-                          {po.proforma_invoice_url ? (
-                            <button 
-                              onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)}
-                              className="flex items-center justify-between bg-amber-50/60 border border-amber-200 px-2 py-1 rounded text-[10px] hover:border-amber-400 transition-colors shadow-3xs w-full text-left"
-                            >
-                              <span className="font-bold text-amber-800 flex items-center gap-1 truncate max-w-[130px]">
-                                📄 PI #{po.invoice_no}
-                              </span>
-                              <ExternalLink size={10} className="text-amber-500 flex-shrink-0" />
-                            </button>
-                          ) : (
-                            <span className="text-[9px] italic text-slate-400 pl-1 block">No PI Attached</span>
+                        </td>
+                        
+                        <td className="p-4 align-top">
+                          <div className="font-bold text-slate-800">{po.project_code}</div>
+                          <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
+                        </td>
+                        
+                        <td className="p-4 align-top">
+                          <div className="font-extrabold text-slate-800 uppercase line-clamp-1" title={po.vendor_name}>{po.vendor_name}</div>
+                          <div className="text-[10px] font-mono text-slate-500 truncate mt-0.5">{po.vendor_contact} | {po.vendor_email}</div>
+                        </td>
+                        
+                        {/* 🎯 FINANCIAL BREAKDOWN */}
+                        <td className="p-4 text-right font-mono align-top bg-slate-50/30 space-y-1 border-l border-slate-100">
+                          <div>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase block">Total Value:</span>
+                            <span className="font-extrabold text-slate-800">₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                          </div>
+                          {po.disbursed_amount > 0 && (
+                            <div className="pt-0.5 text-emerald-600">
+                              <span className="text-[9px] font-bold uppercase block">Already Paid:</span>
+                              <span className="font-bold">₹{po.disbursed_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                            </div>
                           )}
-
-                          {/* 3. Final Tax Invoice (TI) */}
-                          {po.tax_invoice_url ? (
-                            <button 
-                              onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)}
-                              className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 px-2 py-1 rounded text-[10px] hover:border-emerald-400 transition-colors shadow-3xs w-full text-left"
-                            >
-                              <span className="font-bold text-emerald-800 flex items-center gap-1 truncate max-w-[130px]">
-                                🧾 Tax Inv #{po.tax_invoice_no}
-                              </span>
-                              <ExternalLink size={10} className="text-emerald-500 flex-shrink-0" />
-                            </button>
-                          ) : (
-                            <span className="text-[9px] italic text-slate-400 pl-1 block">Tax Inv Pending</span>
+                          {(po.remaining_balance > 0 || !po.disbursed_amount) && (
+                            <div className="pt-1 border-t border-slate-200/60">
+                              <span className="text-[9px] font-bold text-rose-500 uppercase block">Pending Balance:</span>
+                              <span className="font-black text-rose-600 text-sm">₹{(po.remaining_balance || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                            </div>
                           )}
-                        </div>
-                      </td>
-
-                      <td className="p-4 align-top text-center">
-                        <StatusBadge status={po.status} />
-                      </td>
-
-                      {/* Accounts Action */}
-                      <td className="p-4 text-center align-top border-l border-slate-100">
-                        {po.status === 'PI Approved - Sent to Accounts' ? (
-                          <Button 
-                            variant="primary" 
-                            onClick={() => openDisbursementModal(po)}
-                            className="text-xs py-1.5 px-3 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs w-full"
-                          >
-                            Process Payment
-                          </Button>
-                        ) : (
-                          <div className="space-y-1.5 text-center flex flex-col items-center">
-                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200 flex flex-col w-full">
-                              <span className="text-[8px] text-emerald-500 uppercase tracking-widest">UTR No:</span>
-                              {po.utr_no}
-                            </span>
-                            <span className="text-[9px] font-bold text-slate-500">
-                              Disbursed: ₹{(po.disbursed_amount || po.grand_total).toLocaleString('en-IN')}
-                            </span>
-                            {po.payment_advice_url && (
-                              <button 
-                                onClick={() => handlePreview(po.payment_advice_url, `Payment Receipt - ${po.utr_no}`)} 
-                                className="text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded hover:text-indigo-800 hover:bg-indigo-100 font-bold text-[10px] flex items-center gap-1 justify-center transition-colors w-full mt-1"
-                              >
-                                <Download size={10} /> Receipt PDF
+                        </td>
+                        
+                        {/* DOCUMENT VAULT */}
+                        <td className="p-4 align-top space-y-2 border-l border-slate-100">
+                          <div className="inline-block bg-indigo-50 border border-indigo-200 rounded px-2 py-0.5 text-[10px] font-black text-indigo-800 truncate max-w-full" title={po.payment_terms}>
+                            Terms: {po.payment_terms || '100% Payable'}
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            {po.signed_po_url ? (
+                              <button onClick={() => handlePreview(po.signed_po_url, `Signed PO - ${po.po_number}`)} className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left">
+                                <span className="font-bold text-slate-700 flex items-center gap-1">✍️ Signed PO</span><ExternalLink size={10} className="text-indigo-400 flex-shrink-0" />
+                              </button>
+                            ) : (
+                              <button onClick={() => openSystemPoView(po)} className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left">
+                                <span className="font-bold text-slate-700 flex items-center gap-1">📄 System PO</span><span className="text-[9px] font-black text-indigo-600 uppercase">View</span>
                               </button>
                             )}
+
+                            {po.proforma_invoice_url ? (
+                              <button onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)} className="flex items-center justify-between bg-amber-50/60 border border-amber-200 px-2 py-1 rounded text-[10px] hover:border-amber-400 transition-colors shadow-3xs w-full text-left">
+                                <span className="font-bold text-amber-800 flex items-center gap-1 truncate max-w-[130px]">📄 PI #{po.invoice_no}</span><ExternalLink size={10} className="text-amber-500 flex-shrink-0" />
+                              </button>
+                            ) : <span className="text-[9px] italic text-slate-400 pl-1 block">No PI Attached</span>}
+
+                            {po.tax_invoice_url ? (
+                              <button onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)} className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 px-2 py-1 rounded text-[10px] hover:border-emerald-400 transition-colors shadow-3xs w-full text-left">
+                                <span className="font-bold text-emerald-800 flex items-center gap-1 truncate max-w-[130px]">🧾 Tax Inv #{po.tax_invoice_no}</span><ExternalLink size={10} className="text-emerald-500 flex-shrink-0" />
+                              </button>
+                            ) : <span className="text-[9px] italic text-slate-400 pl-1 block">Tax Inv Pending</span>}
                           </div>
-                        )}
-                      </td>
-                    </tr>
+                        </td>
+
+                        <td className="p-4 align-top text-center">
+                          <StatusBadge status={po.status} />
+                        </td>
+
+                        {/* Accounts Action */}
+                        <td className="p-4 text-center align-top border-l border-slate-100">
+                          {po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed' ? (
+                            <Button variant="primary" onClick={() => openDisbursementModal(po)} className="text-[11px] py-2 px-3 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs w-full font-bold">
+                              {isPartiallyPaid ? "Clear Remaining Balance" : "Process Advance Payment"}
+                            </Button>
+                          ) : (
+                            <div className="space-y-1.5 text-center flex flex-col items-center">
+                              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200 flex flex-col w-full">
+                                <span className="text-[8px] text-emerald-500 uppercase tracking-widest">Final UTR No:</span>
+                                {po.utr_no}
+                              </span>
+                              <span className="text-[9px] font-bold text-slate-500">
+                                Total Paid: ₹{(po.disbursed_amount || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </span>
+                              {po.payment_advice_url && (
+                                <button onClick={() => handlePreview(po.payment_advice_url, `Payment Receipt - ${po.utr_no}`)} className="text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded hover:text-indigo-800 hover:bg-indigo-100 font-bold text-[10px] flex items-center gap-1 justify-center transition-colors w-full mt-1">
+                                  <Download size={10} /> View Receipt
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+
+                      {/* 🎯 EXPANDED PAYMENT LEDGER ROW */}
+                      {isExpanded && isPartiallyPaid && (
+                        <tr className="bg-amber-50/30 border-b-2 border-slate-200">
+                          <td colSpan="7" className="p-4 pl-12 pr-12">
+                            <div className="bg-white border border-amber-200 p-4 rounded-xl shadow-3xs">
+                              <div className="flex items-center space-x-2 text-[10px] font-black uppercase text-amber-600 tracking-wider mb-3">
+                                <span>Multi-Payment Audit Ledger</span>
+                              </div>
+                              <div className="space-y-2">
+                                {paymentLogs.map((log, idx) => (
+                                  <div key={idx} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                                    <div className="flex flex-col">
+                                      <span className="font-bold text-slate-800">{log.remarks.split(' | ')[0]}</span>
+                                      <span className="text-[9px] font-mono text-slate-400 mt-0.5">Processed by {log.user_name} on {log.timestamp}</span>
+                                    </div>
+                                    {log.remarks.includes('Proof File:') && (
+                                      <button 
+                                        onClick={() => handlePreview(log.remarks.split('Proof File: ')[1], `Payment Advice`)}
+                                        className="text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded border border-indigo-100 flex items-center gap-1"
+                                      >
+                                        <Paperclip size={10} /> View Bank Receipt
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })
               )}
@@ -641,7 +698,7 @@ export default function AccountsDesk({ currentUser }) {
         </div>
       </Card>
 
-      {/* DISBURSEMENT PAYMENT MODAL */}
+      {/* 🎯 DISBURSEMENT PAYMENT MODAL */}
       {selectedPo && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
@@ -684,12 +741,12 @@ export default function AccountsDesk({ currentUser }) {
                   
                   <div className="bg-indigo-50 p-2.5 rounded-lg border border-indigo-200 shadow-3xs flex flex-col justify-center">
                     <span className="text-[9px] font-bold text-indigo-500 uppercase">Payment Terms</span>
-                    <span className="font-bold text-indigo-900 text-xs mt-0.5 line-clamp-2 leading-tight">{selectedPo.payment_terms || '100% Payable'}</span>
+                    <span className="font-bold text-indigo-900 text-[10px] mt-0.5 line-clamp-2 leading-tight">{selectedPo.payment_terms || '100% Payable'}</span>
                   </div>
                   
-                  <div className="col-span-2 bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg shadow-3xs flex justify-between items-center">
-                    <span className="text-[10px] font-bold text-emerald-700 uppercase">Calculated Payable Now:</span>
-                    <span className="font-mono font-black text-emerald-700 text-base">₹{calculatePayableNow(selectedPo.payment_terms, selectedPo.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                  <div className="col-span-2 bg-emerald-50 border border-emerald-200 p-3 rounded-lg shadow-3xs flex justify-between items-center">
+                    <span className="text-xs font-bold text-emerald-800 uppercase">Remaining Balance Pending:</span>
+                    <span className="font-mono font-black text-emerald-700 text-lg">₹{(selectedPo.remaining_balance || selectedPo.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                   </div>
                 </div>
               </div>
@@ -698,20 +755,15 @@ export default function AccountsDesk({ currentUser }) {
               <div className="space-y-4">
                 <div>
                   <Input 
-                    label="Final Amount Disbursing Now (₹) *" 
+                    label="Amount Paying Now (₹) *" 
                     type="number"
                     value={disbursedAmount} 
                     onChange={e => setDisbursedAmount(parseFloat(e.target.value) || 0)} 
                     placeholder="0.00" 
-                    className="font-mono font-bold text-sm bg-white border-emerald-300 focus:ring-emerald-500 text-emerald-900"
+                    className="font-mono font-black text-base bg-white border-emerald-300 focus:ring-emerald-500 text-emerald-900"
                   />
-                  <div className="flex justify-between items-center mt-1">
-                    <p className="text-[9px] text-emerald-600 font-medium pl-1">
-                      Edit manually if releasing a custom partial amount.
-                    </p>
-                    <p className="text-[10px] font-bold text-slate-500 pr-1">
-                      Balance: <span className="text-rose-500 font-mono">₹{(selectedPo.grand_total - disbursedAmount).toLocaleString('en-IN')}</span>
-                    </p>
+                  <div className="flex justify-between items-center mt-1.5">
+                    <p className="text-[9px] text-emerald-600 font-medium pl-1">Edit manually for custom partial payments.</p>
                   </div>
                 </div>
 
@@ -721,7 +773,7 @@ export default function AccountsDesk({ currentUser }) {
                     value={utrNo} 
                     onChange={e => setUtrNo(e.target.value)} 
                     placeholder="e.g. UTR1234567890AX" 
-                    className="font-mono text-sm"
+                    className="font-mono text-sm uppercase"
                   />
                 </div>
 
@@ -758,8 +810,8 @@ export default function AccountsDesk({ currentUser }) {
                   )}
                 </div>
               </div>
-            </div>
 
+            </div>
             {/* Modal Footer */}
             <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex justify-end space-x-3 shrink-0">
               <Button variant="ghost" onClick={() => setSelectedPo(null)} disabled={submitting} className="px-5 text-xs font-bold">
@@ -771,10 +823,9 @@ export default function AccountsDesk({ currentUser }) {
                 disabled={submitting} 
                 className="bg-[#0b9c54] hover:bg-emerald-600 px-6 py-2 shadow-sm text-xs"
               >
-                {submitting ? "Processing Upload..." : "Confirm Payment & Dispatch"}
+                {submitting ? "Processing Upload..." : "Confirm & Send Funds"}
               </Button>
             </div>
-
           </div>
         </div>
       )}

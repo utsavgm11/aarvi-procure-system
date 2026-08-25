@@ -521,8 +521,8 @@ def attach_vendor_quotations(
         )
         db.add(db_quote)
         
-        # 🎯 UPDATED CHECK: Evaluates single unit_price instead of net_amount_payable
-        single_unit_price = quote.unit_price or 0.0
+        # Evaluates single unit_price instead of net_amount_payable
+        single_unit_price = float(quote.unit_price or 0.0)
         if single_unit_price > 250000:
             any_unit_price_exceeds_2_5l = True
 
@@ -1083,7 +1083,7 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
         models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number
     ).filter(models.MaterialTicket.status.in_([
         "Approved", "PI Pending PM Approval", "PI Approved - Sent to Accounts", 
-        "Dispatched", "Partially Delivered", "Delivered - GRN Logged"
+        "Dispatched", "Partially Delivered", "Material Discrepancy Raised", "Delivered - GRN Logged", "Partially Disbursed"
     ])).order_by(models.PurchaseOrder.generated_at.desc()).all()
     
     response = []
@@ -1648,7 +1648,9 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
         models.MaterialTicket
     ).join(
         models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number
-    ).filter(models.MaterialTicket.status.in_(["PI Approved - Sent to Accounts", "Dispatched"])).order_by(models.PurchaseOrder.generated_at.desc()).all()
+    ).filter(
+        models.MaterialTicket.status.in_(["PI Approved - Sent to Accounts", "Partially Disbursed", "Dispatched"])
+    ).order_by(models.PurchaseOrder.generated_at.desc()).all()
     
     response = []
     for po_obj, ticket_obj in orders:
@@ -1660,32 +1662,37 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
         primary_quote = winning_quotes[0] if winning_quotes else None
         primary_vendor = primary_quote.vendor_name if primary_quote else "N/A"
         
-        response.append({
-            "po_number": po_obj.po_number,
-            "ticket_number": po_obj.ticket_number,
-            "project_name": ticket_obj.project_name,
-            "project_code": ticket_obj.project_code,
-            "vendor_name": primary_vendor,
-            "vendor_email": getattr(primary_quote, 'vendor_email', 'N/A') if primary_quote else 'N/A',
-            "vendor_contact": getattr(primary_quote, 'vendor_contact', 'N/A') if primary_quote else 'N/A',
-            "grand_total": float(grand_total),
-            "status": ticket_obj.status,
-            "po_pdf_url": getattr(po_obj, 'pdf_url', None),
-            "signed_po_url": getattr(po_obj, 'signed_po_url', None),
-            "invoice_no": getattr(po_obj, 'invoice_no', '') or '',
-            "invoice_date": getattr(po_obj, 'invoice_date', '') or '',
-            "invoice_remark": getattr(po_obj, 'invoice_remark', '') or '',
-            "payment_terms": getattr(po_obj, 'invoice_duration', '') or '100% Payable',
-            "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None),
-            "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '',
-            "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '',
-            "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None),
-            "utr_no": getattr(po_obj, 'utr_no', '') or '',
-            "payment_date": getattr(po_obj, 'payment_date', '') or '',
-            "payment_remark": getattr(po_obj, 'payment_remark', '') or '',
-            "payment_advice_url": getattr(po_obj, 'payment_advice_url', None),
-            "disbursed_amount": float(getattr(po_obj, 'disbursed_amount', 0) or 0)
-        })
+        already_disbursed = float(getattr(po_obj, 'disbursed_amount', 0) or 0)
+        remaining_balance = grand_total - already_disbursed
+
+        # 🎯 Include in queue if there's still an outstanding balance or pending initial disbursement
+        if remaining_balance > 1.0 or ticket_obj.status == "PI Approved - Sent to Accounts":
+            response.append({
+                "po_number": po_obj.po_number,
+                "ticket_number": po_obj.ticket_number,
+                "project_name": ticket_obj.project_name,
+                "project_code": ticket_obj.project_code,
+                "vendor_name": primary_vendor,
+                "vendor_email": getattr(primary_quote, 'vendor_email', 'N/A') if primary_quote else 'N/A',
+                "vendor_contact": getattr(primary_quote, 'vendor_contact', 'N/A') if primary_quote else 'N/A',
+                "grand_total": float(grand_total),
+                "disbursed_amount": already_disbursed,
+                "remaining_balance": float(max(0.0, remaining_balance)),
+                "status": ticket_obj.status,
+                "po_pdf_url": getattr(po_obj, 'pdf_url', None),
+                "signed_po_url": getattr(po_obj, 'signed_po_url', None),
+                "invoice_no": getattr(po_obj, 'invoice_no', '') or '',
+                "invoice_date": getattr(po_obj, 'invoice_date', '') or '',
+                "invoice_remark": getattr(po_obj, 'invoice_remark', '') or '',
+                "payment_terms": getattr(po_obj, 'invoice_duration', '') or '100% Payable',
+                "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None),
+                "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '',
+                "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '',
+                "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None),
+                "utr_no": getattr(po_obj, 'utr_no', '') or '',
+                "payment_date": getattr(po_obj, 'payment_date', '') or '',
+                "payment_remark": getattr(po_obj, 'payment_remark', '') or ''
+            })
     return response
 
 @app.put("/api/purchase-orders/{po_number}/disbursement")
@@ -1703,10 +1710,21 @@ async def process_po_disbursement(
     if not po:
         raise HTTPException(status_code=404, detail="Purchase Order entity not found.")
     
+    # 🎯 Calculate Total Order Value from Winning Bids
+    winning_quotes = db.query(models.Quotation).filter(
+        models.Quotation.ticket_number == po.ticket_number,
+        models.Quotation.is_selected == True
+    ).all()
+    grand_total = sum(q.total_amount for q in winning_quotes)
+
+    # Accumulate previous payouts with the new tranche
+    previous_disbursed = float(getattr(po, 'disbursed_amount', 0) or 0)
+    new_total_disbursed = previous_disbursed + disbursed_amount
+    po.disbursed_amount = new_total_disbursed
+    
     po.utr_no = utr_no
     po.payment_date = payment_date
     po.payment_remark = payment_remark
-    po.disbursed_amount = disbursed_amount
     
     if file:
         ext = os.path.splitext(file.filename)[1].lower()
@@ -1730,27 +1748,37 @@ async def process_po_disbursement(
     
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
     if ticket:
-        ticket.status = "Dispatched"
+        remaining_balance = grand_total - new_total_disbursed
+
+        # 🎯 TRANCHE EVALUATION: If balance > ₹1.00, set to 'Partially Disbursed'
+        if remaining_balance > 1.0:
+            ticket.status = "Partially Disbursed"
+            log_msg = f"Partial Payment UTR {utr_no} logged (Tranche: ₹{disbursed_amount:,.2f}). Total Disbursed: ₹{new_total_disbursed:,.2f} / ₹{grand_total:,.2f}. Outstanding Balance: ₹{remaining_balance:,.2f}."
+        else:
+            ticket.status = "Dispatched"
+            log_msg = f"Final Payment UTR {utr_no} logged (Tranche: ₹{disbursed_amount:,.2f}). Order 100% Disbursed (Total: ₹{new_total_disbursed:,.2f}) and released for site dispatch."
+
         db.add(models.TicketHistory(
             ticket_number=ticket.ticket_number,
             user_name="Accounts Executive",
-            action_taken="Payment Disbursed & Order Dispatched",
-            remarks=f"Payment UTR {utr_no} (Amount: ₹{disbursed_amount:,.2f}) processed on {payment_date}. Bank transfer receipt attached and order released for final logistics dispatch."
+            action_taken=f"Disbursement Logged ({ticket.status})",
+            remarks=log_msg
         ))
 
-        # 🎯 AUTOMATED EMAIL: Alert Coordinator & Procurement that payment is done
+        # 🎯 AUTOMATED EMAIL: Alert Coordinator
         coordinator = db.query(models.User).filter(models.User.id == ticket.coordinator_id).first()
         if coordinator and coordinator.email:
             background_tasks.add_task(
                 send_workflow_email,
                 recipient_email=coordinator.email,
                 recipient_name=coordinator.name,
-                subject=f"Payment Disbursed & Dispatched: {ticket.ticket_number}",
+                subject=f"Disbursement Update: {ticket.ticket_number} ({ticket.status})",
                 ticket_number=ticket.ticket_number,
                 project_name=ticket.project_name,
-                status="Dispatched"
+                status=ticket.status
             )
         
+        # Alert Purchase Executives
         purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
         for pe in purchase_execs:
             if pe.email:
@@ -1758,14 +1786,19 @@ async def process_po_disbursement(
                     send_workflow_email,
                     recipient_email=pe.email,
                     recipient_name=pe.name,
-                    subject=f"Payment Disbursed for {ticket.ticket_number}",
+                    subject=f"Disbursement Update for {ticket.ticket_number}",
                     ticket_number=ticket.ticket_number,
                     project_name=ticket.project_name,
-                    status="Dispatched"
+                    status=ticket.status
                 )
         
     db.commit()
-    return {"message": "Disbursement successfully logged and order marked as Dispatched."}
+    return {
+        "message": "Disbursement successfully logged.",
+        "status": ticket.status if ticket else "Dispatched",
+        "total_disbursed": new_total_disbursed,
+        "remaining_balance": max(0.0, grand_total - new_total_disbursed)
+    }
 
 # -------------------------------------------------------------------
 # 📦 PHASE 5: GRN & MATERIAL DISCREPANCY HANDLING ENDPOINT
