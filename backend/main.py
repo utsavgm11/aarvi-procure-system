@@ -1733,11 +1733,15 @@ async def process_po_disbursement(
         models.Quotation.ticket_number == po.ticket_number,
         models.Quotation.is_selected == True
     ).all()
-    grand_total = sum(q.total_amount for q in winning_quotes)
+    
+    # 🎯 FIX 1: EXPLICIT FLOAT CONVERSION (Prevents 500 Internal Server Error)
+    grand_total = float(sum((q.total_amount or 0) for q in winning_quotes)) if winning_quotes else 0.0
 
     # Accumulate previous payouts with the new tranche
     previous_disbursed = float(getattr(po, 'disbursed_amount', 0) or 0)
-    new_total_disbursed = previous_disbursed + disbursed_amount
+    
+    # 🎯 FIX 2: EXPLICIT FLOAT CASTING FOR MATH
+    new_total_disbursed = previous_disbursed + float(disbursed_amount)
     po.disbursed_amount = new_total_disbursed
     
     po.utr_no = utr_no
@@ -1771,10 +1775,14 @@ async def process_po_disbursement(
         # 🎯 TRANCHE EVALUATION: If balance > ₹1.00, set to 'Partially Disbursed'
         if remaining_balance > 1.0:
             ticket.status = "Partially Disbursed"
-            log_msg = f"Partial Payment UTR {utr_no} logged (Tranche: ₹{disbursed_amount:,.2f}). Total Disbursed: ₹{new_total_disbursed:,.2f} / ₹{grand_total:,.2f}. Outstanding Balance: ₹{remaining_balance:,.2f}."
+            log_msg = f"Partial Payment UTR {utr_no} logged (Tranche: ₹{float(disbursed_amount):,.2f}). Total Disbursed: ₹{new_total_disbursed:,.2f} / ₹{grand_total:,.2f}. Outstanding Balance: ₹{remaining_balance:,.2f}."
         else:
             ticket.status = "Dispatched"
-            log_msg = f"Final Payment UTR {utr_no} logged (Tranche: ₹{disbursed_amount:,.2f}). Order 100% Disbursed (Total: ₹{new_total_disbursed:,.2f}) and released for site dispatch."
+            log_msg = f"Final Payment UTR {utr_no} logged (Tranche: ₹{float(disbursed_amount):,.2f}). Order 100% Disbursed (Total: ₹{new_total_disbursed:,.2f}) and released for site dispatch."
+
+        # 🎯 FIX 3: ADD PROOF URL TO LOG (Enables the frontend 'View Bank Receipt' button)
+        if po.payment_advice_url:
+            log_msg += f" | Proof File: {po.payment_advice_url}"
 
         db.add(models.TicketHistory(
             ticket_number=ticket.ticket_number,
@@ -1817,6 +1825,7 @@ async def process_po_disbursement(
         "total_disbursed": new_total_disbursed,
         "remaining_balance": max(0.0, grand_total - new_total_disbursed)
     }
+
 
 # -------------------------------------------------------------------
 # 📦 PHASE 5: GRN & MATERIAL DISCREPANCY HANDLING ENDPOINT
