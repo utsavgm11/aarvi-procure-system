@@ -76,8 +76,25 @@ export default function DirectorDashboard({ currentUser }) {
     try {
       const itemsRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
       setItems(itemsRes.data);
+      
       const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/quotations`);
-      setVendorQuotes(quotesRes.data);
+      
+      // 🎯 Auto-select the lowest bid if no bid is currently selected
+      let fetchedQuotes = quotesRes.data;
+      itemsRes.data.forEach(item => {
+        const itemBids = fetchedQuotes.filter(q => q.item_index === item.item_index);
+        const hasSelection = itemBids.some(q => q.is_selected);
+        if (!hasSelection && itemBids.length > 0) {
+          const lowest = itemBids.reduce((min, b) => b.total_amount < min.total_amount ? b : min, itemBids[0]);
+          fetchedQuotes = fetchedQuotes.map(q => 
+            (q.item_index === lowest.item_index && q.vendor_name === lowest.vendor_name) 
+              ? { ...q, is_selected: true } 
+              : q
+          );
+        }
+      });
+      
+      setVendorQuotes(fetchedQuotes);
 
       // 🎯 MOBILE UX: Smooth scroll to detail view
       setTimeout(() => {
@@ -87,6 +104,16 @@ export default function DirectorDashboard({ currentUser }) {
     } catch (err) { 
       console.error("Error loading financial data", err); 
     }
+  };
+
+  // 🎯 HELPER: Handles Selection of a specific vendor quote
+  const handleSelectBid = (itemIndex, vendorName) => {
+    setVendorQuotes(prevQuotes => prevQuotes.map(q => {
+      if (q.item_index === itemIndex) {
+        return { ...q, is_selected: q.vendor_name === vendorName };
+      }
+      return q;
+    }));
   };
 
   // 🎯 HELPER: Handles Opening Cloudinary Documents in Modal
@@ -247,7 +274,7 @@ export default function DirectorDashboard({ currentUser }) {
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${
                     selectedTicket?.ticket_number === t.ticket_number 
                       ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs ring-1 ring-[#2c2a57]' 
-                      : 'bg-white border-slate-200 hover:border-slate-300'
+                      : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-3xs'
                   }`}
                 >
                   <div className="flex justify-between items-center mb-1">
@@ -332,10 +359,11 @@ export default function DirectorDashboard({ currentUser }) {
                               return (
                                 <div 
                                   key={bIdx} 
-                                  className={`p-3 rounded-xl border flex flex-col justify-between relative overflow-hidden transition-all ${
+                                  onClick={() => handleSelectBid(item.item_index, bid.vendor_name)}
+                                  className={`p-3 rounded-xl border flex flex-col justify-between relative overflow-hidden transition-all cursor-pointer ${
                                     isWinner 
-                                      ? 'border-[#0b9c54] bg-emerald-50/40 ring-1 ring-[#0b9c54] shadow-xs' 
-                                      : 'border-slate-200 bg-white opacity-90'
+                                      ? 'border-[#0b9c54] bg-emerald-50/40 ring-2 ring-[#0b9c54] shadow-xs' 
+                                      : 'border-slate-200 bg-white opacity-90 hover:border-indigo-400 hover:shadow-md'
                                   }`}
                                 >
                                   {isWinner && (
@@ -439,7 +467,7 @@ export default function DirectorDashboard({ currentUser }) {
           ) : (
             <div className="space-y-3">
               {historyTickets.map((ticket, i) => (
-                <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-white border border-slate-200 rounded-xl gap-3">
+                <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-white border border-slate-200 rounded-xl gap-3 hover:shadow-3xs transition-shadow">
                   <div>
                     <div className="flex flex-wrap items-center gap-2 mb-1">
                       <span className="font-mono text-[#2c2a57] font-black text-xs md:text-sm">{ticket.ticket_number}</span>
