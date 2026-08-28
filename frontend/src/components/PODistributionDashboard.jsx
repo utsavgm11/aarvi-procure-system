@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Download, FileText, Edit3, Stamp, ArrowRight, CheckCircle2, AlertCircle, X } from 'lucide-react';
-import { Card, Button, StatusBadge } from './ui/SharedUI';
+import { Card, Button } from './ui/SharedUI';
 import aarviLogo from '../assets/logo.png';
 import Letterhead from '../assets/letter_head.jpg';
 
@@ -76,14 +76,16 @@ export default function PODistributionDashboard({ currentUser }) {
     }
   };
 
-  // 🎯 TRUE NATIVE DOCUMENT DOWNLOAD (E-Sign Compatible)
-  // This bypasses frontend screenshots entirely and fetches the true vector document from Python.
-  const handleDownloadNativeDoc = () => {
+  // 🎯 TRUE VECTOR PDF GENERATION (Selectable Text, E-Sign Compatible)
+  const handlePrintToPDF = () => {
+    // This triggers the browser's native PDF compiler using our strict @media print CSS
+    window.print();
+  };
+
+  // 🎯 NATIVE DOCX DOWNLOAD
+  const handleDownloadWord = () => {
     if (!selectedPo) return;
-    
-    // Call your existing Python backend endpoint that generates the true file
     const downloadUrl = `${API_BASE_URL}/purchase-orders/${selectedPo.po_number}/download-docx`;
-    
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.setAttribute('download', `Aarvi_PO_${selectedPo.po_number}.docx`);
@@ -125,11 +127,11 @@ export default function PODistributionDashboard({ currentUser }) {
         <div className="w-full bg-white relative z-10 mb-1">
           <img src={Letterhead} alt="Aarvi Encon Limited Official Letterhead" className="w-full h-auto object-contain select-none" />
         </div>
-        <div className="mt-2 flex justify-between items-baseline border-t border-slate-400 pt-1 font-mono text-[11px] relative z-10">
+        <div className="mt-2 flex justify-between items-baseline border-t border-slate-400 pt-1 font-mono text-[11px] relative z-10" contentEditable="true">
           <span className="font-black text-slate-900">Ref: {docRefPrefix}/2026-27/{formattedRefId}</span>
           <span className="font-bold text-slate-800">Date: {new Date().toLocaleDateString('en-IN')}</span>
         </div>
-        <h1 className="text-base font-black text-slate-950 tracking-wider uppercase text-center mt-2 bg-slate-100 py-1 border-y border-slate-400 relative z-10">
+        <h1 className="text-base font-black text-slate-950 tracking-wider uppercase text-center mt-2 bg-slate-100 py-1 border-y border-slate-400 relative z-10" contentEditable="true">
           {docTitle}
         </h1>
       </div>
@@ -174,8 +176,73 @@ export default function PODistributionDashboard({ currentUser }) {
           </div>
         </div>
       )}
+
+      {/* 🎯 FLAWLESS A4 PRINT CSS ISOLATION */}
+      <style>{`
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 12mm;
+          }
+          
+          html, body {
+            background: #ffffff !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          /* Hide everything in the app by default during print */
+          body * {
+            visibility: hidden;
+          }
+
+          /* Only show the printable PO container and its children */
+          #printable-po, #printable-po * {
+            visibility: visible;
+          }
+
+          /* Snap the document to the absolute top-left of the A4 paper */
+          #printable-po {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100% !important;
+            max-width: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+
+          /* Prevent table columns from blowing out the right side */
+          table {
+            width: 100% !important;
+            table-layout: fixed !important;
+          }
+          th, td, p {
+            overflow-wrap: break-word !important;
+            word-wrap: break-word !important;
+          }
+
+          .print\\:hidden, .seal-footer {
+            display: none !important;
+          }
+
+          /* Smart page breaking */
+          .avoid-break {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+        }
+      `}</style>
       
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4 print:hidden">
         <div>
           <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Contract Distribution Center</h1>
           <p className="text-sm text-slate-500 font-medium">Verify dynamically generated parameters and download native, e-signable documents.</p>
@@ -183,7 +250,7 @@ export default function PODistributionDashboard({ currentUser }) {
       </div>
 
       {alert && (
-        <div className={`p-4 rounded-xl flex items-center space-x-3 border ${alert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
+        <div className={`p-4 rounded-xl flex items-center space-x-3 border print:hidden ${alert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
           {alert.type === 'success' ? <CheckCircle2 size={18} className="flex-shrink-0" /> : <AlertCircle size={18} className="flex-shrink-0" />}
           <span className="font-semibold text-sm">{alert.message}</span>
         </div>
@@ -192,7 +259,7 @@ export default function PODistributionDashboard({ currentUser }) {
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
         
         {/* LEFT QUEUE */}
-        <div className="xl:col-span-3 space-y-3">
+        <div className="xl:col-span-3 space-y-3 print:hidden">
           <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Clearance Queue</h2>
           {poList.length === 0 ? (
             <Card className="p-6 text-center text-slate-400 border-dashed border-2 bg-white text-sm">Queue cleared.</Card>
@@ -219,27 +286,37 @@ export default function PODistributionDashboard({ currentUser }) {
         </div>
 
         {/* RIGHT PREVIEW CANVAS */}
-        <div className="xl:col-span-9">
+        <div className="xl:col-span-9 print:col-span-12">
           {selectedPo && poItems.length > 0 ? (
-            <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative">
+            <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative print:border-none print:shadow-none">
               
-              <div className="bg-slate-900 text-white p-4 flex justify-between items-center">
+              <div className="bg-slate-900 text-white p-4 flex justify-between items-center print:hidden">
                 <div className="flex items-center space-x-2.5">
                   <Edit3 size={17} className="text-amber-400 animate-pulse" />
                   <span className="text-xs uppercase font-bold tracking-tight text-amber-50">Live Document Verification View</span>
                 </div>
-                {/* 🎯 NATIVE DOWNLOAD BUTTON */}
-                <button 
-                  onClick={handleDownloadNativeDoc} 
-                  className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center space-x-2 px-5 py-2 text-xs font-bold shadow-xs"
-                >
-                  <Download size={14} /> <span>Download Official Document</span>
-                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={handleDownloadWord} 
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all flex items-center space-x-2 px-4 py-2 text-xs font-bold shadow-xs"
+                  >
+                    <FileText size={14} /> <span className="hidden sm:inline">Word (.docx)</span>
+                  </button>
+                  <button 
+                    onClick={handlePrintToPDF} 
+                    className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center space-x-2 px-4 py-2 text-xs font-bold shadow-xs"
+                  >
+                    <Download size={14} /> <span>Vector PDF</span>
+                  </button>
+                </div>
               </div>
 
               {/* LIVE VIEW CONTAINER */}
-              <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 flex justify-center">
-                <div className="p-8 pb-32 space-y-6 font-sans bg-white select-text relative text-justify shadow-sm mx-auto w-full max-w-[800px]">
+              <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 flex justify-center print:p-0 print:border-none print:bg-white">
+                <div 
+                  id="printable-po" 
+                  className="p-8 pb-32 space-y-6 font-sans bg-white select-text relative text-justify shadow-sm mx-auto w-full max-w-[800px] print:shadow-none print:p-0 print:max-w-none"
+                >
                   
                   {/* ========================================================= */}
                   {/* 📦 1. GOODS / MATERIALS PO */}
