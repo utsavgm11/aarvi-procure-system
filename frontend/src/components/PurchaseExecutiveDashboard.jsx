@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
   ShoppingCart, FileCheck, CheckCircle2, Clock, Trash2, Send, Plus, 
   Download, Edit3, FileText, AlertCircle, ShieldAlert, Truck, ExternalLink, 
-  MessageSquare, X, AlertOctagon 
+  MessageSquare, X, AlertOctagon, Paperclip 
 } from 'lucide-react';
 import { Card, Button, StatusBadge } from './ui/SharedUI';
 
@@ -25,7 +25,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const [history, setHistory] = useState([]);
   const [selectedHistoryTicket, setSelectedHistoryTicket] = useState(null);
   const [historyPoItems, setHistoryPoItems] = useState([]); 
-  const [historyLogs, setHistoryLogs] = useState([]); // 🎯 NEW: Audit logs for GRN details
+  const [historyLogs, setHistoryLogs] = useState([]);
 
   // Modal Preview State
   const [previewDoc, setPreviewDoc] = useState(null);
@@ -44,17 +44,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       const res = await axios.get(`${API_BASE_URL}/vendors`);
       setVendors(res.data);
     } catch (err) { console.error("Failed to load vendor directory", err); }
-  }, []);
-
-  // PDF ENGINE INJECTION
-  const [pdfEngineReady, setPdfEngineReady] = useState(() => typeof window !== 'undefined' && !!window.html2pdf);
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.html2pdf) return;
-    const script = document.createElement('script');
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-    script.async = true;
-    script.onload = () => setPdfEngineReady(true);
-    document.body.appendChild(script);
   }, []);
 
   // --- DATA FETCHING ---
@@ -130,7 +119,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     } catch (err) { console.error(err); }
   };
 
-  // 🎯 TICKET OPENING LOGIC (HISTORY LEDGER - INCLUDES GRN LOGS)
+  // 🎯 TICKET OPENING LOGIC (HISTORY LEDGER)
   const openHistoryTicket = async (ticket) => {
     setSelectedHistoryTicket(ticket);
     setHistoryPoItems([]);
@@ -144,7 +133,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       const calcTotal = winningLines.reduce((acc, curr) => acc + (curr.net_amount_payable || curr.base_total_value || 0), 0);
       setSelectedHistoryTicket(prev => ({ ...prev, grand_total: calcTotal }));
 
-      // Fetch Audit Logs to retrieve GRN remarks & proof URLs
       const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
       setHistoryLogs(histRes.data);
 
@@ -339,24 +327,50 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         };
     }
   };
+
   const ui = getContextualUiSettings();
 
-  const handleDownloadPDF = () => {
-    if (!pdfEngineReady && !window.html2pdf) {
-      alert("PDF engine is still loading. Please wait a moment.");
-      return;
+  // 🎯 TRUE NATIVE VECTOR PDF DOWNLOAD (Bypasses Browser Print Dialog)
+  const handleDownloadNativePDF = async () => {
+    if (!selectedHistoryTicket) return;
+    
+    // First, lookup the generated PO number connected to this ticket
+    try {
+      const res = await axios.get(`${API_BASE_URL}/requisitions/${selectedHistoryTicket.ticket_number}/po`);
+      if (res.data && res.data.po_number) {
+        const downloadUrl = `${API_BASE_URL}/purchase-orders/${res.data.po_number}/download-pdf`;
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.setAttribute('download', `Aarvi_PO_${res.data.po_number}.pdf`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } else {
+        alert("Purchase Order has not been formally generated for this request yet.");
+      }
+    } catch (err) {
+      console.error("Failed to generate PDF", err);
     }
-    const element = document.getElementById('printable-po');
-    const filenameString = `Aarvi_${selectedHistoryTicket.category}_${selectedHistoryTicket.ticket_number}.pdf`;
-    const opt = {
-      margin:       [15, 15, 15, 15], 
-      filename:     filenameString,
-      image:        { type: 'jpeg', quality: 1 },
-      html2canvas:  { scale: 2, useCORS: true, scrollY: 0, windowHeight: element.scrollHeight, letterRendering: true },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak:    { mode: 'css', avoid: ['tr', 'td', 'p', 'h1', 'h2', 'h3', 'table', '.avoid-break'] }
-    };
-    window.html2pdf().set(opt).from(element).save();
+  };
+
+  // 🎯 NATIVE DOCX DOWNLOAD
+  const handleDownloadWord = async () => {
+    if (!selectedHistoryTicket) return;
+    
+    try {
+      const res = await axios.get(`${API_BASE_URL}/requisitions/${selectedHistoryTicket.ticket_number}/po`);
+      if (res.data && res.data.po_number) {
+        const downloadUrl = `${API_BASE_URL}/purchase-orders/${res.data.po_number}/download-docx`;
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.setAttribute('download', `Aarvi_PO_${res.data.po_number}.docx`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+    } catch (err) {
+      console.error("Failed to generate Word document", err);
+    }
   };
 
   const convertNumberToWords = (num) => {
@@ -382,17 +396,18 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   };
 
   const renderBrandedHeader = (docTitle, docRefPrefix) => {
+    // Generate a placeholder Ref ID if the PO hasn't been fully sealed yet
     const formattedRefId = selectedHistoryTicket?.ticket_number?.split('-').pop() || '16';
     return (
       <div className="w-full text-xs text-slate-700 font-sans relative avoid-break">
         <div className="w-full bg-white relative z-10 mb-1">
           <img src={Letterhead} alt="Aarvi Encon Limited Official Letterhead" className="w-full h-auto object-contain select-none" />
         </div>
-        <div className="mt-2 flex justify-between items-baseline border-t border-slate-400 pt-1 font-mono text-[11px] relative z-10" contentEditable="true">
+        <div className="mt-2 flex justify-between items-baseline border-t border-slate-400 pt-1 font-mono text-[11px] relative z-10">
           <span className="font-black text-slate-900">Ref: {docRefPrefix}/2026-27/{formattedRefId}</span>
           <span className="font-bold text-slate-800">Date: {new Date().toLocaleDateString('en-IN')}</span>
         </div>
-        <h1 className="text-base font-black text-slate-950 tracking-wider uppercase text-center mt-2 bg-slate-100 py-1 border-y border-slate-400 relative z-10" contentEditable="true">
+        <h1 className="text-base font-black text-slate-950 tracking-wider uppercase text-center mt-2 bg-slate-100 py-1 border-y border-slate-400 relative z-10">
           {docTitle}
         </h1>
       </div>
@@ -403,17 +418,10 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const currentYear = new Date().getFullYear();
   const nextYear = currentYear + 1;
 
-  // 🎯 Extract GRN Action Log
-  const grnLogEntry = historyLogs.find(l => 
-    l.action_taken.includes("Material Delivered") || 
-    l.action_taken.includes("Partial Delivery") || 
-    l.action_taken.includes("CRITICAL ALERT")
-  );
-
   return (
     <div className="space-y-6 pb-12 sm:px-2 md:px-4 lg:px-0">
       
-      {/* 🎯 DOCUMENT PREVIEW MODAL */}
+      {/* 🎯 UNIVERSAL IN-APP DOCUMENT PREVIEW MODAL */}
       {previewDoc && (
         <div 
           className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
@@ -433,13 +441,19 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
               </button>
             </div>
             <div className="flex-1 bg-slate-100 relative overflow-auto custom-scrollbar">
-              <iframe src={previewDoc.url} className="w-full h-full border-0" title="Document Preview" />
+              {previewDoc.url.match(/\.(jpeg|jpg|gif|png)$/i) != null ? (
+                <div className="min-h-full flex items-center justify-center p-4">
+                  <img src={previewDoc.url} alt={previewDoc.title} className="max-w-full h-auto rounded-lg shadow-sm" />
+                </div>
+              ) : (
+                <iframe src={previewDoc.url} className="w-full h-full border-0" title="Document Preview" />
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* DEEP CSS ISOLATION FOR PDF EXPORT */}
+      {/* ISOLATED STYLES FOR PDF PRINT */}
       <style>{`
         .avoid-break, p, tr, td, h1, h2, h3, table {
           page-break-inside: avoid !important;
@@ -475,12 +489,9 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         </div>
       )}
 
-      {/* ============================================================== */}
-      {/* VIEW A: ACTIVE SOURCING INBOX                                  */}
-      {/* ============================================================== */}
+      {/* VIEW A: ACTIVE SOURCING INBOX */}
       {activeTab === 'sourcing' && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
-          {/* TICKETS LIST */}
           <div className="xl:col-span-4 space-y-3">
             <h2 className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Awaiting Vendor Bids</h2>
             {sourcingTickets.length === 0 ? (
@@ -499,7 +510,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             )}
           </div>
           
-          {/* TICKET DETAIL VIEW */}
           <div id="sourcing-detail-view" className="xl:col-span-8 scroll-mt-24">
             {selectedTicket ? (
               <div className="space-y-6 animate-in fade-in duration-300">
@@ -515,7 +525,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                     <Send size={14} className="mr-1.5 inline" /> <span>Submit Matrix</span>
                   </Button>
                 </Card>
-
                 <div className="space-y-5">
                   {items.map((item) => (
                     <Card key={item.item_index} className="overflow-hidden border-slate-200 shadow-xs">
@@ -524,7 +533,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           <div className="flex flex-wrap items-center gap-2 mb-1.5">
                             <span className="bg-[#2c2a57] text-white text-[10px] font-black px-2 py-0.5 rounded font-mono">Row {item.item_index}</span>
                             
-                            {/* 🎯 EDITABLE QUANTITY BADGE */}
                             <div className="flex items-center bg-[#0b9c54]/10 border border-[#0b9c54]/20 rounded px-1.5 py-0.5">
                               <label className="text-[9px] sm:text-[10px] text-[#0b9c54] font-bold uppercase tracking-wider mr-1.5">
                                 Procure Qty:
@@ -538,7 +546,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 title="Edit Quantity if partial stock is already available"
                               />
                             </div>
-
                             <select
                               value={item.item_type || 'Consumable'}
                               onChange={(e) => handleItemClassificationChange(item.item_index, e.target.value)}
@@ -551,16 +558,14 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           <h3 className="text-xs md:text-sm font-bold text-[#2c2a57] leading-tight mt-1">{item.product_description}</h3>
                         </div>
                       </div>
-
                       <div className="p-3 sm:p-4 bg-white">
                         <div className="grid grid-cols-1 gap-4">
                           {(quotes[item.item_index] || []).map((quote, qIdx) => (
                             <div key={qIdx} className="bg-slate-50/50 border border-slate-200 rounded-xl p-3 sm:p-5 relative group hover:border-slate-400 transition-all">
-                              <button onClick={() => removeQuoteBox(item.item_index, qIdx)} className="absolute top-2 right-2 md:top-3 md:right-3 text-slate-400 hover:text-rose-600 transition-colors p-1"><Trash2 size={14} md:size={15} /></button>
+                              <button onClick={() => removeQuoteBox(item.item_index, qIdx)} className="absolute top-2 right-2 md:top-3 md:right-3 text-slate-400 hover:text-rose-600 transition-colors p-1"><Trash2 size={14} /></button>
                               <h4 className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Option {qIdx + 1}</h4>
                               
                               <div className="space-y-4">
-                                {/* Vendor Details Row (Responsive Stacking) */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
@@ -591,7 +596,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
-                                {/* Math & Contact Row (Responsive Stacking) */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Phone/Cell</label>
@@ -601,8 +605,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Email ID</label>
                                     <input type="email" value={quote.vendor_email} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_email', e.target.value)} placeholder="sales@vendor.com" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
-
-                                  {/* Unit Price Input triggers Auto-Math */}
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.amountLabel} *</label>
                                     <input 
@@ -613,8 +615,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                       className="w-full bg-emerald-50 border border-emerald-300 rounded-lg px-3 py-2 text-[11px] md:text-xs font-bold text-emerald-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all" 
                                     />
                                   </div>
-
-                                  {/* GST Input triggers Auto-Math */}
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">GST Percentage (%)</label>
                                     <input 
@@ -626,7 +626,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
-                                {/* Delivery Info Row */}
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.addressLabel}</label>
@@ -642,14 +641,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
-                                {/* Math Result & Terms Row */}
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
                                     <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
-
-                                  {/* CALCULATED NET VALUE DISPLAY */}
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
                                     <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner">
@@ -663,7 +659,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
-                                {/* Remarks Row */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">Contract / Service Custom Clauses</label>
@@ -675,7 +670,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
-                                {/* ATTACHMENT CONTROLLER LAYER */}
                                 <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-indigo-600 uppercase mb-1">
@@ -706,19 +700,21 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                         }}
                                       />
                                       {quote.file_url && (
-                                        <span className="text-[9px] sm:text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md shrink-0 animate-pulse text-center w-full sm:w-auto">
-                                          ✓ ATTACHED
-                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handlePreviewFile(quote.file_url, `Quotation Document`)}
+                                          className="text-[9px] sm:text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md shrink-0 text-center w-full sm:w-auto hover:bg-emerald-100 flex items-center gap-1 justify-center"
+                                        >
+                                          ✓ VIEW ATTACHED
+                                        </button>
                                       )}
                                     </div>
                                   </div>
                                 </div>
-
                               </div>
                             </div>
                           ))}
                           
-                          {/* Add Quote Option Button */}
                           <div onClick={() => addQuoteBox(item.item_index)} className="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center text-slate-500 hover:text-[#0b9c54] hover:border-[#0b9c54]/50 cursor-pointer py-4 shadow-3xs">
                             <Plus size={18} className="mb-1" />
                             <span className="text-[10px] sm:text-xs font-bold uppercase">Add Alternative Quote Option</span>
@@ -739,9 +735,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         </div>
       )}
 
-      {/* ============================================================== */}
-      {/* VIEW B: PURCHASE HISTORY LEDGER (DOCUMENT VIEWER)              */}
-      {/* ============================================================== */}
+      {/* VIEW B: PURCHASE HISTORY LEDGER */}
       {activeTab === 'history' && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
           
@@ -759,7 +753,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                   <div className="text-[9px] md:text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase tracking-tight w-max mb-2">Cost Center: {ticket.project_code}</div>
                   <p className="text-[11px] md:text-xs font-bold text-slate-600 truncate">{ticket.project_name}</p>
                   
-                  {/* EXACT SEALING TIMESTAMP */}
                   <div className="flex items-center space-x-1.5 mt-3 text-[9px] md:text-[10px] font-mono text-slate-600 bg-emerald-50/50 px-2 py-1.5 rounded-lg w-max border border-emerald-100">
                     <Clock size={12} className="text-[#0b9c54]" />
                     <span>Processed On: <strong className="text-slate-900">{ticket.action_date || "Date Unavailable"}</strong></span>
@@ -768,11 +761,9 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
               ))
             )}
           </div>
-
           <div id="isolated-print-wrapper" className="xl:col-span-8 print:col-span-12">
             <div id="history-detail-view" className="scroll-mt-24 space-y-6">
               
-              {/* 🎯 NEW: GRN & DISCREPANCY STATUS BANNER */}
               {selectedHistoryTicket && (
                 <>
                   {selectedHistoryTicket.status === 'Material Discrepancy Raised' && (
@@ -795,7 +786,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       )}
                     </Card>
                   )}
-
                   {selectedHistoryTicket.status === 'Partially Delivered' && (
                     <Card className="p-4 bg-amber-50 border-amber-200 text-amber-900 space-y-2 shadow-xs">
                       <div className="flex items-center justify-between">
@@ -815,7 +805,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       )}
                     </Card>
                   )}
-
                   {selectedHistoryTicket.status === 'Delivered - GRN Logged' && (
                     <Card className="p-4 bg-emerald-50 border-emerald-200 text-emerald-900 flex items-center justify-between shadow-xs">
                       <div className="flex items-center space-x-2.5">
@@ -838,12 +827,20 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       <Edit3 size={17} className="text-amber-400 animate-pulse" />
                       <span className="text-[10px] sm:text-xs uppercase font-bold tracking-tight text-amber-50">Live Editable Canvas • Locked Data</span>
                     </div>
-                    <button 
-                      onClick={handleDownloadPDF} 
-                      className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-2 px-5 py-2 text-xs font-bold shadow-xs w-full sm:w-auto"
-                    >
-                      <Download size={14} /> <span>Download Full PDF</span>
-                    </button>
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <button 
+                        onClick={handleDownloadWord} 
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all flex items-center justify-center space-x-2 px-4 py-2 text-xs font-bold shadow-xs w-full sm:w-auto"
+                      >
+                        <FileText size={14} /> <span className="hidden sm:inline">Word (.docx)</span>
+                      </button>
+                      <button 
+                        onClick={handleDownloadNativePDF} 
+                        className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-2 px-4 py-2 text-xs font-bold shadow-xs w-full sm:w-auto"
+                      >
+                        <Download size={14} /> <span>Vector PDF</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* 🎯 HORIZONTAL SCROLL WRAPPER FOR MOBILE PDF VIEW */}
@@ -938,7 +935,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                             <p className="avoid-break"><strong>7. BILLING:</strong><br/>Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
                             <p className="avoid-break"><strong>8. DELIVERY ADDRESS:</strong><br/>Contract Person: {primaryLine.site_contact_person || "Site Coordinator"}, Contact No.: {primaryLine.site_contact_phone || "N/A"}.<br/><span className="font-bold uppercase">{selectedHistoryTicket.project_name}</span><br/>{primaryLine.delivery_address || "Address Pending"}</p>
                             <p className="avoid-break"><strong>9. LEGAL COMPLIANCE:</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
-                            <p className="avoid-break">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.<br/><br/>Thanking you,<br/>Yours faithfully</p>
+                            <p className="avoid-break pt-2">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.<br/><br/>Thanking you,<br/>Yours faithfully</p>
                           </div>
                         </div>
                       )}
@@ -1221,9 +1218,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         </div>
                       )}
 
-                      {/* ========================================================= */}
-                      {/* 🎯 UNIVERSAL 2-COLUMN SIGNATURE STRIP */}
-                      {/* ========================================================= */}
+                      {/* UNIVERSAL SIGNATURE STRIP */}
                       <div className="pt-16 mt-16 flex justify-between items-end text-xs font-sans relative z-10 avoid-break" contentEditable="false">
                         <div className="w-64 text-left space-y-1">
                           <p className="text-[11px] text-slate-800 mb-10">Yours faithfully<br/><strong>For {selectedHistoryTicket.category === 'GOODS' || selectedHistoryTicket.category === 'FOOD' ? 'M/s. AARVI ENCON LTD.' : 'AARVI ENCON LIMITED'}</strong></p>
@@ -1235,7 +1230,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                             AEL-04-IMSF-PURCH-004
                           </div>
                         )}
-
                         <div className="w-64 text-right space-y-1">
                           <p className="text-[11px] text-slate-800 mb-10 text-center">{selectedHistoryTicket.category === 'GOODS' ? 'Signature & Seal of the Supplier' : 'Signature & seal of the contractor'}<br/>{selectedHistoryTicket.category === 'GOODS' ? 'Accepted & Agreed of the above Said Terms and Conditions' : 'accepted & agreed of the above said terms & conditions'}</p>
                           <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2 text-center">Accepted by {selectedHistoryTicket.category === 'GOODS' ? 'Supplier' : 'Contractor'}</span>
@@ -1253,7 +1247,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                 </div>
               )}
 
-              {/* 🎯 AUDIT LOGS TRAIL SECTION */}
+              {/* AUDIT LOGS TRAIL SECTION */}
               {selectedHistoryTicket && historyLogs.length > 0 && (
                 <Card className="p-4 space-y-4 bg-white border-slate-200">
                   <div className="flex items-center space-x-2 text-slate-500 font-bold text-xs uppercase tracking-wider">
@@ -1270,9 +1264,18 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           {log.action_taken}
                         </p>
                         {log.remarks && (
-                          <p className={`text-xs font-medium p-2 rounded border mt-1 ${log.action_taken.includes("CRITICAL ALERT") ? "bg-rose-50 border-rose-200 text-rose-800" : "bg-slate-50 border-slate-200 text-slate-700"}`}>
-                            {log.remarks}
-                          </p>
+                          <div className={`text-xs font-medium p-2 rounded border mt-1 flex flex-col gap-1 ${log.action_taken.includes("CRITICAL ALERT") ? "bg-rose-50 border-rose-200 text-rose-800" : "bg-slate-50 border-slate-200 text-slate-700"}`}>
+                            <span>{log.remarks.split(' | Proof')[0]}</span>
+                            {log.remarks.includes('Proof File:') && (
+                              <button
+                                type="button"
+                                onClick={() => handlePreviewFile(log.remarks.split('Proof File: ')[1], `Audit Attachment`)}
+                                className="text-indigo-600 hover:underline text-[10px] font-bold flex items-center gap-1 w-max mt-1"
+                              >
+                                <Paperclip size={11} /> View Attachment Proof
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     ))}
@@ -1284,7 +1287,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           </div>
         </div>
       )}
-
     </div>
   );
 }
