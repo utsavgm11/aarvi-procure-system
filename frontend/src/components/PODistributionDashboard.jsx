@@ -76,16 +76,24 @@ export default function PODistributionDashboard({ currentUser }) {
     }
   };
 
-  // 🎯 TRUE VECTOR PDF GENERATION (Selectable Text, E-Sign Compatible)
-  const handlePrintToPDF = () => {
-    // This triggers the browser's native PDF compiler using our strict @media print CSS
-    window.print();
+  // 🎯 TRUE NATIVE VECTOR PDF DOWNLOAD (Bypasses Browser Print Dialog)
+  const handleDownloadNativePDF = () => {
+    if (!selectedPo) return;
+    const downloadUrl = `${API_BASE_URL}/purchase-orders/${selectedPo.po_number}/download-pdf`;
+    
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.setAttribute('download', `Aarvi_PO_${selectedPo.po_number}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
   // 🎯 NATIVE DOCX DOWNLOAD
   const handleDownloadWord = () => {
     if (!selectedPo) return;
     const downloadUrl = `${API_BASE_URL}/purchase-orders/${selectedPo.po_number}/download-docx`;
+    
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.setAttribute('download', `Aarvi_PO_${selectedPo.po_number}.docx`);
@@ -177,72 +185,7 @@ export default function PODistributionDashboard({ currentUser }) {
         </div>
       )}
 
-      {/* 🎯 FLAWLESS A4 PRINT CSS ISOLATION */}
-      <style>{`
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 12mm;
-          }
-          
-          html, body {
-            background: #ffffff !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-
-          /* Hide everything in the app by default during print */
-          body * {
-            visibility: hidden;
-          }
-
-          /* Only show the printable PO container and its children */
-          #printable-po, #printable-po * {
-            visibility: visible;
-          }
-
-          /* Snap the document to the absolute top-left of the A4 paper */
-          #printable-po {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100% !important;
-            max-width: 100% !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            border: none !important;
-            box-shadow: none !important;
-          }
-
-          /* Prevent table columns from blowing out the right side */
-          table {
-            width: 100% !important;
-            table-layout: fixed !important;
-          }
-          th, td, p {
-            overflow-wrap: break-word !important;
-            word-wrap: break-word !important;
-          }
-
-          .print\\:hidden, .seal-footer {
-            display: none !important;
-          }
-
-          /* Smart page breaking */
-          .avoid-break {
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-          tr {
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-        }
-      `}</style>
-      
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4 print:hidden">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Contract Distribution Center</h1>
           <p className="text-sm text-slate-500 font-medium">Verify dynamically generated parameters and download native, e-signable documents.</p>
@@ -250,7 +193,7 @@ export default function PODistributionDashboard({ currentUser }) {
       </div>
 
       {alert && (
-        <div className={`p-4 rounded-xl flex items-center space-x-3 border print:hidden ${alert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
+        <div className={`p-4 rounded-xl flex items-center space-x-3 border ${alert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
           {alert.type === 'success' ? <CheckCircle2 size={18} className="flex-shrink-0" /> : <AlertCircle size={18} className="flex-shrink-0" />}
           <span className="font-semibold text-sm">{alert.message}</span>
         </div>
@@ -259,7 +202,7 @@ export default function PODistributionDashboard({ currentUser }) {
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
         
         {/* LEFT QUEUE */}
-        <div className="xl:col-span-3 space-y-3 print:hidden">
+        <div className="xl:col-span-3 space-y-3">
           <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Clearance Queue</h2>
           {poList.length === 0 ? (
             <Card className="p-6 text-center text-slate-400 border-dashed border-2 bg-white text-sm">Queue cleared.</Card>
@@ -286,11 +229,11 @@ export default function PODistributionDashboard({ currentUser }) {
         </div>
 
         {/* RIGHT PREVIEW CANVAS */}
-        <div className="xl:col-span-9 print:col-span-12">
+        <div className="xl:col-span-9">
           {selectedPo && poItems.length > 0 ? (
-            <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative print:border-none print:shadow-none">
+            <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative">
               
-              <div className="bg-slate-900 text-white p-4 flex justify-between items-center print:hidden">
+              <div className="bg-slate-900 text-white p-4 flex justify-between items-center">
                 <div className="flex items-center space-x-2.5">
                   <Edit3 size={17} className="text-amber-400 animate-pulse" />
                   <span className="text-xs uppercase font-bold tracking-tight text-amber-50">Live Document Verification View</span>
@@ -302,8 +245,9 @@ export default function PODistributionDashboard({ currentUser }) {
                   >
                     <FileText size={14} /> <span className="hidden sm:inline">Word (.docx)</span>
                   </button>
+                  {/* 🎯 CALLS PYTHON XTHML2PDF ENDPOINT */}
                   <button 
-                    onClick={handlePrintToPDF} 
+                    onClick={handleDownloadNativePDF} 
                     className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center space-x-2 px-4 py-2 text-xs font-bold shadow-xs"
                   >
                     <Download size={14} /> <span>Vector PDF</span>
@@ -312,11 +256,8 @@ export default function PODistributionDashboard({ currentUser }) {
               </div>
 
               {/* LIVE VIEW CONTAINER */}
-              <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 flex justify-center print:p-0 print:border-none print:bg-white">
-                <div 
-                  id="printable-po" 
-                  className="p-8 pb-32 space-y-6 font-sans bg-white select-text relative text-justify shadow-sm mx-auto w-full max-w-[800px] print:shadow-none print:p-0 print:max-w-none"
-                >
+              <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 flex justify-center">
+                <div className="p-8 pb-32 space-y-6 font-sans bg-white select-text relative text-justify shadow-sm mx-auto w-full max-w-[800px]">
                   
                   {/* ========================================================= */}
                   {/* 📦 1. GOODS / MATERIALS PO */}
