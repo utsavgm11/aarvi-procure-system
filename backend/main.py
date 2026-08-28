@@ -6,7 +6,6 @@ import io
 from typing import List, Optional
 from datetime import date, datetime
 from pydantic import BaseModel
-# 🎯 ADDED 'Form' to the imports to handle multipart/form-data
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -16,19 +15,20 @@ from sqlalchemy import or_
 from database import get_db
 from docxtpl import DocxTemplate
 import models
-# 🎯 NEW: Import the email service
 from email_service import send_workflow_email
-# 🎯 NEW: Import Cloudinary
 import cloudinary
 import cloudinary.uploader
 from cloudinary.utils import cloudinary_url
+
+# 🎯 NEW: Required for pure native Vector PDF generation
+from xhtml2pdf import pisa 
 
 # 1. System Logging Configurations
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AarviProcure")
 app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.1.0")
 
-# 🎯 NEW: Configure Cloudinary securely using Render Environment Variables
+# 🎯 Configure Cloudinary securely
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
     api_key=os.getenv("CLOUDINARY_API_KEY"),
@@ -36,24 +36,21 @@ cloudinary.config(
     secure=True
 )
 
-# Keep local storage ONLY for temporary processing (e.g., Quotations/PO docs)
 UPLOAD_DIR = "storage/quotation_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
-# 2. Complete CORS Cross-Origin Resource Sharing Rules
+# 2. Complete CORS Rules
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173",
-        "https://aarvi-procure-system.vercel.app",
-        "https://procure.aarviencon.com"], 
+    allow_origins=["http://localhost:5173", "https://aarvi-procure-system.vercel.app", "https://procure.aarviencon.com"], 
     allow_credentials=True,
     allow_methods=["*"], 
     allow_headers=["*"], 
 )
 
 # -------------------------------------------------------------------
-# PYDANTIC INCOMING DATA VALIDATORS (Data Contracts)
+# PYDANTIC INCOMING DATA VALIDATORS
 # -------------------------------------------------------------------
 class RequisitionRowItem(BaseModel):
     product_description: str
@@ -158,6 +155,7 @@ class FinanceApprovalPayload(BaseModel):
     selected_bids: Optional[dict] = None  
     items: Optional[List[UpdateRequisitionItem]] = None 
 
+
 # -------------------------------------------------------------------
 # STAGE 0: LIVE PERSONNEL ROUTING
 # -------------------------------------------------------------------
@@ -240,7 +238,6 @@ def raise_material_requisition(
                 status=initial_status
             )
     
-    logger.info(f"💾 [GRID SAVED] -> Requisition {ticket_number} pushed to {initial_status}.")
     return {"ticket_number": ticket_number, "status": initial_status}
 
 @app.post("/api/requisitions/direct-fast-track", status_code=201)
@@ -521,7 +518,6 @@ def attach_vendor_quotations(
         )
         db.add(db_quote)
         
-        # Evaluates single unit_price instead of net_amount_payable
         single_unit_price = float(quote.unit_price or 0.0)
         if single_unit_price > 250000:
             any_unit_price_exceeds_2_5l = True
@@ -594,7 +590,7 @@ def attach_vendor_quotations(
     return {"ticket_number": ticket_number, "status": ticket.status}
 
 # -------------------------------------------------------------------
-# STAGE 4 & 5: MANAGEMENT SIGN-OFF & AUTOMATED DOCUMENT COMPILATION
+# STAGE 4 & 5: MANAGEMENT SIGN-OFF
 # -------------------------------------------------------------------
 @app.post("/api/requisitions/{ticket_number}/action")
 def process_financial_signoff(
@@ -979,6 +975,159 @@ def get_purchase_orders_awaiting_signature(db: Session = Depends(get_db)):
         })
         
     return response
+
+# -------------------------------------------------------------------
+# 🎯 TRUE VECTOR PDF EXPORT (xhtml2pdf Engine)
+# -------------------------------------------------------------------
+@app.get("/api/purchase-orders/{po_number}/download-pdf")
+def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase Order not found.")
+        
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+    winning_quotes = db.query(models.Quotation).filter(
+        models.Quotation.ticket_number == po.ticket_number,
+        models.Quotation.is_selected == True
+    ).all()
+    
+    if not winning_quotes:
+        raise HTTPException(status_code=400, detail="No selected winning bids found.")
+        
+    primary_quote = winning_quotes[0]
+    base_grand_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
+    net_grand_total = sum(float(q.net_amount_payable or 0) for q in winning_quotes)
+    
+    # 🎯 Clean HTML Template for True Vector PDF
+    items_rows = ""
+    for idx, item in enumerate(winning_quotes, start=1):
+        items_rows += f"""
+        <tr>
+            <td style="text-align: center; border: 1px solid #94a3b8; padding: 6px;">0{idx}</td>
+            <td style="border: 1px solid #94a3b8; padding: 6px; font-weight: bold;">{item.product_description}</td>
+            <td style="text-align: center; border: 1px solid #94a3b8; padding: 6px;">{item.quantity or 1} Nos</td>
+            <td style="text-align: right; border: 1px solid #94a3b8; padding: 6px;">₹{float(item.base_total_value or 0):,.2f}</td>
+        </tr>
+        """
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            @page {{
+                size: a4 portrait;
+                margin: 15mm;
+            }}
+            body {{
+                font-family: Helvetica, Arial, sans-serif;
+                font-size: 10pt;
+                color: #1e293b;
+            }}
+            .header-title {{
+                font-size: 18pt;
+                font-weight: bold;
+                color: #2c2a57;
+                text-transform: uppercase;
+            }}
+            .table-main {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 15px;
+            }}
+            .table-main th {{
+                background-color: #f1f5f9;
+                border: 1px solid #94a3b8;
+                padding: 6px;
+                font-size: 9pt;
+                text-transform: uppercase;
+            }}
+            .terms-section {{
+                margin-top: 20px;
+                font-size: 8.5pt;
+                line-height: 1.4;
+            }}
+            .signature-table {{
+                width: 100%;
+                margin-top: 40px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div style="border-bottom: 2px solid #2c2a57; padding-bottom: 10px;">
+            <span class="header-title">AARVI ENCON LIMITED</span><br/>
+            <span style="font-size: 8pt; color: #64748b;">OFFICIAL PURCHASE ORDER</span>
+        </div>
+
+        <table style="width: 100%; margin-top: 15px;">
+            <tr>
+                <td style="width: 50%; vertical-align: top;">
+                    <strong>PO Number:</strong> {po.po_number}<br/>
+                    <strong>Date:</strong> {date.today().strftime('%d-%m-%Y')}<br/>
+                    <strong>Project Code:</strong> {ticket.project_code if ticket else 'N/A'}
+                </td>
+                <td style="width: 50%; vertical-align: top;">
+                    <strong>Vendor:</strong> M/s. {primary_quote.vendor_name}<br/>
+                    <strong>Address:</strong> {primary_quote.vendor_address or 'N/A'}<br/>
+                    <strong>Contact:</strong> {primary_quote.vendor_contact or 'N/A'}
+                </td>
+            </tr>
+        </table>
+
+        <table class="table-main">
+            <thead>
+                <tr>
+                    <th style="width: 10%;">Sr.</th>
+                    <th style="width: 50%;">Description</th>
+                    <th style="width: 15%;">Qty</th>
+                    <th style="width: 25%;">Total Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {items_rows}
+                <tr>
+                    <td colspan="3" style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 6px;">Grand Total:</td>
+                    <td style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 6px;">₹{net_grand_total:,.2f}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="terms-section">
+            <p><strong>Payment Terms:</strong> {primary_quote.payment_terms or '100% Payable on delivery'}</p>
+            <p><strong>Delivery Location:</strong> {primary_quote.delivery_address or 'As specified by site in-charge'}</p>
+            <p><strong>Standard Terms:</strong> This is a fixed-price purchase order. All materials supplied must strictly adhere to the technical specifications approved by Aarvi Encon Limited.</p>
+        </div>
+
+        <table class="signature-table">
+            <tr>
+                <td style="width: 50%;">
+                    <strong>For AARVI ENCON LIMITED</strong><br/><br/><br/>
+                    ___________________________<br/>
+                    Authorized Signatory
+                </td>
+                <td style="width: 50%; text-align: right;">
+                    <strong>Accepted By Vendor</strong><br/><br/><br/>
+                    ___________________________<br/>
+                    Signature & Seal
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+    pdf_buffer = io.BytesIO()
+    pisa_status = pisa.CreatePDF(html_content, dest=pdf_buffer)
+    
+    if pisa_status.err:
+        raise HTTPException(status_code=500, detail="PDF generation failed.")
+        
+    pdf_buffer.seek(0)
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=Aarvi_PO_{po.po_number}.pdf"}
+    )
 
 # -------------------------------------------------------------------
 # WORD DOCUMENT GENERATION ENGINE
@@ -1709,8 +1858,6 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
         })
         
     return response
-
-
 
 
 @app.put("/api/purchase-orders/{po_number}/disbursement")

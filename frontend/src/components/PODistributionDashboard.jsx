@@ -16,17 +16,6 @@ export default function PODistributionDashboard({ currentUser }) {
   const [actionLoading, setActionLoading] = useState(false);
   const [alert, setAlert] = useState(null);
   const [previewDoc, setPreviewDoc] = useState(null);
-  
-  const [pdfEngineReady, setPdfEngineReady] = useState(() => typeof window !== 'undefined' && !!window.html2pdf);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.html2pdf) return;
-    const script = document.createElement('script');
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js";
-    script.async = true;
-    script.onload = () => setPdfEngineReady(true);
-    document.body.appendChild(script);
-  }, []);
 
   const fetchReleasedPOs = async () => {
     setLoading(true);
@@ -87,58 +76,20 @@ export default function PODistributionDashboard({ currentUser }) {
     }
   };
 
-  // 🎯 A4 PDF DOWNLOAD ENGINE
-  const handleDownloadPDF = async () => {
-    if (!pdfEngineReady && !window.html2pdf) {
-      alert("PDF engine is still loading. Please wait a moment.");
-      return;
-    }
-
-    const element = document.getElementById('printable-po');
-    if (!element) return;
-
-    const filenameString = `Aarvi_${selectedPo?.category || 'PO'}_${selectedPo?.po_number}.pdf`;
-
-    // Temporarily force the PDF canvas to the exact printable A4 width.
-    const originalWidth = element.style.width;
-    const originalMinWidth = element.style.minWidth;
-    const originalMaxWidth = element.style.maxWidth;
-
-    element.style.width = '186mm';
-    element.style.minWidth = '186mm';
-    element.style.maxWidth = '186mm';
-
-    // Allow browser to finish layout before capture
-    await new Promise(resolve => requestAnimationFrame(resolve));
-
-    const opt = {
-      margin: [12, 12, 12, 12],
-      filename: filenameString,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        allowTaint: false,
-        scrollX: 0,
-        scrollY: 0,
-        letterRendering: true,
-        backgroundColor: '#ffffff'
-      },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-      pagebreak: {
-        mode: ['css', 'legacy'],
-        avoid: ['tr', 'td', 'p', 'h1', 'h2', 'h3', 'table', '.avoid-break']
-      }
-    };
-
-    try {
-      await window.html2pdf().set(opt).from(element).save();
-    } finally {
-      // Restore preview dimensions
-      element.style.width = originalWidth;
-      element.style.minWidth = originalMinWidth;
-      element.style.maxWidth = originalMaxWidth;
-    }
+  // 🎯 NATIVE VECTOR PDF DOWNLOAD (E-Sign Compatible)
+  const handleDownloadPDF = () => {
+    if (!selectedPo) return;
+    
+    // Point directly to the new python xhtml2pdf backend engine
+    const downloadUrl = `${API_BASE_URL}/purchase-orders/${selectedPo.po_number}/download-pdf`;
+    
+    // Triggers direct browser download of the true PDF file
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.setAttribute('download', `Aarvi_PO_${selectedPo.po_number}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
   const convertNumberToWords = (num) => {
@@ -224,7 +175,7 @@ export default function PODistributionDashboard({ currentUser }) {
         </div>
       )}
 
-      {/* 🎯 UPDATED A4 PDF CSS ISOLATION */}
+      {/* CSS ISOLATION */}
       <style>{`
         .pdf-document {
           width: 186mm;
@@ -253,32 +204,6 @@ export default function PODistributionDashboard({ currentUser }) {
         .pdf-document tr {
           page-break-inside: avoid !important;
           break-inside: avoid !important;
-        }
-
-        @media print {
-          @page {
-            size: A4 portrait;
-            margin: 12mm;
-          }
-
-          html, body {
-            background: #ffffff !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-
-          .pdf-document {
-            width: 186mm !important;
-            min-width: 186mm !important;
-            max-width: 186mm !important;
-            margin: 0 auto !important;
-            padding-left: 0 !important;
-            padding-right: 0 !important;
-            box-shadow: none !important;
-          }
-
-          .print\\:hidden, nav, aside, header, button, .bg-slate-900, .seal-footer { display: none !important; }
-          #root, main, .grid, .xl\\:col-span-9, #isolated-print-wrapper, .bg-white { display: block !important; width: 100% !important; max-width: 100% !important; background: #ffffff !important; margin: 0 !important; padding: 0 !important; border: none !important; box-shadow: none !important; position: static !important; overflow: visible !important; }
         }
       `}</style>
       
@@ -343,7 +268,6 @@ export default function PODistributionDashboard({ currentUser }) {
                 </button>
               </div>
 
-              {/* 🎯 A4 CANVAS CONTAINER */}
               <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 print:p-0 print:border-none print:bg-white flex justify-center">
                 <div 
                   id="printable-po" 
@@ -467,7 +391,7 @@ export default function PODistributionDashboard({ currentUser }) {
                       <p className="text-xs -mt-2 avoid-break w-full">The subject of the present Contract is the vehicle owned by the Contractor having the following characteristics & providing services for the following sites as & when required:-</p>
                       
                       <div className="avoid-break mt-2 w-full">
-                        <table className="w-full text-left border-collapse border border-slate-400">
+                        <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
                           <thead>
                             <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
                               <th className="py-2 px-2 border-r border-slate-400 w-[20%]">Project Site Name</th>
@@ -594,7 +518,7 @@ export default function PODistributionDashboard({ currentUser }) {
                       <p className="text-xs -mt-2 avoid-break w-full">The subject of the present Contract is the Guest House owned by the Contractor, having the following characteristics & providing service for the following sites as & when required:-</p>
                       
                       <div className="avoid-break mt-2 w-full">
-                        <table className="w-full text-left border-collapse border border-slate-400">
+                        <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
                           <thead>
                             <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
                               <th className="py-2 px-2 border-r border-slate-400 w-[20%]">Project Site Name</th>
