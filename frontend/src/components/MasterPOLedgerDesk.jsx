@@ -5,7 +5,7 @@ import {
   FileCheck, Search, ChevronDown, ChevronUp, Landmark, Layers3, 
   Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
   UploadCloud, Paperclip, Trash2, FileText, CheckCircle2,
-  ShieldAlert, AlertOctagon, Wallet ,ExternalLink
+  ShieldAlert, AlertOctagon, Wallet, ExternalLink
 } from 'lucide-react';
 import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
 
@@ -19,6 +19,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [selectedPoForView, setSelectedPoForView] = useState(null);
   const [poItems, setPoItems] = useState([]);
   
+  // 🎯 Modal Preview State
+  const [previewDoc, setPreviewDoc] = useState(null);
+
   // Store dynamically fetched history logs for expanded rows
   const [rowLogs, setRowLogs] = useState({});
 
@@ -31,9 +34,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [taxInvoiceForms, setTaxInvoiceForms] = useState({});
   const [poFileForms, setPoFileForms] = useState({});
   
-  const [editingInvoices, setEditingInvoices] = useState({}); // Controls PI edit form
-  const [editingTaxInvoices, setEditingTaxInvoices] = useState({}); // Controls Tax Invoice edit form
-  const [editingPOs, setEditingPOs] = useState({}); // Controls Signed PO edit form
+  const [editingInvoices, setEditingInvoices] = useState({});
+  const [editingTaxInvoices, setEditingTaxInvoices] = useState({});
+  const [editingPOs, setEditingPOs] = useState({});
   
   const isPurchaseExecutive = currentUser?.role === 'Purchase Executive';
 
@@ -84,12 +87,10 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     return () => { isMounted = false; clearTimeout(timer); };
   }, [fetchLedgerPOs]);
 
-  // Fetch History Log when expanding a row to see exact GRN details and Payment history
   const toggleExpandRow = async (poNumber, ticketNumber) => {
     const isCurrentlyExpanded = !!expandedRows[poNumber];
     setExpandedRows(prev => ({ ...prev, [poNumber]: !isCurrentlyExpanded }));
     
-    // Only fetch if we are opening it and don't already have the logs
     if (!isCurrentlyExpanded && !rowLogs[poNumber]) {
       try {
         const res = await axios.get(`${API_BASE_URL}/requisitions/${ticketNumber}/history`);
@@ -98,6 +99,13 @@ export default function MasterPOLedgerDesk({ currentUser }) {
         console.error("Failed to fetch row history logs", err);
       }
     }
+  };
+
+  // 🎯 HELPER: Handles Opening Cloudinary Documents in Modal
+  const handlePreviewFile = (url, title) => {
+    if (!url) return;
+    let fullUrl = url.startsWith('/') ? `https://aarvi-procure-system.onrender.com${url}` : url;
+    setPreviewDoc({ url: fullUrl, title });
   };
 
   // --- Signed PO Form Handlers ---
@@ -273,6 +281,38 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   return (
     <div className="space-y-6 relative sm:px-2 md:px-4 lg:px-0 pb-12">
       
+      {/* 🎯 IN-APP MODAL DOCUMENT VIEWER */}
+      {previewDoc && (
+        <div 
+          className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
+          onClick={() => setPreviewDoc(null)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-[#2c2a57] p-4 text-white flex justify-between items-center shrink-0 z-10">
+              <div className="flex items-center gap-2">
+                <FileText size={18} className="text-indigo-300" />
+                <h3 className="font-extrabold text-sm uppercase tracking-wider">{previewDoc.title}</h3>
+              </div>
+              <button onClick={() => setPreviewDoc(null)} className="text-slate-300 hover:text-white bg-white/10 p-1.5 rounded-full transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 bg-slate-100 relative overflow-auto custom-scrollbar">
+              {previewDoc.url.match(/\.(jpeg|jpg|gif|png)$/i) != null ? (
+                <div className="min-h-full flex items-center justify-center p-4">
+                  <img src={previewDoc.url} alt={previewDoc.title} className="max-w-full h-auto rounded-lg shadow-sm" />
+                </div>
+              ) : (
+                <iframe src={previewDoc.url} className="w-full h-full border-0" title="Document Preview" />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SECTION VIEW A: DOCUMENT PREVIEW */}
       {selectedPoForView ? (
         <div className="space-y-4 animate-in fade-in duration-200 pb-10">
@@ -480,6 +520,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                     </div>
 
                     <button 
+                      type="button"
                       onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} 
                       className="w-full py-2 flex items-center justify-center gap-2 text-xs font-bold text-[#2c2a57] bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200"
                     >
@@ -504,12 +545,22 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                            <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Documents</span>
                            <div className="flex flex-col gap-2">
                               {po.signed_po_url ? (
-                                <a href={po.signed_po_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 px-3 py-2 rounded-lg hover:bg-indigo-50 flex justify-between items-center">
+                                <button type="button" onClick={() => handlePreviewFile(po.signed_po_url, `Signed PO: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 px-3 py-2 rounded-lg hover:bg-indigo-50 flex justify-between items-center">
                                   <span>✍️ Signed PO</span><ExternalLink size={12}/>
-                                </a>
+                                </button>
                               ) : (
-                                <button onClick={() => openPoDocumentSection(po)} className="text-[10px] font-bold text-slate-700 bg-white border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-100 flex justify-between items-center">
+                                <button type="button" onClick={() => openPoDocumentSection(po)} className="text-[10px] font-bold text-slate-700 bg-white border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-100 flex justify-between items-center">
                                   <span>📄 View System PO</span><ExternalLink size={12}/>
+                                </button>
+                              )}
+                              {po.proforma_invoice_url && (
+                                <button type="button" onClick={() => handlePreviewFile(po.proforma_invoice_url, `Proforma Invoice: ${po.invoice_no || po.po_number}`)} className="text-[10px] font-bold text-amber-700 bg-white border border-amber-200 px-3 py-2 rounded-lg hover:bg-amber-50 flex justify-between items-center">
+                                  <span>📄 PI {po.invoice_no ? `(${po.invoice_no})` : ''}</span><ExternalLink size={12}/>
+                                </button>
+                              )}
+                              {po.tax_invoice_url && (
+                                <button type="button" onClick={() => handlePreviewFile(po.tax_invoice_url, `Tax Invoice: ${po.tax_invoice_no || po.po_number}`)} className="text-[10px] font-bold text-emerald-700 bg-white border border-emerald-200 px-3 py-2 rounded-lg hover:bg-emerald-50 flex justify-between items-center">
+                                  <span>🧾 Tax Inv {po.tax_invoice_no ? `(${po.tax_invoice_no})` : ''}</span><ExternalLink size={12}/>
                                 </button>
                               )}
                            </div>
@@ -539,9 +590,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   <p className="font-bold text-slate-800">{log.remarks.split(' | ')[0]}</p>
                                   <p className="text-[9px] text-slate-400 mt-1 font-mono">{log.timestamp.split(' ')[0]}</p>
                                   {log.remarks.includes('Proof File:') && (
-                                    <a href={log.remarks.split('Proof File: ')[1]} target="_blank" rel="noopener noreferrer" className="mt-2 text-indigo-600 bg-indigo-50 px-2 py-1 rounded inline-flex items-center gap-1 font-bold">
+                                    <button type="button" onClick={() => handlePreviewFile(log.remarks.split('Proof File: ')[1], `Bank Receipt: ${po.po_number}`)} className="mt-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded inline-flex items-center gap-1 font-bold transition-colors">
                                       <Paperclip size={10} /> View Bank Receipt
-                                    </a>
+                                    </button>
                                   )}
                                 </div>
                               ))}
@@ -687,9 +738,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs group">
                                     <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#2c2a57]"/> Order Document</span>
                                     <div className="flex items-center gap-1.5">
-                                      <button onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-1.5 py-0.5 bg-slate-100 rounded">View PO</button>
+                                      <button type="button" onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-1.5 py-0.5 bg-slate-100 rounded">View PO</button>
                                       {po.signed_po_url ? (
-                                        <a href={po.signed_po_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-700 hover:underline px-1.5 py-0.5 bg-emerald-50 rounded">Signed</a>
+                                        <button type="button" onClick={() => handlePreviewFile(po.signed_po_url, `Signed PO: ${po.po_number}`)} className="text-[10px] font-black text-emerald-700 hover:underline px-1.5 py-0.5 bg-emerald-50 rounded flex items-center gap-1">Signed</button>
                                       ) : (
                                         isPurchaseExecutive && <button onClick={() => toggleEditPO(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:border-indigo-400 bg-slate-50">+ Add Signed</button>
                                       )}
@@ -724,14 +775,14 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                     <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-amber-500"/> Proforma Invoice</span>
                                     {po.proforma_invoice_url ? (
                                       <div className="flex items-center gap-1.5">
-                                        <a href={po.proforma_invoice_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-amber-600 hover:underline px-2 py-0.5 bg-amber-50 rounded">View PI</a>
+                                        <button type="button" onClick={() => handlePreviewFile(po.proforma_invoice_url, `Proforma Invoice: ${po.invoice_no || po.po_number}`)} className="text-[10px] font-black text-amber-600 hover:underline px-2 py-0.5 bg-amber-50 rounded">View PI</button>
                                         {isPurchaseExecutive && (
-                                          <button onClick={() => handleDeleteInvoiceFile(po.po_number)} className="text-slate-300 hover:text-rose-500 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={12}/></button>
+                                          <button type="button" onClick={() => handleDeleteInvoiceFile(po.po_number)} className="text-slate-300 hover:text-rose-500 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={12}/></button>
                                         )}
                                       </div>
                                     ) : (
                                       isPurchaseExecutive ? (
-                                        <button onClick={() => toggleEditInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-amber-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 bg-slate-50">+ Add PI</button>
+                                        <button type="button" onClick={() => toggleEditInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-amber-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 bg-slate-50">+ Add PI</button>
                                       ) : <span className="text-[9px] text-slate-400 italic">Not Uploaded</span>
                                     )}
                                   </div>
@@ -742,7 +793,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   <div className="border border-emerald-300 bg-white p-2.5 rounded-xl shadow-md space-y-2 z-10">
                                     <div className="flex justify-between items-center mb-1">
                                       <span className="text-[9px] font-black uppercase text-emerald-600">Upload Final Tax Invoice</span>
-                                      <button onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
+                                      <button type="button" onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
                                     </div>
                                     <div className="flex gap-2">
                                       <input type="text" value={taxForm.tax_invoice_no} onChange={(e) => handleTaxInputChange(po.po_number, 'tax_invoice_no', e.target.value)} placeholder="Tax Inv No." className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] w-1/2 outline-none" />
@@ -753,19 +804,19 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                         <input type="file" accept=".pdf,.png,.jpg" onChange={(e) => handleTaxFileChange(po.po_number, e)} className="hidden" />
                                         <UploadCloud size={10} className="mr-1"/> Attach Tax Inv
                                       </label>
-                                      <button onClick={() => handleSaveTaxInvoiceDetails(po.po_number)} className="bg-[#0b9c54] text-white font-bold text-[9px] px-4 py-1.5 rounded">Submit</button>
+                                      <button type="button" onClick={() => handleSaveTaxInvoiceDetails(po.po_number)} className="bg-[#0b9c54] text-white font-bold text-[9px] px-4 py-1.5 rounded">Submit</button>
                                     </div>
                                   </div>
                                 ) : (
                                   <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs group">
                                     <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#0b9c54]"/> Final Tax Invoice</span>
                                     {po.tax_invoice_url ? (
-                                      <a href={po.tax_invoice_url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-black text-emerald-700 hover:underline px-2 py-0.5 bg-emerald-50 rounded flex items-center gap-1">
+                                      <button type="button" onClick={() => handlePreviewFile(po.tax_invoice_url, `Tax Invoice: ${po.tax_invoice_no || po.po_number}`)} className="text-[10px] font-black text-emerald-700 hover:underline px-2 py-0.5 bg-emerald-50 rounded flex items-center gap-1">
                                         View
-                                      </a>
+                                      </button>
                                     ) : (
                                       isPurchaseExecutive ? (
-                                        <button onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-emerald-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 bg-slate-50">+ Add Tax Inv</button>
+                                        <button type="button" onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-emerald-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 bg-slate-50">+ Add Tax Inv</button>
                                       ) : <span className="text-[9px] text-slate-400 italic">Not Uploaded</span>
                                     )}
                                   </div>
@@ -794,9 +845,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                       <div className="flex items-center gap-4 mt-3">
                                         <span className="text-[10px] text-slate-500 font-mono bg-white px-2 py-1 rounded border border-slate-200">Inspector: {grnLogEntry.user_name} ({grnLogEntry.timestamp.split(' ')[0]})</span>
                                         {grnLogEntry.remarks.includes('Proof File:') && (
-                                          <a href={grnLogEntry.remarks.split('Proof File: ')[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1 transition-colors">
+                                          <button type="button" onClick={() => handlePreviewFile(grnLogEntry.remarks.split('Proof File: ')[1], `GRN Proof: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1 transition-colors">
                                             <Paperclip size={12} /> View Inspector's Photo Proof
-                                          </a>
+                                          </button>
                                         )}
                                       </div>
                                     </div>
@@ -849,9 +900,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                               </div>
                                               {log.remarks.includes('Proof File:') && (
                                                 <div className="flex justify-end pt-2 border-t border-slate-50">
-                                                  <a href={log.remarks.split('Proof File: ')[1]} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1.5 transition-colors">
+                                                  <button type="button" onClick={() => handlePreviewFile(log.remarks.split('Proof File: ')[1], `Bank Receipt: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1.5 transition-colors">
                                                     <Wallet size={12} /> View Bank Transfer Receipt
-                                                  </a>
+                                                  </button>
                                                 </div>
                                               )}
                                             </div>

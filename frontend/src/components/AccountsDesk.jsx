@@ -91,10 +91,7 @@ export default function AccountsDesk({ currentUser }) {
   // 🎯 HELPER: Handles Opening Cloudinary Documents in Modal
   const handlePreview = (url, title) => {
     if (!url) return;
-    let fullUrl = url;
-    if (url.startsWith('/')) {
-      fullUrl = `https://aarvi-procure-system.onrender.com${url}`;
-    }
+    let fullUrl = url.startsWith('/') ? `https://aarvi-procure-system.onrender.com${url}` : url;
     setPreviewDoc({ url: fullUrl, title });
   };
 
@@ -178,14 +175,14 @@ export default function AccountsDesk({ currentUser }) {
       // Include "Partially Disbursed" in pending tab
       const matchesTab = activeTab === 'pending' 
         ? (po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed')
-        : po.status === 'Dispatched';
+        : (po.status === 'Dispatched' || po.status === 'Partially Delivered' || po.status === 'Material Discrepancy Raised' || po.status === 'Delivered - GRN Logged');
 
       return matchesSearch && matchesTab;
     });
   }, [orders, searchQuery, activeTab]);
 
   const pendingCount = useMemo(() => orders.filter(o => o.status === 'PI Approved - Sent to Accounts' || o.status === 'Partially Disbursed').length, [orders]);
-  const completedCount = useMemo(() => orders.filter(o => o.status === 'Dispatched').length, [orders]);
+  const completedCount = useMemo(() => orders.filter(o => o.status === 'Dispatched' || o.status === 'Partially Delivered' || o.status === 'Material Discrepancy Raised' || o.status === 'Delivered - GRN Logged').length, [orders]);
 
   return (
     <div className="space-y-6 relative pb-10 sm:px-2 md:px-4 lg:px-0">
@@ -452,6 +449,11 @@ export default function AccountsDesk({ currentUser }) {
                         <div key={idx} className="bg-white p-2 border border-slate-200 rounded text-[10px] space-y-1">
                           <p className="font-bold text-slate-700">{log.remarks}</p>
                           <p className="text-[9px] font-mono text-slate-400">Logged on: {log.timestamp}</p>
+                          {log.remarks.includes('Proof File:') && (
+                            <button onClick={() => handlePreview(log.remarks.split('Proof File: ')[1], `Payment Advice`)} className="mt-1 text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded w-max flex items-center gap-1">
+                              <Paperclip size={10} /> View Bank Receipt
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
