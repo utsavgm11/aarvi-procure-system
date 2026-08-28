@@ -87,8 +87,8 @@ export default function PODistributionDashboard({ currentUser }) {
     }
   };
 
-  // 🎯 FIXED A4 PDF DOWNLOAD ENGINE (Strict 794px Width Capture)
-  const handleDownloadPDF = () => {
+  // 🎯 A4 PDF DOWNLOAD ENGINE
+  const handleDownloadPDF = async () => {
     if (!pdfEngineReady && !window.html2pdf) {
       alert("PDF engine is still loading. Please wait a moment.");
       return;
@@ -99,24 +99,46 @@ export default function PODistributionDashboard({ currentUser }) {
 
     const filenameString = `Aarvi_${selectedPo?.category || 'PO'}_${selectedPo?.po_number}.pdf`;
 
+    // Temporarily force the PDF canvas to the exact printable A4 width.
+    const originalWidth = element.style.width;
+    const originalMinWidth = element.style.minWidth;
+    const originalMaxWidth = element.style.maxWidth;
+
+    element.style.width = '186mm';
+    element.style.minWidth = '186mm';
+    element.style.maxWidth = '186mm';
+
+    // Allow browser to finish layout before capture
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
     const opt = {
-      margin:       [8, 8, 8, 8], 
-      filename:     filenameString,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { 
-        scale: 2, 
-        useCORS: true, 
-        scrollY: 0,
+      margin: [12, 12, 12, 12],
+      filename: filenameString,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        allowTaint: false,
         scrollX: 0,
-        width: 794,
-        windowWidth: 794,
-        letterRendering: true
+        scrollY: 0,
+        letterRendering: true,
+        backgroundColor: '#ffffff'
       },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak:    { mode: ['css', 'legacy'], avoid: ['tr', 'td', 'p', 'h1', 'h2', 'h3', 'table', '.avoid-break'] }
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
+      pagebreak: {
+        mode: ['css', 'legacy'],
+        avoid: ['tr', 'td', 'p', 'h1', 'h2', 'h3', 'table', '.avoid-break']
+      }
     };
 
-    window.html2pdf().set(opt).from(element).save();
+    try {
+      await window.html2pdf().set(opt).from(element).save();
+    } finally {
+      // Restore preview dimensions
+      element.style.width = originalWidth;
+      element.style.minWidth = originalMinWidth;
+      element.style.maxWidth = originalMaxWidth;
+    }
   };
 
   const convertNumberToWords = (num) => {
@@ -202,13 +224,59 @@ export default function PODistributionDashboard({ currentUser }) {
         </div>
       )}
 
+      {/* 🎯 UPDATED A4 PDF CSS ISOLATION */}
       <style>{`
-        .avoid-break, p, tr, td, h1, h2, h3, table {
+        .pdf-document {
+          width: 186mm;
+          box-sizing: border-box;
+          background: #ffffff;
+          overflow: visible !important;
+        }
+
+        .pdf-document table {
+          width: 100% !important;
+          max-width: 100% !important;
+          table-layout: fixed !important;
+        }
+
+        .pdf-document th,
+        .pdf-document td {
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+
+        .avoid-break {
           page-break-inside: avoid !important;
           break-inside: avoid !important;
         }
+
+        .pdf-document tr {
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+        }
+
         @media print {
-          html, body { background: #ffffff !important; color: #000000 !important; margin: 0 !important; padding: 0 !important; }
+          @page {
+            size: A4 portrait;
+            margin: 12mm;
+          }
+
+          html, body {
+            background: #ffffff !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          .pdf-document {
+            width: 186mm !important;
+            min-width: 186mm !important;
+            max-width: 186mm !important;
+            margin: 0 auto !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            box-shadow: none !important;
+          }
+
           .print\\:hidden, nav, aside, header, button, .bg-slate-900, .seal-footer { display: none !important; }
           #root, main, .grid, .xl\\:col-span-9, #isolated-print-wrapper, .bg-white { display: block !important; width: 100% !important; max-width: 100% !important; background: #ffffff !important; margin: 0 !important; padding: 0 !important; border: none !important; box-shadow: none !important; position: static !important; overflow: visible !important; }
         }
@@ -275,34 +343,40 @@ export default function PODistributionDashboard({ currentUser }) {
                 </button>
               </div>
 
-              {/* 🎯 FIXED A4 CANVAS CONTAINER (Exact 794px Width) */}
+              {/* 🎯 A4 CANVAS CONTAINER */}
               <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 print:p-0 print:border-none print:bg-white flex justify-center">
                 <div 
                   id="printable-po" 
-                  className="p-8 pb-32 space-y-6 font-sans bg-white select-text relative text-justify shadow-sm print:shadow-none print:min-w-0"
-                  style={{ width: '794px', minWidth: '794px', maxWidth: '794px', boxSizing: 'border-box' }}
+                  className="pdf-document px-[12mm] pt-[10mm] pb-[18mm] space-y-6 font-sans bg-white select-text relative text-justify shadow-sm print:shadow-none mx-auto"
+                  style={{ width: '186mm', maxWidth: '186mm', minWidth: '186mm', boxSizing: 'border-box' }}
                 >
                   
+                  <div className="hidden print:block print:fixed print:top-0 print:left-0 print:z-0 w-12 pt-3 pl-3">
+                    <img src={aarviLogo} alt="Aarvi running logo" className="w-full h-auto object-contain opacity-90" />
+                  </div>
+
+                  {/* ========================================================= */}
                   {/* 📦 1. GOODS / MATERIALS PO */}
+                  {/* ========================================================= */}
                   {selectedPo.category === 'GOODS' && (
                     <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                       {renderBrandedHeader("Purchase Order", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-PO`)}
                       
-                      <div className="text-sm transition-all avoid-break" contentEditable="true">
+                      <div className="text-sm transition-all avoid-break w-full" contentEditable="true">
                         <p className="font-bold text-slate-900 uppercase">M/s. {primaryLine.vendor_name}</p>
                         <p className="text-slate-600 leading-tight w-3/4">{primaryLine.vendor_address || "Address Not Provided"}</p>
                         <p className="text-slate-600 font-mono mt-1">Cell No.: {primaryLine.vendor_contact || "N/A"}</p>
                         <p className="text-slate-600 font-mono">EMAIL:- {primaryLine.vendor_email || "N/A"}</p>
                       </div>
 
-                      <div contentEditable="true" className="space-y-1 avoid-break">
+                      <div contentEditable="true" className="space-y-1 avoid-break w-full">
                         <p className="font-bold text-sm text-slate-900 mt-4">Subject: Purchase Order for {primaryLine.product_description?.split(' ')[0] || 'Materials'}.</p>
                         <p className="text-xs text-slate-700 mt-2">Dear Sir,</p>
                         <p className="text-xs text-slate-700">With reference to Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'recent submission'}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of {primaryLine.product_description || 'goods'} with your company.</p>
                       </div>
 
                       <div className="avoid-break mt-4 w-full">
-                        <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
+                        <table className="w-full text-left border-collapse border border-slate-400">
                           <thead>
                             <tr className="text-[10px] uppercase font-black bg-slate-50 border-b border-slate-400 text-slate-700">
                               <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Sr.No.</th>
@@ -357,7 +431,7 @@ export default function PODistributionDashboard({ currentUser }) {
                         <div className="col-span-8 font-bold">{selectedPo.project_name}</div>
                       </div>
 
-                      <p className="font-bold text-[11px] mt-4 avoid-break">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
+                      <p className="font-bold text-[11px] mt-4 avoid-break w-full">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
 
                       <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3 w-full">
                         <p className="font-bold avoid-break">The placement of order is subject to the following Terms & Conditions:-</p>
@@ -370,7 +444,7 @@ export default function PODistributionDashboard({ currentUser }) {
                         <p className="avoid-break"><strong>7. BILLING:</strong><br/>Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
                         <p className="avoid-break"><strong>8. DELIVERY ADDRESS:</strong><br/>Contract Person: {primaryLine.site_contact_person || "Site Coordinator"}, Contact No.: {primaryLine.site_contact_phone || "N/A"}.<br/><span className="font-bold uppercase">{selectedPo.project_name}</span><br/>{primaryLine.delivery_address || "Address Pending"}</p>
                         <p className="avoid-break"><strong>9. LEGAL COMPLIANCE:</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
-                        <p className="avoid-break">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.<br/><br/>Thanking you,<br/>Yours faithfully</p>
+                        <p className="avoid-break pt-2">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.<br/><br/>Thanking you,<br/>Yours faithfully</p>
                       </div>
                     </div>
                   )}
@@ -380,20 +454,20 @@ export default function PODistributionDashboard({ currentUser }) {
                     <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                       {renderBrandedHeader("VEHICLE RENTAL CONTRACT", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-PO`)}
                       
-                      <div className="text-sm transition-all avoid-break" contentEditable="true">
+                      <div className="text-sm transition-all avoid-break w-full" contentEditable="true">
                         <p className="font-bold text-slate-900">M/s. {primaryLine.vendor_name}</p>
-                        <p className="text-slate-600 leading-normal w-1/2">{primaryLine.vendor_address || "Address Reference Pending"}</p>
+                        <p className="text-slate-600 leading-normal w-3/4">{primaryLine.vendor_address || "Address Reference Pending"}</p>
                         <p className="text-slate-800 font-bold mt-4">Subject: Rental Contract for Hiring Vehicle for M/s. Aarvi Encon Ltd's - [{selectedPo.project_name}]</p>
                         <p className="mt-4 text-xs text-slate-800">Dear Sir,</p>
                         <p className="text-xs mt-2">With reference to your quotation the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place order for Hiring Vehicle with you as per the terms & conditions mentioned in this contract.</p>
                         <p className="text-xs mt-2">Mr. {primaryLine.vendor_name} hereinafter referred to as the "Contractor" of Vehicle, and M/s. Aarvi Encon Ltd hereinafter referred to as the "Client".</p>
                       </div>
 
-                      <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break">Article 1</p>
-                      <p className="text-xs -mt-2 avoid-break">The subject of the present Contract is the vehicle owned by the Contractor having the following characteristics & providing services for the following sites as & when required:-</p>
+                      <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break w-full">Article 1</p>
+                      <p className="text-xs -mt-2 avoid-break w-full">The subject of the present Contract is the vehicle owned by the Contractor having the following characteristics & providing services for the following sites as & when required:-</p>
                       
                       <div className="avoid-break mt-2 w-full">
-                        <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
+                        <table className="w-full text-left border-collapse border border-slate-400">
                           <thead>
                             <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
                               <th className="py-2 px-2 border-r border-slate-400 w-[20%]">Project Site Name</th>
@@ -507,20 +581,20 @@ export default function PODistributionDashboard({ currentUser }) {
                     <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                       {renderBrandedHeader("GUEST HOUSE RENTAL CONTRACT", `AEL/${primaryLine.vendor_name?.split(' ')[0]?.toUpperCase() || 'GH'}-PO`)}
                       
-                      <div className="text-sm transition-all avoid-break" contentEditable="true">
+                      <div className="text-sm transition-all avoid-break w-full" contentEditable="true">
                         <p className="font-bold text-slate-900">M/s. {primaryLine.vendor_name}</p>
-                        <p className="text-slate-600 leading-normal w-1/2">{primaryLine.vendor_address || "Address Pending"}</p>
+                        <p className="text-slate-600 leading-normal w-3/4">{primaryLine.vendor_address || "Address Pending"}</p>
                         <p className="text-slate-800 font-bold mt-4">Subject: Rental Contract for Guest House for M/s. Aarvi Encon Ltd's - [{selectedPo.project_name}]</p>
                         <p className="mt-4 text-xs text-slate-800">Dear Sir,</p>
                         <p className="text-xs mt-2">With reference to your quotation of the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order to rent a Guest House with you as per the terms & conditions mentioned in this contract.</p>
                         <p className="text-xs mt-2">Mr. {primaryLine.vendor_name}, hereinafter referred to as the "Contractor" of the Guest House and M/s. Aarvi Encon Ltd, hereinafter referred to as the "Client".</p>
                       </div>
 
-                      <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break">Article 1</p>
-                      <p className="text-xs -mt-2 avoid-break">The subject of the present Contract is the Guest House owned by the Contractor, having the following characteristics & providing service for the following sites as & when required:-</p>
+                      <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break w-full">Article 1</p>
+                      <p className="text-xs -mt-2 avoid-break w-full">The subject of the present Contract is the Guest House owned by the Contractor, having the following characteristics & providing service for the following sites as & when required:-</p>
                       
                       <div className="avoid-break mt-2 w-full">
-                        <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
+                        <table className="w-full text-left border-collapse border border-slate-400">
                           <thead>
                             <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
                               <th className="py-2 px-2 border-r border-slate-400 w-[20%]">Project Site Name</th>
@@ -605,24 +679,24 @@ export default function PODistributionDashboard({ currentUser }) {
                     <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                       {renderBrandedHeader("Purchase Order", `AEL/${primaryLine.vendor_name?.split(' ')[0]?.toUpperCase() || 'FOOD'}-PO`)}
                       
-                      <div className="text-sm transition-all mt-6 avoid-break" contentEditable="true">
+                      <div className="text-sm transition-all mt-6 avoid-break w-full" contentEditable="true">
                         <p className="font-bold text-slate-900">Mr. {primaryLine.vendor_name}</p>
-                        <p className="text-slate-600 leading-normal">{primaryLine.vendor_address || "Address Pending"}</p>
+                        <p className="text-slate-600 leading-normal w-3/4">{primaryLine.vendor_address || "Address Pending"}</p>
                         <p className="text-slate-800 mt-6">Dear Sir,</p>
                         <p className="text-slate-900 font-bold mt-2">Subject: Purchase Order for Food.</p>
                         <p className="text-[12px] mt-4 leading-relaxed">With reference to your Quotation, dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `26.05.${currentYear}`}, and the subsequent discussion with our Mr Kishor Nikam (BUSINESS DEVELOPMENT), we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order for the supply of Food as mentioned below:-</p>
                       </div>
 
-                      <div className="pl-6 py-6 font-bold text-[13px] text-slate-900 space-y-4 border-l-4 border-slate-300 ml-4 my-6 avoid-break" contentEditable="true">
+                      <div className="pl-6 py-6 font-bold text-[13px] text-slate-900 space-y-4 border-l-4 border-slate-300 ml-4 my-6 avoid-break w-full" contentEditable="true">
                         {poItems.map((item, idx) => (
-                          <p key={idx}>{item.product_description} Rate Rs. {item.unit_price || item.base_total_value}/- {item.special_terms || 'per meal'}.</p>
+                          <p key={idx} className="break-words">{item.product_description} Rate Rs. {item.unit_price || item.base_total_value}/- {item.special_terms || 'per meal'}.</p>
                         ))}
                         {poItems.length === 1 && (
                            <p>Sunday Rate Rs. {poItems[0].unit_price ? poItems[0].unit_price + 40 : 300}/- per meal Special Dinner.</p>
                         )}
                       </div>
 
-                      <div className="text-[12px] space-y-2 mt-4 avoid-break" contentEditable="true">
+                      <div className="text-[12px] space-y-2 mt-4 avoid-break w-full" contentEditable="true">
                         <p><strong>Terms of payment:-</strong> {primaryLine.payment_terms || "100% payment to be made against submission of Invoices"}</p>
                         <p><strong>Project Name:</strong> {selectedPo.project_name}</p>
                         <p><strong>Our GST Registration no.:</strong> 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
@@ -664,7 +738,7 @@ export default function PODistributionDashboard({ currentUser }) {
                     </div>
                     
                     {selectedPo.category === 'FOOD' && (
-                      <div className="text-[10px] font-mono font-black text-slate-400 select-none tracking-widest self-end pb-1">
+                      <div className="text-[10px] font-mono font-black text-slate-400 select-none tracking-widest self-end pb-1 hidden md:block">
                         AEL-04-IMSF-PURCH-004
                       </div>
                     )}
