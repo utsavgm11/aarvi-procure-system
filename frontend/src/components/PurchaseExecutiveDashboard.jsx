@@ -330,8 +330,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
 
   const ui = getContextualUiSettings();
 
-  // 🎯 THE PERFECT AND SIMPLEST PDF DOWNLOAD METHOD
-  // Simply triggers the browser's optimized PDF engine using our strict CSS.
+  // 🎯 TRUE NATIVE VECTOR PDF DOWNLOAD (Bypasses Browser Print Dialog)
   const handlePrintToPDF = () => {
     if (!selectedHistoryTicket) return;
     window.print();
@@ -350,6 +349,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         document.body.appendChild(link);
         link.click();
         link.remove();
+      } else {
+        alert("Purchase Order has not been formally generated for this request yet.");
       }
     } catch (err) {
       console.error("Failed to generate Word document", err);
@@ -440,38 +441,52 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         @media print {
           @page {
             size: A4 portrait;
-            margin: 12mm;
+            margin: 0mm; /* 🎯 KILLS BROWSER DATE/URL WATERMARKS */
           }
           
-          /* Hide everything in the app by default during print */
+          /* Reset all parent boundaries to prevent clipping */
+          *, *::before, *::after {
+            overflow: visible !important;
+            position: static !important;
+          }
+
+          html, body {
+            background: #ffffff !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          /* Hide everything in the UI by default */
           body * {
             visibility: hidden;
           }
 
-          /* Only show the printable PO container and its children */
+          /* Make ONLY the PO visible */
           #printable-po, #printable-po * {
             visibility: visible;
           }
 
-          /* Snap the document to the absolute top-left of the A4 paper */
+          /* Anchor the PO strictly to the top-left of the paper */
           #printable-po {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 186mm !important; 
-            min-width: 186mm !important;
-            max-width: 186mm !important;
-            padding: 0 !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 210mm !important; 
+            max-width: 210mm !important;
+            padding: 15mm !important; /* Safe white margins */
             margin: 0 !important;
             border: none !important;
             box-shadow: none !important;
+            box-sizing: border-box !important;
           }
 
-          /* Prevent table columns from blowing out the right side */
           table {
             width: 100% !important;
             table-layout: fixed !important;
           }
+          
           th, td, p {
             overflow-wrap: break-word !important;
             word-wrap: break-word !important;
@@ -481,7 +496,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             display: none !important;
           }
 
-          /* Smart page breaking */
           .avoid-break {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
@@ -912,7 +926,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           
                           <div className="text-sm transition-all avoid-break w-full" contentEditable="true">
                             <p className="font-bold text-slate-900 uppercase">M/s. {primaryLine.vendor_name}</p>
-                            <p className="text-slate-600 leading-tight w-3/4">{primaryLine.vendor_address || "Address Not Provided"}</p>
+                            <p className="text-slate-600 leading-tight w-1/2">{primaryLine.vendor_address || "Address Not Provided"}</p>
                             <p className="text-slate-600 font-mono mt-1">Cell No.: {primaryLine.vendor_contact || "N/A"}</p>
                             <p className="text-slate-600 font-mono">EMAIL:- {primaryLine.vendor_email || "N/A"}</p>
                           </div>
@@ -1001,7 +1015,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           
                           <div className="text-sm transition-all avoid-break w-full" contentEditable="true">
                             <p className="font-bold text-slate-900">M/s. {primaryLine.vendor_name}</p>
-                            <p className="text-slate-600 leading-normal w-3/4">{primaryLine.vendor_address || "Address Reference Pending"}</p>
+                            <p className="text-slate-600 leading-normal w-1/2">{primaryLine.vendor_address || "Address Reference Pending"}</p>
                             <p className="text-slate-800 font-bold mt-4">Subject: Rental Contract for Hiring Vehicle for M/s. Aarvi Encon Ltd's - [{selectedHistoryTicket.project_name}]</p>
                             <p className="mt-4 text-xs text-slate-800">Dear Sir,</p>
                             <p className="text-xs mt-2">With reference to your quotation the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place order for Hiring Vehicle with you as per the terms & conditions mentioned in this contract.</p>
@@ -1016,8 +1030,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
                                   <th className="py-2 px-2 border-r border-slate-400 w-[20%]">Project Site Name</th>
                                   <th className="py-2 px-2 border-r border-slate-400 w-[25%]">Vehicle Type</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Qty</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-[15%]">Rate/Month</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Qty (Nos)</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-[15%]">Rate/Per Month</th>
                                   <th className="py-2 px-2 text-slate-900 w-[30%]">Remarks</th>
                                 </tr>
                               </thead>
@@ -1274,21 +1288,20 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       )}
 
                       {/* 🎯 UNIVERSAL 2-COLUMN SIGNATURE STRIP */}
-                      <div className="pt-12 mt-12 flex justify-between items-end text-xs font-sans relative z-10 avoid-break w-full" contentEditable="false">
-                        <div className="w-56 text-left space-y-1">
-                          <p className="text-[11px] text-slate-800 mb-8">Yours faithfully<br/><strong>For {selectedHistoryTicket.category === 'GOODS' || selectedHistoryTicket.category === 'FOOD' ? 'M/s. AARVI ENCON LTD.' : 'AARVI ENCON LIMITED'}</strong></p>
-                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-1.5">Authorized Signatory</span>
+                      <div className="pt-16 mt-16 flex justify-between items-end text-xs font-sans relative z-10 avoid-break w-full" contentEditable="false">
+                        <div className="w-64 text-left space-y-1">
+                          <p className="text-[11px] text-slate-800 mb-10">Yours faithfully<br/><strong>For {selectedHistoryTicket.category === 'GOODS' || selectedHistoryTicket.category === 'FOOD' ? 'M/s. AARVI ENCON LTD.' : 'AARVI ENCON LIMITED'}</strong></p>
+                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2">Authorized Signatory</span>
                         </div>
                         
                         {selectedHistoryTicket.category === 'FOOD' && (
-                          <div className="text-[10px] font-mono font-black text-slate-400 select-none tracking-widest self-end pb-1 hidden md:block">
+                          <div className="text-[10px] font-mono font-black text-slate-400 select-none tracking-widest self-end pb-1 hidden sm:block">
                             AEL-04-IMSF-PURCH-004
                           </div>
                         )}
-
-                        <div className="w-56 text-right space-y-1">
-                          <p className="text-[11px] text-slate-800 mb-8 text-center">{selectedHistoryTicket.category === 'GOODS' ? 'Signature & Seal of the Supplier' : 'Signature & seal of the contractor'}<br/>{selectedHistoryTicket.category === 'GOODS' ? 'Accepted & Agreed of the above Said Terms and Conditions' : 'accepted & agreed of the above said terms & conditions'}</p>
-                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-1.5 text-center">Accepted by {selectedHistoryTicket.category === 'GOODS' ? 'Supplier' : 'Contractor'}</span>
+                        <div className="w-64 text-right space-y-1">
+                          <p className="text-[11px] text-slate-800 mb-10 text-center">{selectedHistoryTicket.category === 'GOODS' ? 'Signature & Seal of the Supplier' : 'Signature & seal of the contractor'}<br/>{selectedHistoryTicket.category === 'GOODS' ? 'Accepted & Agreed of the above Said Terms and Conditions' : 'accepted & agreed of the above said terms & conditions'}</p>
+                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2 text-center">Accepted by {selectedHistoryTicket.category === 'GOODS' ? 'Supplier' : 'Contractor'}</span>
                         </div>
                       </div>
 

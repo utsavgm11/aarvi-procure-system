@@ -12,3 +12,5 @@ reportlab
 docxtpl
 cloudinary
 xhtml2pdf
+playwright
+python-docx

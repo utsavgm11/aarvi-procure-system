@@ -13,15 +13,18 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_  
 from database import get_db
-from docxtpl import DocxTemplate
 import models
 from email_service import send_workflow_email
 import cloudinary
 import cloudinary.uploader
 from cloudinary.utils import cloudinary_url
 
-# 🎯 NEW: Required for pure native Vector PDF generation
-from xhtml2pdf import pisa 
+# 🎯 NEW IMPORTS FOR PERFECT PDF & WORD EXPORT
+from playwright.async_api import async_playwright
+from docx import Document
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
 
 # 1. System Logging Configurations
 logging.basicConfig(level=logging.INFO)
@@ -976,11 +979,11 @@ def get_purchase_orders_awaiting_signature(db: Session = Depends(get_db)):
         
     return response
 
-# -------------------------------------------------------------------
-# 🎯 TRUE VECTOR PDF EXPORT (xhtml2pdf Engine)
-# -------------------------------------------------------------------
+# ===================================================================
+# 🎯 1. EXACT 1:1 VECTOR PDF ENDPOINT (Playwright Headless Chrome)
+# ===================================================================
 @app.get("/api/purchase-orders/{po_number}/download-pdf")
-def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
+async def generate_exact_vector_pdf(po_number: str, db: Session = Depends(get_db)):
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
     if not po:
         raise HTTPException(status_code=404, detail="Purchase Order not found.")
@@ -992,232 +995,279 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
     ).all()
     
     if not winning_quotes:
-        raise HTTPException(status_code=400, detail="No selected winning bids found.")
+        winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po.ticket_number).all()
         
-    primary_quote = winning_quotes[0]
-    base_grand_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
-    net_grand_total = sum(float(q.net_amount_payable or 0) for q in winning_quotes)
-    
-    # 🎯 Clean HTML Template for True Vector PDF
-    items_rows = ""
-    for idx, item in enumerate(winning_quotes, start=1):
-        items_rows += f"""
-        <tr>
-            <td style="text-align: center; border: 1px solid #94a3b8; padding: 6px;">0{idx}</td>
-            <td style="border: 1px solid #94a3b8; padding: 6px; font-weight: bold;">{item.product_description}</td>
-            <td style="text-align: center; border: 1px solid #94a3b8; padding: 6px;">{item.quantity or 1} Nos</td>
-            <td style="text-align: right; border: 1px solid #94a3b8; padding: 6px;">₹{float(item.base_total_value or 0):,.2f}</td>
+    primary_quote = winning_quotes[0] if winning_quotes else None
+    vendor_name = primary_quote.vendor_name if primary_quote else "N/A"
+    vendor_address = primary_quote.vendor_address if primary_quote else "N/A"
+    vendor_contact = primary_quote.vendor_contact if primary_quote else "N/A"
+    vendor_email = primary_quote.vendor_email if primary_quote else "N/A"
+    payment_terms = primary_quote.payment_terms if primary_quote else "100% Payable on delivery"
+    delivery_address = primary_quote.delivery_address if primary_quote else "As per site guidelines"
+    time_of_delivery = primary_quote.time_of_delivery if primary_quote else "2-3 Days"
+    site_contact = primary_quote.site_contact_person if primary_quote else "Site In-Charge"
+    site_phone = primary_quote.site_contact_phone if primary_quote else "N/A"
+
+    base_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
+    net_total = sum(float(q.net_amount_payable or q.total_amount or 0) for q in winning_quotes)
+    gst_adj = net_total - base_total
+
+    # Build Item Rows for Table
+    table_rows_html = ""
+    for idx, q in enumerate(winning_quotes, start=1):
+        qty = q.quantity or 1
+        unit_rate = (q.base_total_value or 0) / qty
+        table_rows_html += f"""
+        <tr class="border-b border-slate-300 text-xs">
+            <td class="py-2 px-2 border-r border-slate-400 text-center font-mono">0{idx}</td>
+            <td class="py-2 px-2 border-r border-slate-400 font-bold text-slate-900">{q.product_description or 'Item'} {f'({q.make_brand})' if q.make_brand else ''}</td>
+            <td class="py-2 px-2 border-r border-slate-400 text-center font-mono font-bold">{qty} Nos</td>
+            <td class="py-2 px-2 border-r border-slate-400 text-right font-mono">₹{unit_rate:,.2f}</td>
+            <td class="py-2 px-2 text-right font-mono font-bold text-slate-900">₹{q.base_total_value:,.2f}</td>
         </tr>
         """
 
+    # Exact HTML matching web preview layout
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
+        <meta charset="utf-8"/>
+        <script src="https://cdn.tailwindcss.com"></script>
         <style>
-            @page {{
-                size: a4 portrait;
-                margin: 15mm;
-            }}
-            body {{
-                font-family: Helvetica, Arial, sans-serif;
-                font-size: 10pt;
-                color: #1e293b;
-            }}
-            .header-title {{
-                font-size: 18pt;
-                font-weight: bold;
-                color: #2c2a57;
-                text-transform: uppercase;
-            }}
-            .table-main {{
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 15px;
-            }}
-            .table-main th {{
-                background-color: #f1f5f9;
-                border: 1px solid #94a3b8;
-                padding: 6px;
-                font-size: 9pt;
-                text-transform: uppercase;
-            }}
-            .terms-section {{
-                margin-top: 20px;
-                font-size: 8.5pt;
-                line-height: 1.4;
-            }}
-            .signature-table {{
-                width: 100%;
-                margin-top: 40px;
-            }}
+            @page {{ size: A4 portrait; margin: 0; }}
+            body {{ margin: 0; padding: 0; background: #ffffff; font-family: ui-sans-serif, system-ui, sans-serif; }}
+            .avoid-break {{ page-break-inside: avoid !important; break-inside: avoid !important; }}
         </style>
     </head>
-    <body>
-        <div style="border-bottom: 2px solid #2c2a57; padding-bottom: 10px;">
-            <span class="header-title">AARVI ENCON LIMITED</span><br/>
-            <span style="font-size: 8pt; color: #64748b;">OFFICIAL PURCHASE ORDER</span>
+    <body class="bg-white p-10 text-slate-800 text-xs leading-relaxed">
+        <div id="printable-po" class="w-full max-w-[794px] mx-auto space-y-4">
+            
+            <div class="flex justify-between items-baseline border-t border-b border-slate-400 py-1 font-mono text-[11px] font-bold">
+                <span>Ref: AEL/{vendor_name[:6].upper()}-PO/2026-27/{po_number.split('-')[-1]}</span>
+                <span>Date: {date.today().strftime('%d/%m/%Y')}</span>
+            </div>
+
+            <h1 class="text-base font-black text-slate-950 tracking-wider uppercase text-center bg-slate-100 py-1 border-y border-slate-400">
+                PURCHASE ORDER
+            </h1>
+
+            <div class="text-xs space-y-1">
+                <p class="font-bold text-slate-900 uppercase text-sm">M/s. {vendor_name}</p>
+                <p class="text-slate-600 leading-tight w-3/4">{vendor_address}</p>
+                <p class="text-slate-600 font-mono pt-1">Cell No.: {vendor_contact}</p>
+                <p class="text-slate-600 font-mono">EMAIL:- {vendor_email}</p>
+            </div>
+
+            <div class="space-y-1">
+                <p class="font-bold text-sm text-slate-900 mt-2">Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}.</p>
+                <p class="text-xs text-slate-700">Dear Sir,</p>
+                <p class="text-xs text-slate-700">With reference to Quotation Dated recent submission, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of items with your company.</p>
+            </div>
+
+            <table class="w-full text-left border-collapse border border-slate-400">
+                <thead>
+                    <tr class="text-[10px] uppercase font-black bg-slate-50 border-b border-slate-400 text-slate-700">
+                        <th class="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Sr.No.</th>
+                        <th class="py-2 px-2 border-r border-slate-400 w-[45%]">Description</th>
+                        <th class="py-2 px-2 border-r border-slate-400 text-center w-[15%]">QUANTITY</th>
+                        <th class="py-2 px-2 border-r border-slate-400 text-right w-[15%]">RATE UNIT</th>
+                        <th class="py-2 px-2 text-right w-[15%]">Total (Rs.)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {table_rows_html}
+                    <tr class="border-t-2 border-slate-400 font-bold">
+                        <td colSpan="4" class="py-1.5 px-2 border-r border-slate-400 text-right">Basic Total Value</td>
+                        <td class="py-1.5 px-2 text-right font-mono text-sm">₹{base_total:,.2f}</td>
+                    </tr>
+                    <tr class="font-bold">
+                        <td colSpan="4" class="py-1.5 px-2 border-r border-slate-400 text-right">GST Adjustment</td>
+                        <td class="py-1.5 px-2 text-right font-mono text-slate-700">₹{gst_adj:,.2f}</td>
+                    </tr>
+                    <tr class="font-black bg-slate-100 border-t border-slate-400 text-black">
+                        <td colSpan="4" class="py-2 px-2 border-r border-slate-400 text-right uppercase text-[10px]">Net Amount Payable</td>
+                        <td class="py-2 px-2 text-right font-mono text-base">₹{net_total:,.2f}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="grid grid-cols-12 gap-2 text-[11px] leading-tight text-slate-800 mt-4 avoid-break">
+                <div class="col-span-1 font-bold">a)</div>
+                <div class="col-span-3 font-bold uppercase">TERMS OF PAYMENTS</div>
+                <div class="col-span-8">{payment_terms}</div>
+                
+                <div class="col-span-1 font-bold">b)</div>
+                <div class="col-span-3 font-bold uppercase">DELIVERY</div>
+                <div class="col-span-8">Time is an essence of this Purchase Order. The material has to be delivered within {time_of_delivery} from PO issue.</div>
+                
+                <div class="col-span-1 font-bold">c)</div>
+                <div class="col-span-3 font-bold uppercase">PROJECT</div>
+                <div class="col-span-8 font-bold">{ticket.project_name if ticket else 'N/A'}</div>
+            </div>
+
+            <div class="pt-2 text-[11px] leading-relaxed text-slate-800 space-y-2 avoid-break">
+                <p class="font-bold">The placement of order is subject to the following Terms & Conditions:-</p>
+                <p><strong>1. PRICE:</strong> The cost with GST is Rs. {net_total:,.2f}/-. Fixed-price order, no escalation.</p>
+                <p><strong>2. QUALITY:</strong> Material supplied must meet engineer satisfaction or be replaced without financial implications.</p>
+                <p><strong>3. DELIVERY ADDRESS:</strong> Person: {site_contact}, Contact: {site_phone}. Destination: {delivery_address}</p>
+                <p><strong>4. LEGAL COMPLIANCE:</strong> Subject to exclusive jurisdiction of courts in Mumbai.</p>
+            </div>
+
+            <div class="pt-10 mt-10 flex justify-between items-end text-xs avoid-break">
+                <div class="w-56 text-left">
+                    <p class="mb-8">Yours faithfully<br/><strong>For M/s. AARVI ENCON LTD.</strong></p>
+                    <span class="font-black text-slate-900 border-t border-slate-400 pt-1 block">Authorized Signatory</span>
+                </div>
+                <div class="w-56 text-right">
+                    <p class="mb-8 text-center">Signature & Seal of Supplier<br/>Accepted & Agreed Terms</p>
+                    <span class="font-black text-slate-900 border-t border-slate-400 pt-1 block text-center">Accepted by Supplier</span>
+                </div>
+            </div>
         </div>
-
-        <table style="width: 100%; margin-top: 15px;">
-            <tr>
-                <td style="width: 50%; vertical-align: top;">
-                    <strong>PO Number:</strong> {po.po_number}<br/>
-                    <strong>Date:</strong> {date.today().strftime('%d-%m-%Y')}<br/>
-                    <strong>Project Code:</strong> {ticket.project_code if ticket else 'N/A'}
-                </td>
-                <td style="width: 50%; vertical-align: top;">
-                    <strong>Vendor:</strong> M/s. {primary_quote.vendor_name}<br/>
-                    <strong>Address:</strong> {primary_quote.vendor_address or 'N/A'}<br/>
-                    <strong>Contact:</strong> {primary_quote.vendor_contact or 'N/A'}
-                </td>
-            </tr>
-        </table>
-
-        <table class="table-main">
-            <thead>
-                <tr>
-                    <th style="width: 10%;">Sr.</th>
-                    <th style="width: 50%;">Description</th>
-                    <th style="width: 15%;">Qty</th>
-                    <th style="width: 25%;">Total Amount</th>
-                </tr>
-            </thead>
-            <tbody>
-                {items_rows}
-                <tr>
-                    <td colspan="3" style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 6px;">Grand Total:</td>
-                    <td style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 6px;">₹{net_grand_total:,.2f}</td>
-                </tr>
-            </tbody>
-        </table>
-
-        <div class="terms-section">
-            <p><strong>Payment Terms:</strong> {primary_quote.payment_terms or '100% Payable on delivery'}</p>
-            <p><strong>Delivery Location:</strong> {primary_quote.delivery_address or 'As specified by site in-charge'}</p>
-            <p><strong>Standard Terms:</strong> This is a fixed-price purchase order. All materials supplied must strictly adhere to the technical specifications approved by Aarvi Encon Limited.</p>
-        </div>
-
-        <table class="signature-table">
-            <tr>
-                <td style="width: 50%;">
-                    <strong>For AARVI ENCON LIMITED</strong><br/><br/><br/>
-                    ___________________________<br/>
-                    Authorized Signatory
-                </td>
-                <td style="width: 50%; text-align: right;">
-                    <strong>Accepted By Vendor</strong><br/><br/><br/>
-                    ___________________________<br/>
-                    Signature & Seal
-                </td>
-            </tr>
-        </table>
     </body>
     </html>
     """
 
-    pdf_buffer = io.BytesIO()
-    pisa_status = pisa.CreatePDF(html_content, dest=pdf_buffer)
-    
-    if pisa_status.err:
-        raise HTTPException(status_code=500, detail="PDF generation failed.")
-        
-    pdf_buffer.seek(0)
+    # Launch Headless Chrome to generate pure vector PDF
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page(viewport={"width": 1200, "height": 1600})
+        await page.set_content(html_content, wait_until="networkidle")
+        pdf_bytes = await page.pdf(
+            format="A4",
+            print_background=True,
+            margin={"top": "10mm", "right": "10mm", "bottom": "10mm", "left": "10mm"}
+        )
+        await browser.close()
+
     return StreamingResponse(
-        pdf_buffer,
+        io.BytesIO(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=Aarvi_PO_{po.po_number}.pdf"}
+        headers={"Content-Disposition": f"attachment; filename=Aarvi_PO_{po_number}.pdf"}
     )
 
-# -------------------------------------------------------------------
-# WORD DOCUMENT GENERATION ENGINE
-# -------------------------------------------------------------------
+
+# ===================================================================
+# 🎯 2. DYNAMIC NATIVE WORD (.DOCX) GENERATOR ENDPOINT
+# ===================================================================
 @app.get("/api/purchase-orders/{po_number}/download-docx")
 def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
     if not po:
-        raise HTTPException(status_code=404, detail="Purchase Order not found in database.")
+        raise HTTPException(status_code=404, detail="Purchase Order not found.")
         
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
     winning_quotes = db.query(models.Quotation).filter(
         models.Quotation.ticket_number == po.ticket_number,
         models.Quotation.is_selected == True
     ).all()
+    
     if not winning_quotes:
-        raise HTTPException(status_code=400, detail="No selected winning bids found.")
-        
-    primary_quote = winning_quotes[0]
-    base_grand_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
-    net_grand_total = sum(float(q.net_amount_payable or 0) for q in winning_quotes)
+        winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po.ticket_number).all()
+
+    primary_quote = winning_quotes[0] if winning_quotes else None
+    vendor_name = primary_quote.vendor_name if primary_quote else "N/A"
+    vendor_address = primary_quote.vendor_address if primary_quote else "N/A"
+    vendor_contact = primary_quote.vendor_contact if primary_quote else "N/A"
+    vendor_email = primary_quote.vendor_email if primary_quote else "N/A"
+    payment_terms = primary_quote.payment_terms if primary_quote else "100% Payable on delivery"
+
+    base_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
+    net_total = sum(float(q.net_amount_payable or q.total_amount or 0) for q in winning_quotes)
+    gst_adj = net_total - base_total
+
+    # Create Document dynamically (No template required)
+    doc = Document()
+
+    # Document Margins (0.5 inch)
+    for section in doc.sections:
+        section.top_margin = Inches(0.5)
+        section.bottom_margin = Inches(0.5)
+        section.left_margin = Inches(0.5)
+        section.right_margin = Inches(0.5)
+
+    # Title / Ref
+    p_ref = doc.add_paragraph()
+    p_ref.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    run_ref = p_ref.add_run(f"Ref: AEL/{vendor_name[:6].upper()}-PO/2026-27/{po_number.split('-')[-1]}\nDate: {date.today().strftime('%d/%m/%Y')}")
+    run_ref.font.size = Pt(9)
+    run_ref.font.name = 'Arial'
+
+    p_title = doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run_title = p_title.add_run("PURCHASE ORDER")
+    run_title.font.bold = True
+    run_title.font.size = Pt(14)
+    run_title.font.color.rgb = RGBColor(0x2C, 0x2A, 0x57)
+
+    # Vendor Details
+    p_vendor = doc.add_paragraph()
+    r = p_vendor.add_run(f"M/s. {vendor_name}\n")
+    r.font.bold = True
+    r.font.size = Pt(11)
+    p_vendor.add_run(f"{vendor_address}\nContact: {vendor_contact} | Email: {vendor_email}\n").font.size = Pt(9)
+
+    doc.add_paragraph(f"Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}").runs[0].font.bold = True
+
+    # Table
+    table = doc.add_table(rows=1, cols=5)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+
+    hdr_cells = table.rows[0].cells
+    headers = ["Sr.", "Description", "Qty", "Rate", "Total (Rs.)"]
+    widths = [Inches(0.5), Inches(3.2), Inches(0.8), Inches(1.0), Inches(1.2)]
+
+    for i, h in enumerate(headers):
+        hdr_cells[i].text = h
+        hdr_cells[i].width = widths[i]
+        hdr_cells[i].paragraphs[0].runs[0].font.bold = True
+        hdr_cells[i].paragraphs[0].runs[0].font.size = Pt(9)
+
+    for idx, q in enumerate(winning_quotes, start=1):
+        row_cells = table.add_row().cells
+        qty = q.quantity or 1
+        unit_rate = (q.base_total_value or 0) / qty
+        row_cells[0].text = f"0{idx}"
+        row_cells[1].text = q.product_description or 'Item'
+        row_cells[2].text = f"{qty} Nos"
+        row_cells[3].text = f"Rs. {unit_rate:,.2f}"
+        row_cells[4].text = f"Rs. {q.base_total_value:,.2f}"
+
+    # Total Rows
+    r1 = table.add_row().cells
+    r1[3].text = "Basic Total:"
+    r1[4].text = f"Rs. {base_total:,.2f}"
     
-    def number_to_words(num):
-        if num == 0: return 'Zero'
-        ones = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen ']
-        tens = ['', '', 'Twenty ', 'Thirty ', 'Forty ', 'Fifty ', 'Sixty ', 'Seventy ', 'Eighty ', 'Ninety ']
-        def convert_less_thousand(n):
-            s = ''
-            if n >= 100: s += ones[int(n // 100)] + 'Hundred '; n %= 100
-            if n >= 20: s += tens[int(n // 10)]; n %= 10
-            if n > 0: s += ones[int(n)]
-            return s
-        str_val = ''
-        crore = int(num // 10000000); num %= 10000000
-        lakh = int(num // 100000); num %= 100000
-        thousand = int(num // 1000); num %= 1000
-        if crore > 0: str_val += convert_less_thousand(crore) + 'Crore '
-        if lakh > 0: str_val += convert_less_thousand(lakh) + 'Lakh '
-        if thousand > 0: str_val += convert_less_thousand(thousand) + 'Thousand '
-        if num > 0: str_val += convert_less_thousand(num)
-        return str_val.strip() + ' Only'
-        
-    items_data = []
-    for idx, item in enumerate(winning_quotes, start=1):
-        qty = item.quantity or 1
-        base_val = float(item.base_total_value or 0)
-        rate = base_val / qty
-        items_data.append({
-            "sr": f"0{idx}",
-            "desc": f"{item.product_description} [Brand: {item.make_brand}]" if item.make_brand else item.product_description,
-            "qty": str(qty),
-            "rate": f"{rate:,.2f}",
-            "total": f"{base_val:,.2f}"
-        })
-        
-    try:
-        doc = DocxTemplate("official_PO.docx")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Template 'official_PO.docx' not found. Error: {str(e)}")
-        
-    category_code = ticket.category[:4].upper() if ticket and ticket.category else "GEN"
-    context = {
-        "po_number": po_number.split('-')[-1],
-        "category_code": category_code,
-        "date": date.today().strftime('%d-%m-%Y'),
-        "vendor_name": primary_quote.vendor_name,
-        "vendor_address": primary_quote.vendor_address or "Address Not Provided",
-        "vendor_contact": primary_quote.vendor_contact or "N/A",
-        "vendor_email": primary_quote.vendor_email or "N/A",
-        "project_name": ticket.project_name if ticket else "N/A",
-        "project_code": ticket.project_code if ticket else "N/A",
-        "delivery_address": primary_quote.delivery_address or "As per site guidelines",
-        "site_contact": primary_quote.site_contact_person or "Site In-Charge",
-        "site_phone": primary_quote.site_contact_phone or "N/A",
-        "base_total": f"{base_grand_total:,.2f}",
-        "gst_adjustment": f"{(net_grand_total - base_grand_total):,.2f}",
-        "net_amount": f"{net_grand_total:,.2f}",
-        "amount_in_words": f"Rupees {number_to_words(int(round(net_grand_total)))}",
-        "items": items_data
-    }
-    doc.render(context)
-    
-    file_stream = io.BytesIO()
-    doc.save(file_stream)
-    file_stream.seek(0)
-    
+    r2 = table.add_row().cells
+    r2[3].text = "GST Adjustment:"
+    r2[4].text = f"Rs. {gst_adj:,.2f}"
+
+    r3 = table.add_row().cells
+    r3[3].text = "Net Amount Payable:"
+    r3[4].text = f"Rs. {net_total:,.2f}"
+    r3[4].paragraphs[0].runs[0].font.bold = True
+
+    # Payment & Terms
+    doc.add_paragraph().add_run(f"\nPayment Terms: {payment_terms}").font.bold = True
+    doc.add_paragraph().add_run(f"Project Name: {ticket.project_name if ticket else 'N/A'}").font.bold = True
+
+    # Signatures Table
+    sig_table = doc.add_table(rows=1, cols=2)
+    sig_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    c1, c2 = sig_table.rows[0].cells
+    c1.text = "\n\nFor AARVI ENCON LIMITED\n_____________________\nAuthorized Signatory"
+    c2.text = "\n\nAccepted By Vendor\n_____________________\nSignature & Seal"
+
+    stream = io.BytesIO()
+    doc.save(stream)
+    stream.seek(0)
+
     return StreamingResponse(
-        file_stream,
+        stream,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f"attachment; filename=Aarvi_{category_code}_{po_number}.docx"}
+        headers={"Content-Disposition": f"attachment; filename=Aarvi_PO_{po_number}.docx"}
     )
 
 # -------------------------------------------------------------------
