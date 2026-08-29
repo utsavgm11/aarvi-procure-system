@@ -330,33 +330,16 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
 
   const ui = getContextualUiSettings();
 
-  // 🎯 TRUE NATIVE VECTOR PDF DOWNLOAD (Bypasses Browser Print Dialog)
-  const handleDownloadNativePDF = async () => {
+  // 🎯 THE PERFECT AND SIMPLEST PDF DOWNLOAD METHOD
+  // Simply triggers the browser's optimized PDF engine using our strict CSS.
+  const handlePrintToPDF = () => {
     if (!selectedHistoryTicket) return;
-    
-    // First, lookup the generated PO number connected to this ticket
-    try {
-      const res = await axios.get(`${API_BASE_URL}/requisitions/${selectedHistoryTicket.ticket_number}/po`);
-      if (res.data && res.data.po_number) {
-        const downloadUrl = `${API_BASE_URL}/purchase-orders/${res.data.po_number}/download-pdf`;
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.setAttribute('download', `Aarvi_PO_${res.data.po_number}.pdf`);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      } else {
-        alert("Purchase Order has not been formally generated for this request yet.");
-      }
-    } catch (err) {
-      console.error("Failed to generate PDF", err);
-    }
+    window.print();
   };
 
   // 🎯 NATIVE DOCX DOWNLOAD
   const handleDownloadWord = async () => {
     if (!selectedHistoryTicket) return;
-    
     try {
       const res = await axios.get(`${API_BASE_URL}/requisitions/${selectedHistoryTicket.ticket_number}/po`);
       if (res.data && res.data.po_number) {
@@ -396,7 +379,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   };
 
   const renderBrandedHeader = (docTitle, docRefPrefix) => {
-    // Generate a placeholder Ref ID if the PO hasn't been fully sealed yet
     const formattedRefId = selectedHistoryTicket?.ticket_number?.split('-').pop() || '16';
     return (
       <div className="w-full text-xs text-slate-700 font-sans relative avoid-break">
@@ -453,16 +435,61 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         </div>
       )}
 
-      {/* ISOLATED STYLES FOR PDF PRINT */}
+      {/* 🎯 FLAWLESS A4 PRINT CSS ISOLATION */}
       <style>{`
-        .avoid-break, p, tr, td, h1, h2, h3, table {
-          page-break-inside: avoid !important;
-          break-inside: avoid !important;
-        }
         @media print {
-          html, body { background: #ffffff !important; color: #000000 !important; margin: 0 !important; padding: 0 !important; }
-          .print\\:hidden, nav, aside, header, button, .bg-slate-900 { display: none !important; }
-          #root, main, .grid, .xl\\:col-span-8, #isolated-print-wrapper, .bg-white { display: block !important; width: 100% !important; max-width: 100% !important; background: #ffffff !important; margin: 0 !important; padding: 0 !important; border: none !important; box-shadow: none !important; position: static !important; overflow: visible !important; }
+          @page {
+            size: A4 portrait;
+            margin: 12mm;
+          }
+          
+          /* Hide everything in the app by default during print */
+          body * {
+            visibility: hidden;
+          }
+
+          /* Only show the printable PO container and its children */
+          #printable-po, #printable-po * {
+            visibility: visible;
+          }
+
+          /* Snap the document to the absolute top-left of the A4 paper */
+          #printable-po {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 186mm !important; 
+            min-width: 186mm !important;
+            max-width: 186mm !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+
+          /* Prevent table columns from blowing out the right side */
+          table {
+            width: 100% !important;
+            table-layout: fixed !important;
+          }
+          th, td, p {
+            overflow-wrap: break-word !important;
+            word-wrap: break-word !important;
+          }
+
+          .print\\:hidden, .seal-footer {
+            display: none !important;
+          }
+
+          /* Smart page breaking */
+          .avoid-break {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
         }
       `}</style>
 
@@ -489,9 +516,12 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         </div>
       )}
 
-      {/* VIEW A: ACTIVE SOURCING INBOX */}
+      {/* ============================================================== */}
+      {/* VIEW A: ACTIVE SOURCING INBOX                                  */}
+      {/* ============================================================== */}
       {activeTab === 'sourcing' && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
+          {/* TICKETS LIST */}
           <div className="xl:col-span-4 space-y-3">
             <h2 className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Awaiting Vendor Bids</h2>
             {sourcingTickets.length === 0 ? (
@@ -510,6 +540,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             )}
           </div>
           
+          {/* TICKET DETAIL VIEW */}
           <div id="sourcing-detail-view" className="xl:col-span-8 scroll-mt-24">
             {selectedTicket ? (
               <div className="space-y-6 animate-in fade-in duration-300">
@@ -525,6 +556,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                     <Send size={14} className="mr-1.5 inline" /> <span>Submit Matrix</span>
                   </Button>
                 </Card>
+
                 <div className="space-y-5">
                   {items.map((item) => (
                     <Card key={item.item_index} className="overflow-hidden border-slate-200 shadow-xs">
@@ -533,6 +565,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           <div className="flex flex-wrap items-center gap-2 mb-1.5">
                             <span className="bg-[#2c2a57] text-white text-[10px] font-black px-2 py-0.5 rounded font-mono">Row {item.item_index}</span>
                             
+                            {/* 🎯 EDITABLE QUANTITY BADGE */}
                             <div className="flex items-center bg-[#0b9c54]/10 border border-[#0b9c54]/20 rounded px-1.5 py-0.5">
                               <label className="text-[9px] sm:text-[10px] text-[#0b9c54] font-bold uppercase tracking-wider mr-1.5">
                                 Procure Qty:
@@ -546,6 +579,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 title="Edit Quantity if partial stock is already available"
                               />
                             </div>
+
                             <select
                               value={item.item_type || 'Consumable'}
                               onChange={(e) => handleItemClassificationChange(item.item_index, e.target.value)}
@@ -558,14 +592,16 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                           <h3 className="text-xs md:text-sm font-bold text-[#2c2a57] leading-tight mt-1">{item.product_description}</h3>
                         </div>
                       </div>
+
                       <div className="p-3 sm:p-4 bg-white">
                         <div className="grid grid-cols-1 gap-4">
                           {(quotes[item.item_index] || []).map((quote, qIdx) => (
                             <div key={qIdx} className="bg-slate-50/50 border border-slate-200 rounded-xl p-3 sm:p-5 relative group hover:border-slate-400 transition-all">
-                              <button onClick={() => removeQuoteBox(item.item_index, qIdx)} className="absolute top-2 right-2 md:top-3 md:right-3 text-slate-400 hover:text-rose-600 transition-colors p-1"><Trash2 size={14} /></button>
+                              <button onClick={() => removeQuoteBox(item.item_index, qIdx)} className="absolute top-2 right-2 md:top-3 md:right-3 text-slate-400 hover:text-rose-600 transition-colors p-1"><Trash2 size={14} md:size={15} /></button>
                               <h4 className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Option {qIdx + 1}</h4>
                               
                               <div className="space-y-4">
+                                {/* Vendor Details Row (Responsive Stacking) */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
@@ -596,6 +632,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
+                                {/* Math & Contact Row (Responsive Stacking) */}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Phone/Cell</label>
@@ -605,6 +642,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Email ID</label>
                                     <input type="email" value={quote.vendor_email} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_email', e.target.value)} placeholder="sales@vendor.com" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
+
+                                  {/* Unit Price Input triggers Auto-Math */}
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.amountLabel} *</label>
                                     <input 
@@ -615,6 +654,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                       className="w-full bg-emerald-50 border border-emerald-300 rounded-lg px-3 py-2 text-[11px] md:text-xs font-bold text-emerald-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all" 
                                     />
                                   </div>
+
+                                  {/* GST Input triggers Auto-Math */}
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">GST Percentage (%)</label>
                                     <input 
@@ -626,6 +667,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
+                                {/* Delivery Info Row */}
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.addressLabel}</label>
@@ -641,11 +683,14 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
+                                {/* Math Result & Terms Row */}
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
                                     <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                   </div>
+
+                                  {/* CALCULATED NET VALUE DISPLAY */}
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
                                     <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner">
@@ -659,6 +704,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
+                                {/* Remarks Row */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">Contract / Service Custom Clauses</label>
@@ -670,6 +716,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </div>
                                 </div>
 
+                                {/* ATTACHMENT CONTROLLER LAYER */}
                                 <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
                                   <div>
                                     <label className="block text-[9px] md:text-[10px] font-bold text-indigo-600 uppercase mb-1">
@@ -735,7 +782,9 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         </div>
       )}
 
-      {/* VIEW B: PURCHASE HISTORY LEDGER */}
+      {/* ============================================================== */}
+      {/* VIEW B: PURCHASE HISTORY LEDGER (DOCUMENT VIEWER)              */}
+      {/* ============================================================== */}
       {activeTab === 'history' && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
           
@@ -761,9 +810,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
               ))
             )}
           </div>
+
           <div id="isolated-print-wrapper" className="xl:col-span-8 print:col-span-12">
             <div id="history-detail-view" className="scroll-mt-24 space-y-6">
               
+              {/* 🎯 GRN & DISCREPANCY STATUS BANNER */}
               {selectedHistoryTicket && (
                 <>
                   {selectedHistoryTicket.status === 'Material Discrepancy Raised' && (
@@ -820,7 +871,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
               )}
 
               {selectedHistoryTicket && historyPoItems.length > 0 ? (
-                <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative animate-in fade-in duration-200">
+                <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative animate-in fade-in duration-200 print:border-none print:shadow-none">
                   
                   <div className="bg-slate-900 text-white p-4 flex flex-col sm:flex-row justify-between sm:items-center gap-3 print:hidden">
                     <div className="flex items-center space-x-2.5">
@@ -834,8 +885,10 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       >
                         <FileText size={14} /> <span className="hidden sm:inline">Word (.docx)</span>
                       </button>
+                      
+                      {/* 🎯 NATIVE PDF DOWNLOAD BUTTON */}
                       <button 
-                        onClick={handleDownloadNativePDF} 
+                        onClick={handlePrintToPDF} 
                         className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-2 px-4 py-2 text-xs font-bold shadow-xs w-full sm:w-auto"
                       >
                         <Download size={14} /> <span>Vector PDF</span>
@@ -843,9 +896,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                     </div>
                   </div>
 
-                  {/* 🎯 HORIZONTAL SCROLL WRAPPER FOR MOBILE PDF VIEW */}
-                  <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 print:p-0 print:border-none print:bg-white">
-                    <div id="printable-po" className="p-6 sm:p-8 pb-16 space-y-6 font-sans bg-white select-text relative w-full h-auto overflow-visible text-justify min-w-[800px] shadow-sm print:shadow-none print:min-w-0">
+                  <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 flex justify-center print:p-0 print:border-none print:bg-white">
+                    <div id="printable-po" className="p-6 sm:p-8 pb-16 space-y-6 font-sans bg-white select-text relative w-full h-auto overflow-visible text-justify max-w-[800px] shadow-sm print:shadow-none print:min-w-0 print:p-0">
                       
                       <div className="hidden print:block print:fixed print:top-0 print:left-0 print:z-0 w-12 pt-3 pl-3">
                         <img src={aarviLogo} alt="Aarvi running logo" className="w-full h-auto object-contain opacity-90" />
@@ -855,36 +907,36 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       {/* 📦 1. GOODS / MATERIALS PO */}
                       {/* ========================================================= */}
                       {selectedHistoryTicket.category === 'GOODS' && (
-                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
+                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                           {renderBrandedHeader("Purchase Order", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-PO`)}
                           
-                          <div className="text-sm transition-all avoid-break" contentEditable="true">
+                          <div className="text-sm transition-all avoid-break w-full" contentEditable="true">
                             <p className="font-bold text-slate-900 uppercase">M/s. {primaryLine.vendor_name}</p>
-                            <p className="text-slate-600 leading-tight w-1/2">{primaryLine.vendor_address || "Address Not Provided"}</p>
+                            <p className="text-slate-600 leading-tight w-3/4">{primaryLine.vendor_address || "Address Not Provided"}</p>
                             <p className="text-slate-600 font-mono mt-1">Cell No.: {primaryLine.vendor_contact || "N/A"}</p>
                             <p className="text-slate-600 font-mono">EMAIL:- {primaryLine.vendor_email || "N/A"}</p>
                           </div>
-                          <div contentEditable="true" className="space-y-1 avoid-break">
+                          <div contentEditable="true" className="space-y-1 avoid-break w-full">
                             <p className="font-bold text-sm text-slate-900 mt-4">Subject: Purchase Order for {primaryLine.product_description?.split(' ')[0] || 'Materials'}.</p>
                             <p className="text-xs text-slate-700 mt-2">Dear Sir,</p>
                             <p className="text-xs text-slate-700">With reference to Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'recent submission'}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of {primaryLine.product_description || 'goods'} with your company.</p>
                           </div>
-                          <div className="avoid-break mt-4">
-                            <table className="w-full text-left border-collapse border border-slate-400">
+                          <div className="avoid-break mt-4 w-full">
+                            <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
                               <thead>
                                 <tr className="text-[10px] uppercase font-black bg-slate-50 border-b border-slate-400 text-slate-700">
-                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-12">Sr.No.</th>
-                                  <th className="py-2 px-2 border-r border-slate-400">Description</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-16">QUANTITY</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-24">RATE UNIT</th>
-                                  <th className="py-2 px-2 text-right w-28">Total Price in Rs.</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Sr.No.</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 w-[45%]">Description</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[15%]">QUANTITY</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-[15%]">RATE UNIT</th>
+                                  <th className="py-2 px-2 text-right w-[15%]">Total (Rs.)</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {historyPoItems.map((item, index) => (
                                   <tr key={index} className="border-b border-slate-300">
                                     <td className="py-2 px-2 border-r border-slate-400 text-center font-mono">0{index + 1}</td>
-                                    <td className="py-2 px-2 border-r border-slate-400 font-bold text-slate-900" contentEditable="true">{item.product_description} {item.make_brand && `(${item.make_brand})`}</td>
+                                    <td className="py-2 px-2 border-r border-slate-400 font-bold text-slate-900 break-words" contentEditable="true">{item.product_description} {item.make_brand && `(${item.make_brand})`}</td>
                                     <td className="py-2 px-2 border-r border-slate-400 text-center font-mono font-bold" contentEditable="true">{item.quantity} Nos</td>
                                     <td className="py-2 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{((item.base_total_value) / (item.quantity || 1)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
                                     <td className="py-2 px-2 text-right font-mono font-bold text-slate-900" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
@@ -910,7 +962,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               </tbody>
                             </table>
                           </div>
-                          <div className="grid grid-cols-12 gap-2 text-[11px] leading-tight text-slate-800 mt-6 avoid-break" contentEditable="true">
+                          <div className="grid grid-cols-12 gap-2 text-[11px] leading-tight text-slate-800 mt-6 avoid-break w-full" contentEditable="true">
                             <div className="col-span-1 font-bold">a)</div>
                             <div className="col-span-3 font-bold uppercase">TERMS OF PAYMENTS</div>
                             <div className="col-span-8">{primaryLine.payment_terms || "100% Payment shall be paid after receipt of material at site."}</div>
@@ -923,14 +975,14 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                             <div className="col-span-3 font-bold uppercase">PROJECT</div>
                             <div className="col-span-8 font-bold">{selectedHistoryTicket.project_name}</div>
                           </div>
-                          <p className="font-bold text-[11px] mt-4 avoid-break">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
-                          <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3">
+                          <p className="font-bold text-[11px] mt-4 avoid-break w-full">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
+                          <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3 w-full">
                             <p className="font-bold avoid-break">The placement of order is subject to the following Terms & Conditions:-</p>
                             <p className="avoid-break"><strong>1. PRICE:</strong><br/>The cost of Purchase with GST as shown above is Rs. {(selectedHistoryTicket.grand_total || 0).toLocaleString('en-IN')}/- (Rupees {convertNumberToWords(Math.round(selectedHistoryTicket.grand_total || 0))}). This is a fixed-price order and no escalation is applicable.</p>
                             <p className="avoid-break"><strong>2. QUALITY:</strong><br/>If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.</p>
                             <p className="avoid-break"><strong>3. LIQUIDITY DAMAGE: (NOT APPLICABLE)</strong><br/>If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.</p>
                             <p className="avoid-break"><strong>4. TAXES & DUTIES:</strong><br/>Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
-                            <p className="avoid-break"><strong>5. CORRESPONDENCE:</strong><br/>All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova,<br/>Marathon Nextgen Complex,<br/>G.K. Marg Lower Parel (W),<br/>Mumbai -400013.<br/>Tel: 022-40499999</p>
+                            <p className="avoid-break"><strong>5. CORRESPONDENCE:</strong><br/>All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013.<br/>Tel: 022-40499999</p>
                             <p className="avoid-break"><strong>6. REFERENCE:</strong><br/>Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'Recently Submitted'}.</p>
                             <p className="avoid-break"><strong>7. BILLING:</strong><br/>Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
                             <p className="avoid-break"><strong>8. DELIVERY ADDRESS:</strong><br/>Contract Person: {primaryLine.site_contact_person || "Site Coordinator"}, Contact No.: {primaryLine.site_contact_phone || "N/A"}.<br/><span className="font-bold uppercase">{selectedHistoryTicket.project_name}</span><br/>{primaryLine.delivery_address || "Address Pending"}</p>
@@ -944,46 +996,46 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       {/* 🚜 2. VEHICLE RENTAL PO */}
                       {/* ========================================================= */}
                       {selectedHistoryTicket.category === 'VEHICLE' && (
-                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
+                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                           {renderBrandedHeader("VEHICLE RENTAL CONTRACT", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-PO`)}
                           
-                          <div className="text-sm transition-all avoid-break" contentEditable="true">
+                          <div className="text-sm transition-all avoid-break w-full" contentEditable="true">
                             <p className="font-bold text-slate-900">M/s. {primaryLine.vendor_name}</p>
-                            <p className="text-slate-600 leading-normal w-1/2">{primaryLine.vendor_address || "Address Reference Pending"}</p>
+                            <p className="text-slate-600 leading-normal w-3/4">{primaryLine.vendor_address || "Address Reference Pending"}</p>
                             <p className="text-slate-800 font-bold mt-4">Subject: Rental Contract for Hiring Vehicle for M/s. Aarvi Encon Ltd's - [{selectedHistoryTicket.project_name}]</p>
                             <p className="mt-4 text-xs text-slate-800">Dear Sir,</p>
                             <p className="text-xs mt-2">With reference to your quotation the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place order for Hiring Vehicle with you as per the terms & conditions mentioned in this contract.</p>
                             <p className="text-xs mt-2">Mr. {primaryLine.vendor_name} hereinafter referred to as the "Contractor" of Vehicle, and M/s. Aarvi Encon Ltd hereinafter referred to as the "Client".</p>
                           </div>
-                          <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break">Article 1</p>
-                          <p className="text-xs -mt-2 avoid-break">The subject of the present Contract is the vehicle owned by the Contractor having the following characteristics & providing services for the following sites as & when required:-</p>
+                          <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break w-full">Article 1</p>
+                          <p className="text-xs -mt-2 avoid-break w-full">The subject of the present Contract is the vehicle owned by the Contractor having the following characteristics & providing services for the following sites as & when required:-</p>
                           
-                          <div className="avoid-break mt-2">
-                            <table className="w-full text-left border-collapse border border-slate-400">
+                          <div className="avoid-break mt-2 w-full">
+                            <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
                               <thead>
                                 <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
-                                  <th className="py-2 px-2 border-r border-slate-400">Project Site Name</th>
-                                  <th className="py-2 px-2 border-r border-slate-400">Vehicle Type</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-center">Qty (Nos)</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-right">Rate/Per Month</th>
-                                  <th className="py-2 px-2 text-slate-900 w-1/3">Remarks</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 w-[20%]">Project Site Name</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 w-[25%]">Vehicle Type</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Qty</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-[15%]">Rate/Month</th>
+                                  <th className="py-2 px-2 text-slate-900 w-[30%]">Remarks</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {historyPoItems.map((item, idx) => (
                                   <tr key={idx} className="border-b border-slate-400">
-                                    <td className="py-3 px-2 border-r border-slate-400 font-bold" contentEditable="true">{selectedHistoryTicket.project_name}</td>
-                                    <td className="py-3 px-2 border-r border-slate-400 font-mono text-slate-900" contentEditable="true">{item.product_description}</td>
+                                    <td className="py-3 px-2 border-r border-slate-400 font-bold break-words" contentEditable="true">{selectedHistoryTicket.project_name}</td>
+                                    <td className="py-3 px-2 border-r border-slate-400 font-mono text-slate-900 break-words" contentEditable="true">{item.product_description}</td>
                                     <td className="py-3 px-2 border-r border-slate-400 text-center font-mono" contentEditable="true">{item.quantity || 1}</td>
                                     <td className="py-3 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                                    <td className="py-3 px-2 text-slate-800 leading-tight" contentEditable="true">{item.special_terms || "24 hours, 9 seaters, working in all shifts, Diesel cost will be paid at actuals, 1 Ltr for 10 km, Driver and maintenance under Contractor scope."}</td>
+                                    <td className="py-3 px-2 text-slate-800 leading-tight break-words" contentEditable="true">{item.special_terms || "24 hours, 9 seaters, working in all shifts, Diesel cost will be paid at actuals, 1 Ltr for 10 km, Driver and maintenance under Contractor scope."}</td>
                                   </tr>
                                 ))}
                               </tbody>
                             </table>
                             <p className="text-[11px] font-bold text-slate-900 mt-2">GST Extra as applicable</p>
                           </div>
-                          <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded">
+                          <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded w-full">
                             <p className="font-bold text-[12px] avoid-break">NOTE: -</p>
                             <p className="avoid-break">1. Duty hrs shall be as per site schedule.</p>
                             <p className="avoid-break">2. Log Book will be maintained in attached prescribed form and will be signed by user for each trip.</p>
@@ -1069,41 +1121,41 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       {/* 🏢 3. GUEST HOUSE ACCOMMODATION */}
                       {/* ========================================================= */}
                       {selectedHistoryTicket.category === 'ACCOMMODATION' && (
-                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
+                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                           {renderBrandedHeader("GUEST HOUSE RENTAL CONTRACT", `AEL/${primaryLine.vendor_name?.split(' ')[0]?.toUpperCase() || 'GH'}-PO`)}
                           
-                          <div className="text-sm transition-all avoid-break" contentEditable="true">
+                          <div className="text-sm transition-all avoid-break w-full" contentEditable="true">
                             <p className="font-bold text-slate-900">M/s. {primaryLine.vendor_name}</p>
-                            <p className="text-slate-600 leading-normal w-1/2">{primaryLine.vendor_address || "Address Pending"}</p>
+                            <p className="text-slate-600 leading-normal w-3/4">{primaryLine.vendor_address || "Address Pending"}</p>
                             <p className="text-slate-800 font-bold mt-4">Subject: Rental Contract for Guest House for M/s. Aarvi Encon Ltd's - [{selectedHistoryTicket.project_name}]</p>
                             <p className="mt-4 text-xs text-slate-800">Dear Sir,</p>
                             <p className="text-xs mt-2">With reference to your quotation of the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order to rent a Guest House with you as per the terms & conditions mentioned in this contract.</p>
                             <p className="text-xs mt-2">Mr. {primaryLine.vendor_name}, hereinafter referred to as the "Contractor" of the Guest House and M/s. Aarvi Encon Ltd, hereinafter referred to as the "Client".</p>
                           </div>
-                          <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break">Article 1</p>
-                          <p className="text-xs -mt-2 avoid-break">The subject of the present Contract is the Guest House owned by the Contractor, having the following characteristics & providing service for the following sites as & when required:-</p>
+                          <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break w-full">Article 1</p>
+                          <p className="text-xs -mt-2 avoid-break w-full">The subject of the present Contract is the Guest House owned by the Contractor, having the following characteristics & providing service for the following sites as & when required:-</p>
                           
-                          <div className="avoid-break mt-2">
-                            <table className="w-full text-left border-collapse border border-slate-400">
+                          <div className="avoid-break mt-2 w-full">
+                            <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
                               <thead>
                                 <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
-                                  <th className="py-2 px-2 border-r border-slate-400">Project Site Name</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-12">Qty</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-12">UOM</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-24">Rate/Month/<br/>Per Room (Rs)</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-24">Total</th>
-                                  <th className="py-2 px-2 text-slate-900 w-1/3">Remarks</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 w-[20%]">Project Site Name</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Qty</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">UOM</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-[15%]">Rate/Month</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-[15%]">Total</th>
+                                  <th className="py-2 px-2 text-slate-900 w-[30%]">Remarks</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {historyPoItems.map((item, idx) => (
                                   <tr key={idx} className="border-b border-slate-400">
-                                    <td className="py-3 px-2 border-r border-slate-400 font-bold" contentEditable="true">{selectedHistoryTicket.project_name}</td>
+                                    <td className="py-3 px-2 border-r border-slate-400 font-bold break-words" contentEditable="true">{selectedHistoryTicket.project_name}</td>
                                     <td className="py-3 px-2 border-r border-slate-400 text-center font-mono" contentEditable="true">{item.quantity ? `0${item.quantity}` : "01"}</td>
                                     <td className="py-3 px-2 border-r border-slate-400 text-center font-mono" contentEditable="true">Nos</td>
                                     <td className="py-3 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{(item.base_total_value / (item.quantity || 1)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
                                     <td className="py-3 px-2 border-r border-slate-400 text-right font-mono font-bold" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
-                                    <td className="py-3 px-2 text-slate-800 leading-tight" contentEditable="true">
+                                    <td className="py-3 px-2 text-slate-800 leading-tight break-words" contentEditable="true">
                                       {item.special_terms || `1) Monthly Rent Per Month: INR ${(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}\n2) 7BHK\n3) Electricity bill for Aarvi Scope`}
                                     </td>
                                   </tr>
@@ -1112,7 +1164,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                             </table>
                             <p className="text-[11px] text-slate-900 mt-2 font-bold">NOTE: -<br/>1. All rooms and washrooms should be properly available and in a hygienic condition at the time of shifting candidates.</p>
                           </div>
-                          <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded">
+                          <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded w-full">
                             <div className="avoid-break">
                               <p className="font-bold text-[12px] underline">Article 2</p>
                               <p className="mt-1">Duration of contract: The contract is valid from {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-05-${currentYear}`} to {primaryLine.contract_end_date ? new Date(primaryLine.contract_end_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-5-${nextYear}`} (12 Months). (Extendable or reducible).<br/>This contract is valid as per the client/site requirement of the Guest House. At the end of the requirement period both parties should agree on the discontinuation of the service & the rental contract automatically gets canceled & void. Client & Contractor can give a day's Notice to cancel the services.</p>
@@ -1167,30 +1219,33 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       {/* 🍱 4. FOOD SUPPLY PO */}
                       {/* ========================================================= */}
                       {selectedHistoryTicket.category === 'FOOD' && (
-                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10">
+                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                           {renderBrandedHeader("Purchase Order", `AEL/${primaryLine.vendor_name?.split(' ')[0]?.toUpperCase() || 'FOOD'}-PO`)}
                           
-                          <div className="text-sm transition-all mt-6 avoid-break" contentEditable="true">
+                          <div className="text-sm transition-all mt-6 avoid-break w-full" contentEditable="true">
                             <p className="font-bold text-slate-900">Mr. {primaryLine.vendor_name}</p>
-                            <p className="text-slate-600 leading-normal">{primaryLine.vendor_address || "Address Pending"}</p>
+                            <p className="text-slate-600 leading-normal w-3/4">{primaryLine.vendor_address || "Address Pending"}</p>
                             <p className="text-slate-800 mt-6">Dear Sir,</p>
                             <p className="text-slate-900 font-bold mt-2">Subject: Purchase Order for Food.</p>
                             <p className="text-[12px] mt-4 leading-relaxed">With reference to your Quotation, dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `26.05.${currentYear}`}, and the subsequent discussion with our Mr Kishor Nikam (BUSINESS DEVELOPMENT), we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order for the supply of Food as mentioned below:-</p>
                           </div>
-                          <div className="pl-6 py-6 font-bold text-[13px] text-slate-900 space-y-4 border-l-4 border-slate-300 ml-4 my-6 avoid-break" contentEditable="true">
+
+                          <div className="pl-6 py-6 font-bold text-[13px] text-slate-900 space-y-4 border-l-4 border-slate-300 ml-4 my-6 avoid-break w-full" contentEditable="true">
                             {historyPoItems.map((item, idx) => (
-                              <p key={idx}>{item.product_description} Rate Rs. {item.unit_price || item.base_total_value}/- {item.special_terms || 'per meal'}.</p>
+                              <p key={idx} className="break-words">{item.product_description} Rate Rs. {item.unit_price || item.base_total_value}/- {item.special_terms || 'per meal'}.</p>
                             ))}
                             {historyPoItems.length === 1 && (
                                <p>Sunday Rate Rs. {historyPoItems[0].unit_price ? historyPoItems[0].unit_price + 40 : 300}/- per meal Special Dinner.</p>
                             )}
                           </div>
-                          <div className="text-[12px] space-y-2 mt-4 avoid-break" contentEditable="true">
+
+                          <div className="text-[12px] space-y-2 mt-4 avoid-break w-full" contentEditable="true">
                             <p><strong>Terms of payment:-</strong> {primaryLine.payment_terms || "100% payment to be made against submission of Invoices"}</p>
                             <p><strong>Project Name:</strong> {selectedHistoryTicket.project_name}</p>
-                            <p><strong>Our GST Registration no.:</strong> 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.</p>
+                            <p><strong>Our GST Registration no.:</strong> 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
                           </div>
-                          <div contentEditable="true" className="pt-6 text-[12px] leading-relaxed text-slate-800 space-y-4">
+
+                          <div className="pt-6 text-[12px] leading-relaxed text-slate-800 space-y-4 w-full" contentEditable="true">
                             <p className="font-bold underline mb-4 avoid-break">The placement of work Order is subject to the following Terms & Conditions:-</p>
                             
                             <div className="avoid-break">
@@ -1198,7 +1253,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                             </div>
                             
                             <div className="avoid-break">
-                              <p><strong>2. CORRESPONDENCE:-</strong><br/>All the correspondence pertaining to this order is to be made to: -<br/>M/s.AarviEnconLtd.<br/>B-1/603, 6th Floor, Marathon Innova,<br/>Marathon Nextgen Complex,<br/>G.K. Marg., Lower Parel (W),<br/>Mumbai 400013.<br/>Tel: 022-40499999</p>
+                              <p><strong>2. CORRESPONDENCE:-</strong><br/>All the correspondence pertaining to this order is to be made to: -<br/>M/s.AarviEnconLtd.<br/>B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg., Lower Parel (W), Mumbai 400013.<br/>Tel: 022-40499999</p>
                             </div>
                             
                             <div className="avoid-break">
@@ -1218,21 +1273,22 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         </div>
                       )}
 
-                      {/* UNIVERSAL SIGNATURE STRIP */}
-                      <div className="pt-16 mt-16 flex justify-between items-end text-xs font-sans relative z-10 avoid-break" contentEditable="false">
-                        <div className="w-64 text-left space-y-1">
-                          <p className="text-[11px] text-slate-800 mb-10">Yours faithfully<br/><strong>For {selectedHistoryTicket.category === 'GOODS' || selectedHistoryTicket.category === 'FOOD' ? 'M/s. AARVI ENCON LTD.' : 'AARVI ENCON LIMITED'}</strong></p>
-                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2">Authorized Signatory</span>
+                      {/* 🎯 UNIVERSAL 2-COLUMN SIGNATURE STRIP */}
+                      <div className="pt-12 mt-12 flex justify-between items-end text-xs font-sans relative z-10 avoid-break w-full" contentEditable="false">
+                        <div className="w-56 text-left space-y-1">
+                          <p className="text-[11px] text-slate-800 mb-8">Yours faithfully<br/><strong>For {selectedHistoryTicket.category === 'GOODS' || selectedHistoryTicket.category === 'FOOD' ? 'M/s. AARVI ENCON LTD.' : 'AARVI ENCON LIMITED'}</strong></p>
+                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-1.5">Authorized Signatory</span>
                         </div>
                         
                         {selectedHistoryTicket.category === 'FOOD' && (
-                          <div className="text-[10px] font-mono font-black text-slate-400 select-none tracking-widest self-end pb-1 hidden sm:block">
+                          <div className="text-[10px] font-mono font-black text-slate-400 select-none tracking-widest self-end pb-1 hidden md:block">
                             AEL-04-IMSF-PURCH-004
                           </div>
                         )}
-                        <div className="w-64 text-right space-y-1">
-                          <p className="text-[11px] text-slate-800 mb-10 text-center">{selectedHistoryTicket.category === 'GOODS' ? 'Signature & Seal of the Supplier' : 'Signature & seal of the contractor'}<br/>{selectedHistoryTicket.category === 'GOODS' ? 'Accepted & Agreed of the above Said Terms and Conditions' : 'accepted & agreed of the above said terms & conditions'}</p>
-                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2 text-center">Accepted by {selectedHistoryTicket.category === 'GOODS' ? 'Supplier' : 'Contractor'}</span>
+
+                        <div className="w-56 text-right space-y-1">
+                          <p className="text-[11px] text-slate-800 mb-8 text-center">{selectedHistoryTicket.category === 'GOODS' ? 'Signature & Seal of the Supplier' : 'Signature & seal of the contractor'}<br/>{selectedHistoryTicket.category === 'GOODS' ? 'Accepted & Agreed of the above Said Terms and Conditions' : 'accepted & agreed of the above said terms & conditions'}</p>
+                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-1.5 text-center">Accepted by {selectedHistoryTicket.category === 'GOODS' ? 'Supplier' : 'Contractor'}</span>
                         </div>
                       </div>
 
@@ -1249,7 +1305,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
 
               {/* AUDIT LOGS TRAIL SECTION */}
               {selectedHistoryTicket && historyLogs.length > 0 && (
-                <Card className="p-4 space-y-4 bg-white border-slate-200">
+                <Card className="p-4 space-y-4 bg-white border-slate-200 print:hidden">
                   <div className="flex items-center space-x-2 text-slate-500 font-bold text-xs uppercase tracking-wider">
                     <MessageSquare size={14} /> <span>Complete Requisition Audit Log</span>
                   </div>
