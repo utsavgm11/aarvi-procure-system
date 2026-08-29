@@ -41,6 +41,8 @@ cloudinary.config(
 
 UPLOAD_DIR = "storage/quotation_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+# 🎯 Directory for saved PO HTML templates
+os.makedirs("storage/po_templates", exist_ok=True)
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
 # 2. Complete CORS Rules
@@ -157,6 +159,10 @@ class FinanceApprovalPayload(BaseModel):
     remarks: Optional[str] = None
     selected_bids: Optional[dict] = None  
     items: Optional[List[UpdateRequisitionItem]] = None 
+
+# 🎯 Payload for saving custom edited PO templates
+class SaveTemplatePayload(BaseModel):
+    html_content: str
 
 
 # -------------------------------------------------------------------
@@ -980,132 +986,196 @@ def get_purchase_orders_awaiting_signature(db: Session = Depends(get_db)):
     return response
 
 # -------------------------------------------------------------------
-# 🎯 1. NATIVE PDF ENDPOINT (Pure Python - No Playwright needed)
+# 💾 SAVE & LOAD EDITED PO HTML TEMPLATES
+# -------------------------------------------------------------------
+@app.put("/api/purchase-orders/{po_number}/template")
+def save_po_template(po_number: str, payload: SaveTemplatePayload, db: Session = Depends(get_db)):
+    file_path = os.path.join("storage/po_templates", f"{po_number}.html")
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(payload.html_content)
+        return {"message": "PO Template saved successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save template: {str(e)}")
+
+@app.get("/api/purchase-orders/{po_number}/template")
+def get_po_template(po_number: str):
+    file_path = os.path.join("storage/po_templates", f"{po_number}.html")
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            return {"html_content": f.read()}
+    return {"html_content": None}
+
+# -------------------------------------------------------------------
+# 🎯 1. NATIVE PDF ENDPOINT (Pure Python - Full T&C Template)
 # -------------------------------------------------------------------
 @app.get("/api/purchase-orders/{po_number}/download-pdf")
 def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase Order not found.")
+    if not po: raise HTTPException(status_code=404, detail="Purchase Order not found.")
         
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
-    winning_quotes = db.query(models.Quotation).filter(
-        models.Quotation.ticket_number == po.ticket_number,
-        models.Quotation.is_selected == True
-    ).all()
-    
+    winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po.ticket_number, models.Quotation.is_selected == True).all()
     if not winning_quotes:
         winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po.ticket_number).all()
         
     primary_quote = winning_quotes[0] if winning_quotes else None
-    vendor_name = primary_quote.vendor_name if primary_quote else "N/A"
-    vendor_address = primary_quote.vendor_address if primary_quote else "N/A"
-    vendor_contact = primary_quote.vendor_contact if primary_quote else "N/A"
-    vendor_email = primary_quote.vendor_email if primary_quote else "N/A"
-    payment_terms = primary_quote.payment_terms if primary_quote else "100% Payable on delivery"
-    time_of_delivery = primary_quote.time_of_delivery if primary_quote else "2-3 Days"
+    
+    # 🎯 FIX: Correctly handle 'None' values with strict fallbacks
+    vendor_name = getattr(primary_quote, 'vendor_name', None) or "N/A"
+    vendor_address = getattr(primary_quote, 'vendor_address', None) or "Address Not Provided"
+    vendor_contact = getattr(primary_quote, 'vendor_contact', None) or "N/A"
+    vendor_email = getattr(primary_quote, 'vendor_email', None) or "N/A"
+    payment_terms = getattr(primary_quote, 'payment_terms', None) or "100% Payment shall be paid after receipt of material at site."
+    time_of_delivery = getattr(primary_quote, 'time_of_delivery', None) or "2-3 Days"
+    site_contact = getattr(primary_quote, 'site_contact_person', None) or "Site Coordinator"
+    site_phone = getattr(primary_quote, 'site_contact_phone', None) or "N/A"
+    delivery_address = getattr(primary_quote, 'delivery_address', None) or "Address Pending"
+    contract_date = getattr(primary_quote, 'contract_start_date', None)
+    contract_date_str = contract_date.strftime('%d/%m/%Y') if contract_date else "Recently Submitted"
     project_name = ticket.project_name if ticket else "N/A"
 
     base_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
     net_total = sum(float(q.net_amount_payable or q.total_amount or 0) for q in winning_quotes)
     gst_adj = net_total - base_total
 
-    # Build Item Rows for Table (Classic HTML for xhtml2pdf)
+    def number_to_words(num):
+        if num == 0: return 'Zero'
+        ones = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen ']
+        tens = ['', '', 'Twenty ', 'Thirty ', 'Forty ', 'Fifty ', 'Sixty ', 'Seventy ', 'Eighty ', 'Ninety ']
+        def convert_less_thousand(n):
+            s = ''
+            if n >= 100: s += ones[int(n // 100)] + 'Hundred '; n %= 100
+            if n >= 20: s += tens[int(n // 10)]; n %= 10
+            if n > 0: s += ones[int(n)]
+            return s
+        str_val = ''
+        crore = int(num // 10000000); num %= 10000000
+        lakh = int(num // 100000); num %= 100000
+        thousand = int(num // 1000); num %= 1000
+        if crore > 0: str_val += convert_less_thousand(crore) + 'Crore '
+        if lakh > 0: str_val += convert_less_thousand(lakh) + 'Lakh '
+        if thousand > 0: str_val += convert_less_thousand(thousand) + 'Thousand '
+        if num > 0: str_val += convert_less_thousand(num)
+        return str_val.strip() + ' Only'
+
+    amount_in_words = f"Rupees {number_to_words(int(round(net_total)))}"
+
     table_rows_html = ""
     for idx, q in enumerate(winning_quotes, start=1):
         qty = q.quantity or 1
         unit_rate = (q.base_total_value or 0) / qty
-        desc = f"{q.product_description} ({q.make_brand})" if q.make_brand else q.product_description
+        desc = f"{q.product_description} ({q.make_brand})" if q.make_brand else (q.product_description or 'Item')
         table_rows_html += f"""
         <tr>
             <td style="text-align: center; border: 1px solid #94a3b8; padding: 5px;">0{idx}</td>
             <td style="border: 1px solid #94a3b8; padding: 5px; font-weight: bold;">{desc}</td>
             <td style="text-align: center; border: 1px solid #94a3b8; padding: 5px;">{qty} Nos</td>
-            <td style="text-align: right; border: 1px solid #94a3b8; padding: 5px;">Rs. {unit_rate:,.2f}</td>
-            <td style="text-align: right; border: 1px solid #94a3b8; padding: 5px; font-weight: bold;">Rs. {q.base_total_value:,.2f}</td>
+            <td style="text-align: right; border: 1px solid #94a3b8; padding: 5px;">{unit_rate:,.2f}</td>
+            <td style="text-align: right; border: 1px solid #94a3b8; padding: 5px; font-weight: bold;">{q.base_total_value:,.2f}</td>
         </tr>
         """
 
+    # 🎯 FIX: Injected Full Terms & Conditions into PDF Template
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <style>
             @page {{ size: a4 portrait; margin: 15mm; }}
-            body {{ font-family: Helvetica, sans-serif; font-size: 10pt; color: #1e293b; }}
+            body {{ font-family: Helvetica, sans-serif; font-size: 9.5pt; color: #1e293b; line-height: 1.4; }}
             .border-table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
-            .border-table th {{ background-color: #f1f5f9; border: 1px solid #94a3b8; padding: 5px; font-size: 9pt; text-align: left; }}
+            .border-table th {{ background-color: #f1f5f9; border: 1px solid #94a3b8; padding: 5px; font-size: 8.5pt; text-align: left; }}
+            .tc-section p {{ margin-bottom: 6px; }}
         </style>
     </head>
     <body>
         <table style="width: 100%; border-bottom: 2px solid #2c2a57; padding-bottom: 10px;">
             <tr>
-                <td style="font-size: 18pt; font-weight: bold; color: #2c2a57;">AARVI ENCON LIMITED</td>
-                <td style="text-align: right; font-size: 10pt;"><b>Date:</b> {date.today().strftime('%d/%m/%Y')}</td>
+                <td style="font-size: 16pt; font-weight: bold; color: #2c2a57;">AARVI ENCON LIMITED</td>
+                <td style="text-align: right; font-size: 9pt;"><b>Ref:</b> AEL/{vendor_name[:6].upper()}-PO/2026-27/{po_number.split('-')[-1]}<br/><b>Date:</b> {date.today().strftime('%d/%m/%Y')}</td>
             </tr>
         </table>
         
-        <h2 style="text-align: center; font-size: 14pt;">PURCHASE ORDER</h2>
+        <h2 style="text-align: center; font-size: 12pt; margin-top: 10px; background-color: #f1f5f9; padding: 5px; border: 1px solid #94a3b8;">PURCHASE ORDER</h2>
         
         <table style="width: 100%; margin-top: 10px;">
             <tr>
-                <td style="width: 50%; vertical-align: top;">
+                <td style="width: 100%; vertical-align: top;">
                     <b>M/s. {vendor_name}</b><br/>
                     {vendor_address}<br/>
-                    Contact: {vendor_contact}<br/>
-                    Email: {vendor_email}
-                </td>
-                <td style="width: 50%; vertical-align: top; text-align: right;">
-                    <b>PO No:</b> {po_number}<br/>
-                    <b>Project:</b> {project_name}<br/>
+                    Cell No.: {vendor_contact}<br/>
+                    EMAIL:- {vendor_email}
                 </td>
             </tr>
         </table>
 
+        <p style="margin-top: 15px;"><b>Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}.</b></p>
+        <p>Dear Sir,<br/>With reference to Quotation Dated {contract_date_str}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of goods with your company.</p>
+
         <table class="border-table">
             <thead>
                 <tr>
-                    <th style="width: 10%; text-align: center;">Sr.</th>
-                    <th style="width: 45%;">Description</th>
-                    <th style="width: 15%; text-align: center;">Qty</th>
-                    <th style="width: 15%; text-align: right;">Rate</th>
-                    <th style="width: 15%; text-align: right;">Total</th>
+                    <th style="width: 8%; text-align: center;">Sr.No.</th>
+                    <th style="width: 47%;">Description</th>
+                    <th style="width: 15%; text-align: center;">QUANTITY</th>
+                    <th style="width: 15%; text-align: right;">RATE UNIT</th>
+                    <th style="width: 15%; text-align: right;">Total (Rs.)</th>
                 </tr>
             </thead>
             <tbody>
                 {table_rows_html}
                 <tr>
-                    <td colspan="4" style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 5px;">Basic Total:</td>
-                    <td style="text-align: right; border: 1px solid #94a3b8; padding: 5px;">Rs. {base_total:,.2f}</td>
+                    <td colspan="4" style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 5px;">Basic Total Value</td>
+                    <td style="text-align: right; border: 1px solid #94a3b8; padding: 5px;">{base_total:,.2f}</td>
                 </tr>
                 <tr>
-                    <td colspan="4" style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 5px;">GST Adjustment:</td>
-                    <td style="text-align: right; border: 1px solid #94a3b8; padding: 5px;">Rs. {gst_adj:,.2f}</td>
+                    <td colspan="4" style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 5px;">GST Adjustment</td>
+                    <td style="text-align: right; border: 1px solid #94a3b8; padding: 5px;">{gst_adj:,.2f}</td>
                 </tr>
                 <tr>
-                    <td colspan="4" style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 5px; background-color: #f1f5f9;">Net Payable:</td>
-                    <td style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 5px; background-color: #f1f5f9;">Rs. {net_total:,.2f}</td>
+                    <td colspan="4" style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 5px; background-color: #f1f5f9;">Net Amount Payable</td>
+                    <td style="text-align: right; font-weight: bold; border: 1px solid #94a3b8; padding: 5px; background-color: #f1f5f9;">{net_total:,.2f}</td>
+                </tr>
+                <tr>
+                    <td colspan="5" style="text-align: center; font-style: italic; border: 1px solid #94a3b8; padding: 5px;">({amount_in_words})</td>
                 </tr>
             </tbody>
         </table>
 
-        <div style="margin-top: 20px; line-height: 1.5;">
-            <b>Payment Terms:</b> {payment_terms}<br/>
-            <b>Delivery Time:</b> {time_of_delivery}<br/>
-            <b>Standard Terms:</b> This is a fixed-price purchase order. All materials supplied must strictly adhere to technical specifications.
+        <div class="tc-section" style="margin-top: 15px;">
+            <p><b>a) TERMS OF PAYMENTS:</b> {payment_terms}</p>
+            <p><b>b) DELIVERY:</b> Time is an essence of this Purchase Order. The material has to be delivered within {time_of_delivery} from the date of issue of PO.</p>
+            <p><b>c) PROJECT:</b> {project_name}</p>
+            
+            <p style="margin-top: 15px;"><b>Our GST Registration no.:</b> 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
+            <p><b>The placement of order is subject to the following Terms & Conditions:-</b></p>
+            
+            <p><b>1. PRICE:</b> The cost of Purchase with GST as shown above is Rs. {net_total:,.2f}/- ({amount_in_words}). This is a fixed-price order and no escalation is applicable.</p>
+            <p><b>2. QUALITY:</b> If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.</p>
+            <p><b>3. LIQUIDITY DAMAGE: (NOT APPLICABLE)</b> If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.</p>
+            <p><b>4. TAXES & DUTIES:</b> Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
+            <p><b>5. CORRESPONDENCE:</b> All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013. Tel: 022-40499999</p>
+            <p><b>6. REFERENCE:</b> Quotation Dated {contract_date_str}.</p>
+            <p><b>7. BILLING:</b> Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents: a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
+            <p><b>8. DELIVERY ADDRESS:</b> Contract Person: {site_contact}, Contact No.: {site_phone}. {project_name}. {delivery_address}</p>
+            <p><b>9. LEGAL COMPLIANCE:</b> Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai.</p>
+            
+            <p style="margin-top: 15px;">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.</p>
+            <p>Thanking you,</p>
         </div>
 
-        <table style="width: 100%; margin-top: 50px;">
+        <table style="width: 100%; margin-top: 40px; page-break-inside: avoid;">
             <tr>
                 <td style="width: 50%;">
-                    <b>For AARVI ENCON LIMITED</b><br/><br/><br/><br/>
-                    ___________________________<br/>
-                    Authorized Signatory
+                    Yours faithfully<br/>
+                    <b>For M/s. AARVI ENCON LTD.</b><br/><br/><br/><br/>
+                    <span style="border-top: 1px solid #000; padding-top: 5px;">AUTHORIZED SIGNATORY</span>
                 </td>
                 <td style="width: 50%; text-align: right;">
-                    <b>Accepted By Vendor</b><br/><br/><br/><br/>
-                    ___________________________<br/>
-                    Signature & Seal
+                    Signature & Seal of the Supplier<br/>
+                    Accepted & Agreed of the above Said Terms and Conditions<br/><br/><br/><br/>
+                    <span style="border-top: 1px solid #000; padding-top: 5px;">ACCEPTED BY SUPPLIER</span>
                 </td>
             </tr>
         </table>
@@ -1128,63 +1198,90 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
 @app.get("/api/purchase-orders/{po_number}/download-docx")
 def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase Order not found.")
-        
-    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
-    winning_quotes = db.query(models.Quotation).filter(
-        models.Quotation.ticket_number == po.ticket_number,
-        models.Quotation.is_selected == True
-    ).all()
+    if not po: raise HTTPException(status_code=404, detail="Purchase Order not found.")
     
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+    winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po.ticket_number, models.Quotation.is_selected == True).all()
     if not winning_quotes:
         winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po.ticket_number).all()
 
     primary_quote = winning_quotes[0] if winning_quotes else None
-    vendor_name = primary_quote.vendor_name if primary_quote else "N/A"
-    vendor_address = primary_quote.vendor_address if primary_quote else "N/A"
-    vendor_contact = primary_quote.vendor_contact if primary_quote else "N/A"
-    vendor_email = primary_quote.vendor_email if primary_quote else "N/A"
-    payment_terms = primary_quote.payment_terms if primary_quote else "100% Payable on delivery"
+    
+    # 🎯 FIX: Correctly handle 'None' values with strict fallbacks
+    vendor_name = getattr(primary_quote, 'vendor_name', None) or "N/A"
+    vendor_address = getattr(primary_quote, 'vendor_address', None) or "Address Not Provided"
+    vendor_contact = getattr(primary_quote, 'vendor_contact', None) or "N/A"
+    vendor_email = getattr(primary_quote, 'vendor_email', None) or "N/A"
+    payment_terms = getattr(primary_quote, 'payment_terms', None) or "100% Payment shall be paid after receipt of material at site."
+    time_of_delivery = getattr(primary_quote, 'time_of_delivery', None) or "2-3 Days"
+    site_contact = getattr(primary_quote, 'site_contact_person', None) or "Site Coordinator"
+    site_phone = getattr(primary_quote, 'site_contact_phone', None) or "N/A"
+    delivery_address = getattr(primary_quote, 'delivery_address', None) or "Address Pending"
+    contract_date = getattr(primary_quote, 'contract_start_date', None)
+    contract_date_str = contract_date.strftime('%d/%m/%Y') if contract_date else "Recently Submitted"
+    project_name = ticket.project_name if ticket else "N/A"
 
     base_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
     net_total = sum(float(q.net_amount_payable or q.total_amount or 0) for q in winning_quotes)
     gst_adj = net_total - base_total
 
-    # Create Document dynamically (No template required)
-    doc = Document()
+    def number_to_words(num):
+        if num == 0: return 'Zero'
+        ones = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen ']
+        tens = ['', '', 'Twenty ', 'Thirty ', 'Forty ', 'Fifty ', 'Sixty ', 'Seventy ', 'Eighty ', 'Ninety ']
+        def convert_less_thousand(n):
+            s = ''
+            if n >= 100: s += ones[int(n // 100)] + 'Hundred '; n %= 100
+            if n >= 20: s += tens[int(n // 10)]; n %= 10
+            if n > 0: s += ones[int(n)]
+            return s
+        str_val = ''
+        crore = int(num // 10000000); num %= 10000000
+        lakh = int(num // 100000); num %= 100000
+        thousand = int(num // 1000); num %= 1000
+        if crore > 0: str_val += convert_less_thousand(crore) + 'Crore '
+        if lakh > 0: str_val += convert_less_thousand(lakh) + 'Lakh '
+        if thousand > 0: str_val += convert_less_thousand(thousand) + 'Thousand '
+        if num > 0: str_val += convert_less_thousand(num)
+        return str_val.strip() + ' Only'
 
-    # Document Margins (0.5 inch)
+    amount_in_words = f"Rupees {number_to_words(int(round(net_total)))}"
+
+    doc = Document()
     for section in doc.sections:
-        section.top_margin = Inches(0.5)
-        section.bottom_margin = Inches(0.5)
+        section.top_margin = Inches(0.4)
+        section.bottom_margin = Inches(0.4)
         section.left_margin = Inches(0.5)
         section.right_margin = Inches(0.5)
 
-    # Title / Ref
+    # 🎯 EMBED LETTERHEAD IMAGE AT THE TOP
+    letterhead_path = "assets/letter_head.jpg"
+    if os.path.exists(letterhead_path):
+        p_lh = doc.add_paragraph()
+        p_lh.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_lh.add_run().add_picture(letterhead_path, width=Inches(7.2))
+
+    # Ref & Title
     p_ref = doc.add_paragraph()
     p_ref.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     run_ref = p_ref.add_run(f"Ref: AEL/{vendor_name[:6].upper()}-PO/2026-27/{po_number.split('-')[-1]}\nDate: {date.today().strftime('%d/%m/%Y')}")
     run_ref.font.size = Pt(9)
-    run_ref.font.name = 'Arial'
 
     p_title = doc.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run_title = p_title.add_run("PURCHASE ORDER")
     run_title.font.bold = True
-    run_title.font.size = Pt(14)
-    run_title.font.color.rgb = RGBColor(0x2C, 0x2A, 0x57)
+    run_title.font.size = Pt(12)
 
     # Vendor Details
     p_vendor = doc.add_paragraph()
-    r = p_vendor.add_run(f"M/s. {vendor_name}\n")
-    r.font.bold = True
-    r.font.size = Pt(11)
-    p_vendor.add_run(f"{vendor_address}\nContact: {vendor_contact} | Email: {vendor_email}\n").font.size = Pt(9)
+    p_vendor.add_run(f"M/s. {vendor_name}\n").bold = True
+    p_vendor.add_run(f"{vendor_address}\nCell No.: {vendor_contact} | EMAIL:- {vendor_email}\n").font.size = Pt(9)
 
-    doc.add_paragraph(f"Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}").runs[0].font.bold = True
+    doc.add_paragraph(f"Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}.").runs[0].font.bold = True
+    doc.add_paragraph(f"Dear Sir,\nWith reference to Quotation Dated {contract_date_str}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of goods with your company.")
 
-    # Table
+    # Items Table
     table = doc.add_table(rows=1, cols=5)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.style = 'Table Grid'
@@ -1207,28 +1304,49 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
         row_cells[0].text = f"0{idx}"
         row_cells[1].text = q.product_description or 'Item'
         row_cells[2].text = f"{qty} Nos"
-        row_cells[3].text = f"Rs. {unit_rate:,.2f}"
-        row_cells[4].text = f"Rs. {q.base_total_value:,.2f}"
+        row_cells[3].text = f"{unit_rate:,.2f}"
+        row_cells[4].text = f"{q.base_total_value:,.2f}"
 
-    # Total Rows
     r1 = table.add_row().cells
-    r1[3].text = "Basic Total:"
-    r1[4].text = f"Rs. {base_total:,.2f}"
+    r1[3].text = "Basic Total Value"
+    r1[4].text = f"{base_total:,.2f}"
     
     r2 = table.add_row().cells
-    r2[3].text = "GST Adjustment:"
-    r2[4].text = f"Rs. {gst_adj:,.2f}"
+    r2[3].text = "GST Adjustment"
+    r2[4].text = f"{gst_adj:,.2f}"
 
     r3 = table.add_row().cells
-    r3[3].text = "Net Amount Payable:"
-    r3[4].text = f"Rs. {net_total:,.2f}"
+    r3[3].text = "Net Amount Payable"
+    r3[4].text = f"{net_total:,.2f}"
     r3[4].paragraphs[0].runs[0].font.bold = True
 
-    # Payment & Terms
-    doc.add_paragraph().add_run(f"\nPayment Terms: {payment_terms}").font.bold = True
-    doc.add_paragraph().add_run(f"Project Name: {ticket.project_name if ticket else 'N/A'}").font.bold = True
+    doc.add_paragraph(f"({amount_in_words})").alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # Signatures Table
+    # Full Terms
+    doc.add_paragraph().add_run(f"a) TERMS OF PAYMENTS: {payment_terms}").font.bold = True
+    doc.add_paragraph().add_run(f"b) DELIVERY: Time is an essence of this Purchase Order. The material has to be delivered within {time_of_delivery} from the date of issue of PO.").font.bold = True
+    doc.add_paragraph().add_run(f"c) PROJECT: {project_name}").font.bold = True
+
+    doc.add_paragraph("Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)")
+    doc.add_paragraph("The placement of order is subject to the following Terms & Conditions:-").runs[0].font.bold = True
+
+    terms = [
+        f"1. PRICE: The cost of Purchase with GST as shown above is Rs. {net_total:,.2f}/-. This is a fixed-price order and no escalation is applicable.",
+        "2. QUALITY: If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.",
+        "3. LIQUIDITY DAMAGE: (NOT APPLICABLE) If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.",
+        "4. TAXES & DUTIES: Prevailing Taxes & Duties (i.e. GST) shall be as shown above.",
+        "5. CORRESPONDENCE: All the correspondence pertaining to this order is to be made to: M/s. Aarvi Encon Ltd., B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013. Tel: 022-40499999",
+        f"6. REFERENCE: Quotation Dated {contract_date_str}.",
+        "7. BILLING: Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents: a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.",
+        f"8. DELIVERY ADDRESS: Contract Person: {site_contact}, Contact No.: {site_phone}. {project_name}. {delivery_address}",
+        "9. LEGAL COMPLIANCE: Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai."
+    ]
+    for term in terms:
+        p = doc.add_paragraph(term)
+        p.runs[0].font.size = Pt(9)
+        
+    doc.add_paragraph("Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.\nThanking you,\nYours faithfully")
+
     sig_table = doc.add_table(rows=1, cols=2)
     sig_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     c1, c2 = sig_table.rows[0].cells
@@ -1238,7 +1356,6 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     stream = io.BytesIO()
     doc.save(stream)
     stream.seek(0)
-
     return StreamingResponse(
         stream,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1523,575 +1640,6 @@ async def update_po_tax_invoice_details(
     db.commit()
     return {"message": "Tax Invoice details saved successfully.", "tax_invoice_url": po.tax_invoice_url}
 
-
-# -------------------------------------------------------------------
-# 🏢 VENDOR MASTER DIRECTORY LAYER
-# -------------------------------------------------------------------
-class VendorCreatePayload(BaseModel):
-    name: str
-    address: Optional[str] = ""
-    contact_number: Optional[str] = ""
-    email: Optional[str] = ""
-
-@app.post("/api/vendors", status_code=201)
-def add_new_vendor(payload: VendorCreatePayload, db: Session = Depends(get_db)):
-    existing_vendor = db.query(models.Vendor).filter(models.Vendor.name == payload.name).first()
-    if existing_vendor:
-        raise HTTPException(status_code=400, detail="A vendor with this exact company name already exists in the master directory.")
-        
-    new_vendor = models.Vendor(
-        name=payload.name,
-        address=payload.address,
-        contact_number=payload.contact_number,
-        email=payload.email,
-        is_active=True
-    )
-    db.add(new_vendor)
-    db.commit()
-    return {"message": f"Vendor {payload.name} successfully added to Master Directory."}
-
-@app.get("/api/vendors", response_model=List[dict])
-def get_all_vendors(db: Session = Depends(get_db)):
-    vendors = db.query(models.Vendor).filter(models.Vendor.is_active == True).order_by(models.Vendor.name.asc()).all()
-    return [{"id": v.id, "name": v.name, "address": v.address, "contact_number": v.contact_number, "email": v.email} for v in vendors]    
-
-# -------------------------------------------------------------------
-# 🔐 AUTHENTICATION & LOGIN LAYER
-# -------------------------------------------------------------------
-class LoginPayload(BaseModel):
-    email: str
-    password: str
-
-@app.post("/api/auth/login")
-def login_user(payload: LoginPayload, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == payload.email).first()
-    if not user or user.password_hash != payload.password:
-        raise HTTPException(status_code=401, detail="Invalid email or password.")
-        
-    if getattr(user, 'is_active', True) == False:
-        raise HTTPException(status_code=403, detail="This account has been disabled by IT.")
-        
-    return {"id": user.id, "name": user.name, "email": user.email, "role": user.role, "empcode": getattr(user, 'empcode', 'N/A')}
-
-# -------------------------------------------------------------------
-# 🛡️ IT ADMIN & USER MANAGEMENT LAYER
-# -------------------------------------------------------------------
-class AdminCreateUserPayload(BaseModel):
-    empcode: str
-    name: str
-    email: str
-    password: str
-    role: str
-
-class AdminUserUpdatePayload(BaseModel):
-    name: str
-    empcode: str
-    role: str
-    password: Optional[str] = None  
-
-@app.get("/api/admin/users")
-def admin_get_all_users(db: Session = Depends(get_db)):
-    users = db.query(models.User).order_by(models.User.role.asc(), models.User.name.asc()).all()
-    return [{"id": u.id, "empcode": u.empcode, "name": u.name, "email": u.email, "role": u.role, "is_active": getattr(u, 'is_active', True)} for u in users]
-
-@app.post("/api/admin/users", status_code=201)
-def admin_create_user(payload: AdminCreateUserPayload, db: Session = Depends(get_db)):
-    if db.query(models.User).filter(models.User.email == payload.email).first():
-        raise HTTPException(status_code=400, detail="Email already registered.")
-    
-    if db.query(models.User).filter(models.User.empcode == payload.empcode).first():
-        raise HTTPException(status_code=400, detail=f"Employee Code {payload.empcode} is already in use!")
-    
-    new_user = models.User(
-        empcode=payload.empcode,
-        name=payload.name, 
-        email=payload.email, 
-        password_hash=payload.password, 
-        role=payload.role, 
-        is_active=True
-    )
-    db.add(new_user)
-    db.commit()
-    return {"message": f"User {payload.name} created successfully with code {payload.empcode}."}
-
-@app.put("/api/admin/users/{email}")
-def admin_update_user_profile(email: str, payload: AdminUserUpdatePayload, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == email).first()
-    if not user: raise HTTPException(status_code=404, detail="Target user not found.")
-    
-    if payload.empcode != user.empcode:
-        if db.query(models.User).filter(models.User.empcode == payload.empcode).first():
-            raise HTTPException(status_code=400, detail=f"Employee Code {payload.empcode} is already in use!")
-            
-    user.name = payload.name
-    user.empcode = payload.empcode
-    user.role = payload.role
-    if payload.password and payload.password.strip():
-        user.password_hash = payload.password.strip()
-    db.commit()
-    return {"message": f"Profile for {user.name} successfully updated."}
-
-@app.put("/api/admin/users/{email}/toggle-status")
-def admin_toggle_user_status(email: str, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == email).first()
-    if not user: raise HTTPException(status_code=404, detail="User account not found.")
-        
-    if user.email == "admin@aarviencon.com":
-        raise HTTPException(status_code=400, detail="Root System Admin account cannot be disabled.")
-    user.is_active = not user.is_active
-    db.commit()
-    
-    status_text = "Activated" if user.is_active else "Deactivated (Locked Out)"
-    return {"message": f"Account {email} status changed to: {status_text}."}
-
-@app.get("/api/users/{user_id}/notifications", response_model=List[dict])
-def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not user: return []
-        
-    notifications = []
-    
-    if user.role == "Site Coordinator":
-        queried_tickets = db.query(models.MaterialTicket).filter(
-            models.MaterialTicket.coordinator_id == user_id,
-            models.MaterialTicket.status == "Awaiting Coordinator Sign-Off"
-        ).all()
-        for t in queried_tickets:
-            notifications.append({
-                "id": f"query-{t.ticket_number}",
-                "type": "alert",
-                "message": f"Ticket {t.ticket_number} has a pending query/counter-edit from management.",
-                "link": f"/dashboard/handshake"
-            })
-    elif user.role in ["Site Manager", "Project Manager"]:
-        pending_vetting = db.query(models.MaterialTicket).filter(
-            or_(
-                (models.MaterialTicket.assigned_site_manager_id == user_id) & (models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"])),
-                (models.MaterialTicket.assigned_project_manager_id == user_id) & (models.MaterialTicket.status == "Pending PM Vetting")
-            )
-        ).all()
-        for t in pending_vetting:
-            notifications.append({
-                "id": f"vetting-{t.ticket_number}",
-                "type": "action",
-                "message": f"New requisition {t.ticket_number} requires your technical vetting signature.",
-                "link": f"/dashboard/vetting"
-            })
-    elif user.role == "Purchase Executive":
-        pending_sourcing = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Pending Sourcing").all()
-        for t in pending_sourcing:
-            notifications.append({
-                "id": f"sourcing-{t.ticket_number}",
-                "type": "info",
-                "message": f"Requisition {t.ticket_number} approved. Please attach vendor quotation sheets.",
-                "link": f"/dashboard/sourcing"
-            })
-    elif user.role == "Director":
-        pending_director = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Pending Director").all()
-        for t in pending_director:
-            notifications.append({
-                "id": f"director-{t.ticket_number}",
-                "type": "critical",
-                "message": f"High-Value Requisition {t.ticket_number} requires absolute executive board sign-off.",
-                "link": f"/dashboard/management"
-            })
-    return notifications
-
-# -------------------------------------------------------------------
-# 🎯 NEW: LIVE SIDEBAR COUNTS ENDPOINT
-# -------------------------------------------------------------------
-@app.get("/api/sidebar-counts", response_model=dict)
-def get_sidebar_counts(user_id: int, role: str, db: Session = Depends(get_db)):
-    counts = {
-        "pending_sourcing": 0,
-        "pending_signature": 0,
-        "po_ledger_alerts": 0,
-        "pending_approvals": 0,
-        "pending_vetting": 0,
-        "pending_disbursements": 0,
-        "coordinator_queries": 0
-    }
-    
-    if role == "Site Coordinator":
-        counts["coordinator_queries"] = db.query(models.MaterialTicket).filter(
-            models.MaterialTicket.coordinator_id == user_id,
-            models.MaterialTicket.status == "Awaiting Coordinator Sign-Off"
-        ).count()
-    
-    if role in ["Site Manager", "Project Manager"]:
-        counts["pending_vetting"] = db.query(models.MaterialTicket).filter(
-            or_(
-                (models.MaterialTicket.assigned_site_manager_id == user_id) & (models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"])),
-                (models.MaterialTicket.assigned_project_manager_id == user_id) & (models.MaterialTicket.status == "Pending PM Vetting"),
-                (models.MaterialTicket.assigned_site_manager_id == None) & (models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"]))
-            )
-        ).count()
-    
-    if role == "Purchase Executive":
-        counts["pending_sourcing"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Pending Sourcing").count()
-        counts["pending_signature"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Awaiting Digital Signature").count()
-        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
-    
-    if role == "Director":
-        counts["pending_approvals"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Pending Director").count()
-        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
-        
-    elif role == "Project Manager":
-        counts["pending_approvals"] = db.query(models.MaterialTicket).filter(
-            or_(
-                models.MaterialTicket.assigned_project_manager_id == user_id,
-                models.MaterialTicket.assigned_project_manager_id == None
-            ),
-            models.MaterialTicket.status.in_(["Pending Project Manager", "PI Pending PM Approval"])
-        ).count()
-        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
-    
-    if role in ["Accounts Executive", "Accounts", "Finance Manager"]:
-        counts["pending_disbursements"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "PI Approved - Sent to Accounts").count()
-        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
-
-    if role in ["Admin", "IT Manager"]:
-        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
-
-    return counts
-
-@app.get("/api/requisitions/{ticket_number}/po", response_model=dict)
-def get_po_by_ticket(ticket_number: str, db: Session = Depends(get_db)):
-    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.ticket_number == ticket_number).first()
-    if not po:
-        return {}
-    return {
-        "po_number": po.po_number,
-        "ticket_number": po.ticket_number,
-        "invoice_no": po.invoice_no or "",
-        "invoice_date": po.invoice_date or "",
-        "invoice_remark": po.invoice_remark or "",
-        "invoice_duration": po.invoice_duration or "",
-        "proforma_invoice_url": po.proforma_invoice_url or None
-    }
-
-class ApprovePIPayload(BaseModel):
-    user_name: str
-    remarks: Optional[str] = ""
-
-@app.put("/api/requisitions/{ticket_number}/approve-pi")
-def approve_proforma_invoice(
-    ticket_number: str,
-    payload: ApprovePIPayload,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Requisition not found.")
-    
-    ticket.status = "PI Approved - Sent to Accounts"
-    
-    db.add(models.TicketHistory(
-        ticket_number=ticket_number,
-        user_name=payload.user_name,
-        action_taken="Proforma Invoice Approved",
-        remarks=payload.remarks or "Proforma Invoice verified and approved by PM. Routed to Accounts Desk for disbursement."
-    ))
-
-    # 🎯 AUTOMATED EMAIL: Alert Accounts that PI is approved and ready for payment
-    accounts_users = db.query(models.User).filter(models.User.role.in_(["Accounts Executive", "Accounts", "Finance Manager"]), models.User.is_active == True).all()
-    for acc in accounts_users:
-        if acc.email:
-            background_tasks.add_task(
-                send_workflow_email,
-                recipient_email=acc.email,
-                recipient_name=acc.name,
-                subject=f"Payment Action: PI Approved for {ticket_number}",
-                ticket_number=ticket_number,
-                project_name=ticket.project_name,
-                status="PI Approved - Sent to Accounts"
-            )
-    
-    db.commit()
-    return {"ticket_number": ticket_number, "status": ticket.status}
-
-
-# -------------------------------------------------------------------
-# 💳 PHASE 4: ACCOUNTS DESK & PAYMENT DISBURSEMENT ENDPOINTS
-# -------------------------------------------------------------------
-@app.get("/api/accounts/pending-disbursement", response_model=List[dict])
-def get_pending_disbursement_pos(db: Session = Depends(get_db)):
-    # 1. Fetch tickets across all relevant Accounts & Disbursement lifecycle stages
-    tickets = db.query(models.MaterialTicket).filter(
-        models.MaterialTicket.status.in_([
-            "PI Approved - Sent to Accounts", 
-            "Partially Disbursed", 
-            "Dispatched", 
-            "Partially Delivered", 
-            "Material Discrepancy Raised", 
-            "Delivered - GRN Logged"
-        ])
-    ).order_by(models.MaterialTicket.created_at.desc()).all()
-    
-    response = []
-    for ticket_obj in tickets:
-        # 2. Safely look up Purchase Order entity if generated
-        po_obj = db.query(models.PurchaseOrder).filter(
-            models.PurchaseOrder.ticket_number == ticket_obj.ticket_number
-        ).first()
-        
-        # 3. Retrieve winning quotes or fallback to any attached bid
-        winning_quotes = db.query(models.Quotation).filter(
-            models.Quotation.ticket_number == ticket_obj.ticket_number,
-            models.Quotation.is_selected == True
-        ).all()
-        
-        if not winning_quotes:
-            winning_quotes = db.query(models.Quotation).filter(
-                models.Quotation.ticket_number == ticket_obj.ticket_number
-            ).all()
-            
-        # FIX: Explicitly cast sum to float and guard against None values
-        grand_total = float(sum(q.total_amount or 0 for q in winning_quotes)) if winning_quotes else 0.0
-        primary_quote = winning_quotes[0] if winning_quotes else None
-        primary_vendor = primary_quote.vendor_name if primary_quote else "Pending Vendor Linking"
-        
-        already_disbursed = float(getattr(po_obj, 'disbursed_amount', 0) or 0) if po_obj else 0.0
-        remaining_balance = grand_total - already_disbursed
-        
-        response.append({
-            "po_number": po_obj.po_number if po_obj else f"PO-{ticket_obj.ticket_number.split('-')[-1]}",
-            "ticket_number": ticket_obj.ticket_number,
-            "project_name": ticket_obj.project_name,
-            "project_code": ticket_obj.project_code,
-            "vendor_name": primary_vendor,
-            "vendor_email": getattr(primary_quote, 'vendor_email', 'N/A') if primary_quote else 'N/A',
-            "vendor_contact": getattr(primary_quote, 'vendor_contact', 'N/A') if primary_quote else 'N/A',
-            "grand_total": grand_total,
-            "disbursed_amount": already_disbursed,
-            "remaining_balance": float(max(0.0, remaining_balance)),
-            "status": ticket_obj.status,
-            "po_pdf_url": getattr(po_obj, 'pdf_url', None) if po_obj else None,
-            "signed_po_url": getattr(po_obj, 'signed_po_url', None) if po_obj else None,
-            "invoice_no": getattr(po_obj, 'invoice_no', '') or '' if po_obj else '',
-            "invoice_date": getattr(po_obj, 'invoice_date', '') or '' if po_obj else '',
-            "invoice_remark": getattr(po_obj, 'invoice_remark', '') or '' if po_obj else '',
-            "payment_terms": getattr(po_obj, 'invoice_duration', '') or '100% Payable' if po_obj else '100% Payable',
-            "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None) if po_obj else None,
-            "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '' if po_obj else '',
-            "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '' if po_obj else '',
-            "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None) if po_obj else None,
-            "utr_no": getattr(po_obj, 'utr_no', '') or '' if po_obj else '',
-            "payment_date": getattr(po_obj, 'payment_date', '') or '' if po_obj else '',
-            "payment_remark": getattr(po_obj, 'payment_remark', '') or '' if po_obj else ''
-        })
-        
-    return response
-
-
-@app.put("/api/purchase-orders/{po_number}/disbursement")
-async def process_po_disbursement(
-    po_number: str,
-    background_tasks: BackgroundTasks,
-    utr_no: str = Form(""),
-    payment_date: str = Form(""),
-    payment_remark: str = Form(""),
-    disbursed_amount: float = Form(0.0),
-    file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db)
-):
-    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase Order entity not found.")
-    
-    # 🎯 Calculate Total Order Value from Winning Bids
-    winning_quotes = db.query(models.Quotation).filter(
-        models.Quotation.ticket_number == po.ticket_number,
-        models.Quotation.is_selected == True
-    ).all()
-    
-    # 🎯 FIX 1: EXPLICIT FLOAT CONVERSION (Prevents 500 Internal Server Error)
-    grand_total = float(sum((q.total_amount or 0) for q in winning_quotes)) if winning_quotes else 0.0
-
-    # Accumulate previous payouts with the new tranche
-    previous_disbursed = float(getattr(po, 'disbursed_amount', 0) or 0)
-    
-    # 🎯 FIX 2: EXPLICIT FLOAT CASTING FOR MATH
-    new_total_disbursed = previous_disbursed + float(disbursed_amount)
-    po.disbursed_amount = new_total_disbursed
-    
-    po.utr_no = utr_no
-    po.payment_date = payment_date
-    po.payment_remark = payment_remark
-    
-    if file:
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
-            raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
-            
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"BANK_RECEIPT_{po_number}_{timestamp}"
-        
-        try:
-            upload_result = cloudinary.uploader.upload(
-                file.file, 
-                public_id=filename,
-                folder="aarvi_payment_advices",
-                resource_type="auto"
-            )
-            po.payment_advice_url = upload_result.get("secure_url")
-        except Exception as e:
-            logger.error(f"Cloudinary Upload Failed: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to upload payment receipt to cloud storage.")
-    
-    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
-    if ticket:
-        remaining_balance = grand_total - new_total_disbursed
-
-        # 🎯 TRANCHE EVALUATION: If balance > ₹1.00, set to 'Partially Disbursed'
-        if remaining_balance > 1.0:
-            ticket.status = "Partially Disbursed"
-            log_msg = f"Partial Payment UTR {utr_no} logged (Tranche: ₹{float(disbursed_amount):,.2f}). Total Disbursed: ₹{new_total_disbursed:,.2f} / ₹{grand_total:,.2f}. Outstanding Balance: ₹{remaining_balance:,.2f}."
-        else:
-            ticket.status = "Dispatched"
-            log_msg = f"Final Payment UTR {utr_no} logged (Tranche: ₹{float(disbursed_amount):,.2f}). Order 100% Disbursed (Total: ₹{new_total_disbursed:,.2f}) and released for site dispatch."
-
-        # 🎯 FIX 3: ADD PROOF URL TO LOG (Enables the frontend 'View Bank Receipt' button)
-        if po.payment_advice_url:
-            log_msg += f" | Proof File: {po.payment_advice_url}"
-
-        db.add(models.TicketHistory(
-            ticket_number=ticket.ticket_number,
-            user_name="Accounts Executive",
-            action_taken=f"Disbursement Logged ({ticket.status})",
-            remarks=log_msg
-        ))
-
-        # 🎯 AUTOMATED EMAIL: Alert Coordinator
-        coordinator = db.query(models.User).filter(models.User.id == ticket.coordinator_id).first()
-        if coordinator and coordinator.email:
-            background_tasks.add_task(
-                send_workflow_email,
-                recipient_email=coordinator.email,
-                recipient_name=coordinator.name,
-                subject=f"Disbursement Update: {ticket.ticket_number} ({ticket.status})",
-                ticket_number=ticket.ticket_number,
-                project_name=ticket.project_name,
-                status=ticket.status
-            )
-        
-        # Alert Purchase Executives
-        purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
-        for pe in purchase_execs:
-            if pe.email:
-                background_tasks.add_task(
-                    send_workflow_email,
-                    recipient_email=pe.email,
-                    recipient_name=pe.name,
-                    subject=f"Disbursement Update for {ticket.ticket_number}",
-                    ticket_number=ticket.ticket_number,
-                    project_name=ticket.project_name,
-                    status=ticket.status
-                )
-        
-    db.commit()
-    return {
-        "message": "Disbursement successfully logged.",
-        "status": ticket.status if ticket else "Dispatched",
-        "total_disbursed": new_total_disbursed,
-        "remaining_balance": max(0.0, grand_total - new_total_disbursed)
-    }
-
-
-# -------------------------------------------------------------------
-# 📦 PHASE 5: GRN & MATERIAL DISCREPANCY HANDLING ENDPOINT
-# -------------------------------------------------------------------
-@app.put("/api/requisitions/{ticket_number}/grn")
-async def process_goods_receipt_note(
-    ticket_number: str,
-    background_tasks: BackgroundTasks,
-    user_name: str = Form(...),
-    receipt_type: str = Form("CLEAN"),
-    discrepancy_category: str = Form(""),
-    remarks: str = Form(""),
-    file: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db)
-):
-    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Requisition ticket not found.")
-        
-    grn_url = None
-    if file:
-        ext = os.path.splitext(file.filename)[1].lower()
-        if ext not in [".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg"]:
-            raise HTTPException(status_code=400, detail="Allowed file types: PDF, Word Doc, PNG, JPG.")
-            
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"GRN_{receipt_type}_{ticket_number}_{timestamp}"
-        
-        try:
-            upload_result = cloudinary.uploader.upload(
-                file.file, 
-                public_id=filename,
-                folder="aarvi_grn_documents",
-                resource_type="auto"
-            )
-            grn_url = upload_result.get("secure_url")
-        except Exception as e:
-            logger.error(f"Cloudinary Upload Failed for GRN: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to upload GRN/Proof document to cloud storage.")
-            
-    if receipt_type == "CLEAN":
-        ticket.status = "Delivered - GRN Logged"
-        action = "Material Delivered & Clean GRN Verified"
-        detail_text = f"100% Goods verified at site by {user_name}. Remarks: {remarks or 'None'}"
-        
-    elif receipt_type == "PARTIAL":
-        ticket.status = "Partially Delivered"
-        action = "Partial Delivery Logged at Site"
-        detail_text = f"Partial quantity received by {user_name}. Remarks: {remarks or 'None'}"
-        
-    else:
-        ticket.status = "Material Discrepancy Raised"
-        action = f"CRITICAL ALERT: Material Discrepancy ({discrepancy_category})"
-        detail_text = f"Issue flagged by {user_name} [{discrepancy_category}]: {remarks or 'No remarks provided'}"
-
-    if grn_url:
-        detail_text += f" | Proof File: {grn_url}"
-        
-    db.add(models.TicketHistory(
-        ticket_number=ticket.ticket_number,
-        user_name=user_name,
-        action_taken=action,
-        remarks=detail_text
-    ))
-
-    # 🎯 AUTOMATED EMAIL: Alert Procurement & PM if there is a shortage or damage
-    if receipt_type in ["PARTIAL", "DISCREPANCY"]:
-        pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
-        if pm and pm.email:
-            background_tasks.add_task(
-                send_workflow_email,
-                recipient_email=pm.email,
-                recipient_name=pm.name,
-                subject=f"URGENT ALERT: {receipt_type} Delivery on {ticket_number}",
-                ticket_number=ticket_number,
-                project_name=ticket.project_name,
-                status=ticket.status
-            )
-        
-        purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
-        for pe in purchase_execs:
-            if pe.email:
-                background_tasks.add_task(
-                    send_workflow_email,
-                    recipient_email=pe.email,
-                    recipient_name=pe.name,
-                    subject=f"URGENT ALERT: {receipt_type} Delivery on {ticket_number}",
-                    ticket_number=ticket_number,
-                    project_name=ticket.project_name,
-                    status=ticket.status
-                )
-    
-    db.commit()
-    return {"message": "Receipt status processed successfully.", "status": ticket.status, "grn_url": grn_url}
 
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
