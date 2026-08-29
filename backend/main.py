@@ -986,11 +986,11 @@ def get_purchase_orders_awaiting_signature(db: Session = Depends(get_db)):
     return response
 
 # -------------------------------------------------------------------
-# 💾 SAVE & LOAD EDITED PO HTML TEMPLATES
+# 💾 SAVE & LOAD EDITED PO HTML TEMPLATES (Supports PO or REQ Ref)
 # -------------------------------------------------------------------
-@app.put("/api/purchase-orders/{po_number}/template")
-def save_po_template(po_number: str, payload: SaveTemplatePayload, db: Session = Depends(get_db)):
-    file_path = os.path.join("storage/po_templates", f"{po_number}.html")
+@app.put("/api/purchase-orders/{ref_id}/template")
+def save_po_template(ref_id: str, payload: SaveTemplatePayload):
+    file_path = os.path.join("storage/po_templates", f"{ref_id}.html")
     try:
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(payload.html_content)
@@ -998,9 +998,9 @@ def save_po_template(po_number: str, payload: SaveTemplatePayload, db: Session =
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save template: {str(e)}")
 
-@app.get("/api/purchase-orders/{po_number}/template")
-def get_po_template(po_number: str):
-    file_path = os.path.join("storage/po_templates", f"{po_number}.html")
+@app.get("/api/purchase-orders/{ref_id}/template")
+def get_po_template(ref_id: str):
+    file_path = os.path.join("storage/po_templates", f"{ref_id}.html")
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8") as f:
             return {"html_content": f.read()}
