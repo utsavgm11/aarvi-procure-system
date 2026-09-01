@@ -17,7 +17,6 @@ import models
 from email_service import send_workflow_email
 import cloudinary
 import cloudinary.uploader
-from cloudinary.utils import cloudinary_url
 
 # 🎯 PURE PYTHON ENGINES (Zero System Dependencies for Render.com)
 from xhtml2pdf import pisa
@@ -1640,6 +1639,575 @@ async def update_po_tax_invoice_details(
     db.commit()
     return {"message": "Tax Invoice details saved successfully.", "tax_invoice_url": po.tax_invoice_url}
 
+
+# -------------------------------------------------------------------
+# 🏢 VENDOR MASTER DIRECTORY LAYER
+# -------------------------------------------------------------------
+class VendorCreatePayload(BaseModel):
+    name: str
+    address: Optional[str] = ""
+    contact_number: Optional[str] = ""
+    email: Optional[str] = ""
+
+@app.post("/api/vendors", status_code=201)
+def add_new_vendor(payload: VendorCreatePayload, db: Session = Depends(get_db)):
+    existing_vendor = db.query(models.Vendor).filter(models.Vendor.name == payload.name).first()
+    if existing_vendor:
+        raise HTTPException(status_code=400, detail="A vendor with this exact company name already exists in the master directory.")
+        
+    new_vendor = models.Vendor(
+        name=payload.name,
+        address=payload.address,
+        contact_number=payload.contact_number,
+        email=payload.email,
+        is_active=True
+    )
+    db.add(new_vendor)
+    db.commit()
+    return {"message": f"Vendor {payload.name} successfully added to Master Directory."}
+
+@app.get("/api/vendors", response_model=List[dict])
+def get_all_vendors(db: Session = Depends(get_db)):
+    vendors = db.query(models.Vendor).filter(models.Vendor.is_active == True).order_by(models.Vendor.name.asc()).all()
+    return [{"id": v.id, "name": v.name, "address": v.address, "contact_number": v.contact_number, "email": v.email} for v in vendors]    
+
+# -------------------------------------------------------------------
+# 🔐 AUTHENTICATION & LOGIN LAYER
+# -------------------------------------------------------------------
+class LoginPayload(BaseModel):
+    email: str
+    password: str
+
+@app.post("/api/auth/login")
+def login_user(payload: LoginPayload, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    if not user or user.password_hash != payload.password:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+        
+    if getattr(user, 'is_active', True) == False:
+        raise HTTPException(status_code=403, detail="This account has been disabled by IT.")
+        
+    return {"id": user.id, "name": user.name, "email": user.email, "role": user.role, "empcode": getattr(user, 'empcode', 'N/A')}
+
+# -------------------------------------------------------------------
+# 🛡️ IT ADMIN & USER MANAGEMENT LAYER
+# -------------------------------------------------------------------
+class AdminCreateUserPayload(BaseModel):
+    empcode: str
+    name: str
+    email: str
+    password: str
+    role: str
+
+class AdminUserUpdatePayload(BaseModel):
+    name: str
+    empcode: str
+    role: str
+    password: Optional[str] = None  
+
+@app.get("/api/admin/users")
+def admin_get_all_users(db: Session = Depends(get_db)):
+    users = db.query(models.User).order_by(models.User.role.asc(), models.User.name.asc()).all()
+    return [{"id": u.id, "empcode": u.empcode, "name": u.name, "email": u.email, "role": u.role, "is_active": getattr(u, 'is_active', True)} for u in users]
+
+@app.post("/api/admin/users", status_code=201)
+def admin_create_user(payload: AdminCreateUserPayload, db: Session = Depends(get_db)):
+    if db.query(models.User).filter(models.User.email == payload.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered.")
+    
+    if db.query(models.User).filter(models.User.empcode == payload.empcode).first():
+        raise HTTPException(status_code=400, detail=f"Employee Code {payload.empcode} is already in use!")
+    
+    new_user = models.User(
+        empcode=payload.empcode,
+        name=payload.name, 
+        email=payload.email, 
+        password_hash=payload.password, 
+        role=payload.role, 
+        is_active=True
+    )
+    db.add(new_user)
+    db.commit()
+    return {"message": f"User {payload.name} created successfully with code {payload.empcode}."}
+
+@app.put("/api/admin/users/{email}")
+def admin_update_user_profile(email: str, payload: AdminUserUpdatePayload, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user: raise HTTPException(status_code=404, detail="Target user not found.")
+    
+    if payload.empcode != user.empcode:
+        if db.query(models.User).filter(models.User.empcode == payload.empcode).first():
+            raise HTTPException(status_code=400, detail=f"Employee Code {payload.empcode} is already in use!")
+            
+    user.name = payload.name
+    user.empcode = payload.empcode
+    user.role = payload.role
+    if payload.password and payload.password.strip():
+        user.password_hash = payload.password.strip()
+    db.commit()
+    return {"message": f"Profile for {user.name} successfully updated."}
+
+@app.put("/api/admin/users/{email}/toggle-status")
+def admin_toggle_user_status(email: str, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user: raise HTTPException(status_code=404, detail="User account not found.")
+        
+    if user.email == "admin@aarviencon.com":
+        raise HTTPException(status_code=400, detail="Root System Admin account cannot be disabled.")
+    user.is_active = not user.is_active
+    db.commit()
+    
+    status_text = "Activated" if user.is_active else "Deactivated (Locked Out)"
+    return {"message": f"Account {email} status changed to: {status_text}."}
+
+@app.get("/api/users/{user_id}/notifications", response_model=List[dict])
+def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user: return []
+        
+    notifications = []
+    
+    if user.role == "Site Coordinator":
+        queried_tickets = db.query(models.MaterialTicket).filter(
+            models.MaterialTicket.coordinator_id == user_id,
+            models.MaterialTicket.status == "Awaiting Coordinator Sign-Off"
+        ).all()
+        for t in queried_tickets:
+            notifications.append({
+                "id": f"query-{t.ticket_number}",
+                "type": "alert",
+                "message": f"Ticket {t.ticket_number} has a pending query/counter-edit from management.",
+                "link": f"/dashboard/handshake"
+            })
+    elif user.role in ["Site Manager", "Project Manager"]:
+        pending_vetting = db.query(models.MaterialTicket).filter(
+            or_(
+                (models.MaterialTicket.assigned_site_manager_id == user_id) & (models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"])),
+                (models.MaterialTicket.assigned_project_manager_id == user_id) & (models.MaterialTicket.status == "Pending PM Vetting")
+            )
+        ).all()
+        for t in pending_vetting:
+            notifications.append({
+                "id": f"vetting-{t.ticket_number}",
+                "type": "action",
+                "message": f"New requisition {t.ticket_number} requires your technical vetting signature.",
+                "link": f"/dashboard/vetting"
+            })
+    elif user.role == "Purchase Executive":
+        pending_sourcing = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Pending Sourcing").all()
+        for t in pending_sourcing:
+            notifications.append({
+                "id": f"sourcing-{t.ticket_number}",
+                "type": "info",
+                "message": f"Requisition {t.ticket_number} approved. Please attach vendor quotation sheets.",
+                "link": f"/dashboard/sourcing"
+            })
+    elif user.role == "Director":
+        pending_director = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Pending Director").all()
+        for t in pending_director:
+            notifications.append({
+                "id": f"director-{t.ticket_number}",
+                "type": "critical",
+                "message": f"High-Value Requisition {t.ticket_number} requires absolute executive board sign-off.",
+                "link": f"/dashboard/management"
+            })
+    return notifications
+
+# -------------------------------------------------------------------
+# 🎯 NEW: LIVE SIDEBAR COUNTS ENDPOINT
+# -------------------------------------------------------------------
+@app.get("/api/sidebar-counts", response_model=dict)
+def get_sidebar_counts(user_id: int, role: str, db: Session = Depends(get_db)):
+    counts = {
+        "pending_sourcing": 0,
+        "pending_signature": 0,
+        "po_ledger_alerts": 0,
+        "pending_approvals": 0,
+        "pending_vetting": 0,
+        "pending_disbursements": 0,
+        "coordinator_queries": 0
+    }
+    
+    if role == "Site Coordinator":
+        counts["coordinator_queries"] = db.query(models.MaterialTicket).filter(
+            models.MaterialTicket.coordinator_id == user_id,
+            models.MaterialTicket.status == "Awaiting Coordinator Sign-Off"
+        ).count()
+    
+    if role in ["Site Manager", "Project Manager"]:
+        counts["pending_vetting"] = db.query(models.MaterialTicket).filter(
+            or_(
+                (models.MaterialTicket.assigned_site_manager_id == user_id) & (models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"])),
+                (models.MaterialTicket.assigned_project_manager_id == user_id) & (models.MaterialTicket.status == "Pending PM Vetting"),
+                (models.MaterialTicket.assigned_site_manager_id == None) & (models.MaterialTicket.status.in_(["Vetting Active", "Approved by Coordinator"]))
+            )
+        ).count()
+    
+    if role == "Purchase Executive":
+        counts["pending_sourcing"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Pending Sourcing").count()
+        counts["pending_signature"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Awaiting Digital Signature").count()
+        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+    
+    if role == "Director":
+        counts["pending_approvals"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "Pending Director").count()
+        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+        
+    elif role == "Project Manager":
+        counts["pending_approvals"] = db.query(models.MaterialTicket).filter(
+            or_(
+                models.MaterialTicket.assigned_project_manager_id == user_id,
+                models.MaterialTicket.assigned_project_manager_id == None
+            ),
+            models.MaterialTicket.status.in_(["Pending Project Manager", "PI Pending PM Approval"])
+        ).count()
+        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+    
+    if role in ["Accounts Executive", "Accounts", "Finance Manager"]:
+        counts["pending_disbursements"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "PI Approved - Sent to Accounts").count()
+        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+
+    if role in ["Admin", "IT Manager"]:
+        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+
+    return counts
+
+@app.get("/api/requisitions/{ticket_number}/po", response_model=dict)
+def get_po_by_ticket(ticket_number: str, db: Session = Depends(get_db)):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.ticket_number == ticket_number).first()
+    if not po:
+        return {}
+    return {
+        "po_number": po.po_number,
+        "ticket_number": po.ticket_number,
+        "invoice_no": po.invoice_no or "",
+        "invoice_date": po.invoice_date or "",
+        "invoice_remark": po.invoice_remark or "",
+        "invoice_duration": po.invoice_duration or "",
+        "proforma_invoice_url": po.proforma_invoice_url or None
+    }
+
+class ApprovePIPayload(BaseModel):
+    user_name: str
+    remarks: Optional[str] = ""
+
+@app.put("/api/requisitions/{ticket_number}/approve-pi")
+def approve_proforma_invoice(
+    ticket_number: str,
+    payload: ApprovePIPayload,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Requisition not found.")
+    
+    ticket.status = "PI Approved - Sent to Accounts"
+    
+    db.add(models.TicketHistory(
+        ticket_number=ticket_number,
+        user_name=payload.user_name,
+        action_taken="Proforma Invoice Approved",
+        remarks=payload.remarks or "Proforma Invoice verified and approved by PM. Routed to Accounts Desk for disbursement."
+    ))
+
+    # 🎯 AUTOMATED EMAIL: Alert Accounts that PI is approved and ready for payment
+    accounts_users = db.query(models.User).filter(models.User.role.in_(["Accounts Executive", "Accounts", "Finance Manager"]), models.User.is_active == True).all()
+    for acc in accounts_users:
+        if acc.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=acc.email,
+                recipient_name=acc.name,
+                subject=f"Payment Action: PI Approved for {ticket_number}",
+                ticket_number=ticket_number,
+                project_name=ticket.project_name,
+                status="PI Approved - Sent to Accounts"
+            )
+    
+    db.commit()
+    return {"ticket_number": ticket_number, "status": ticket.status}
+
+
+# -------------------------------------------------------------------
+# 💳 PHASE 4: ACCOUNTS DESK & PAYMENT DISBURSEMENT ENDPOINTS
+# -------------------------------------------------------------------
+@app.get("/api/accounts/pending-disbursement", response_model=List[dict])
+def get_pending_disbursement_pos(db: Session = Depends(get_db)):
+    # 1. Fetch tickets across all relevant Accounts & Disbursement lifecycle stages
+    tickets = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status.in_([
+            "PI Approved - Sent to Accounts", 
+            "Partially Disbursed", 
+            "Dispatched", 
+            "Partially Delivered", 
+            "Material Discrepancy Raised", 
+            "Delivered - GRN Logged"
+        ])
+    ).order_by(models.MaterialTicket.created_at.desc()).all()
+    
+    response = []
+    for ticket_obj in tickets:
+        # 2. Safely look up Purchase Order entity if generated
+        po_obj = db.query(models.PurchaseOrder).filter(
+            models.PurchaseOrder.ticket_number == ticket_obj.ticket_number
+        ).first()
+        
+        # 3. Retrieve winning quotes or fallback to any attached bid
+        winning_quotes = db.query(models.Quotation).filter(
+            models.Quotation.ticket_number == ticket_obj.ticket_number,
+            models.Quotation.is_selected == True
+        ).all()
+        
+        if not winning_quotes:
+            winning_quotes = db.query(models.Quotation).filter(
+                models.Quotation.ticket_number == ticket_obj.ticket_number
+            ).all()
+            
+        # FIX: Explicitly cast sum to float and guard against None values
+        grand_total = float(sum(q.total_amount or 0 for q in winning_quotes)) if winning_quotes else 0.0
+        primary_quote = winning_quotes[0] if winning_quotes else None
+        primary_vendor = primary_quote.vendor_name if primary_quote else "Pending Vendor Linking"
+        
+        already_disbursed = float(getattr(po_obj, 'disbursed_amount', 0) or 0) if po_obj else 0.0
+        remaining_balance = grand_total - already_disbursed
+        
+        response.append({
+            "po_number": po_obj.po_number if po_obj else f"PO-{ticket_obj.ticket_number.split('-')[-1]}",
+            "ticket_number": ticket_obj.ticket_number,
+            "project_name": ticket_obj.project_name,
+            "project_code": ticket_obj.project_code,
+            "vendor_name": primary_vendor,
+            "vendor_email": getattr(primary_quote, 'vendor_email', 'N/A') if primary_quote else 'N/A',
+            "vendor_contact": getattr(primary_quote, 'vendor_contact', 'N/A') if primary_quote else 'N/A',
+            "grand_total": grand_total,
+            "disbursed_amount": already_disbursed,
+            "remaining_balance": float(max(0.0, remaining_balance)),
+            "status": ticket_obj.status,
+            "po_pdf_url": getattr(po_obj, 'pdf_url', None) if po_obj else None,
+            "signed_po_url": getattr(po_obj, 'signed_po_url', None) if po_obj else None,
+            "invoice_no": getattr(po_obj, 'invoice_no', '') or '' if po_obj else '',
+            "invoice_date": getattr(po_obj, 'invoice_date', '') or '' if po_obj else '',
+            "invoice_remark": getattr(po_obj, 'invoice_remark', '') or '' if po_obj else '',
+            "payment_terms": getattr(po_obj, 'invoice_duration', '') or '100% Payable' if po_obj else '100% Payable',
+            "proforma_invoice_url": getattr(po_obj, 'proforma_invoice_url', None) if po_obj else None,
+            "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '' if po_obj else '',
+            "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '' if po_obj else '',
+            "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None) if po_obj else None,
+            "utr_no": getattr(po_obj, 'utr_no', '') or '' if po_obj else '',
+            "payment_date": getattr(po_obj, 'payment_date', '') or '' if po_obj else '',
+            "payment_remark": getattr(po_obj, 'payment_remark', '') or '' if po_obj else ''
+        })
+        
+    return response
+
+
+@app.put("/api/purchase-orders/{po_number}/disbursement")
+async def process_po_disbursement(
+    po_number: str,
+    background_tasks: BackgroundTasks,
+    utr_no: str = Form(""),
+    payment_date: str = Form(""),
+    payment_remark: str = Form(""),
+    disbursed_amount: float = Form(0.0),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase Order entity not found.")
+    
+    # 🎯 Calculate Total Order Value from Winning Bids
+    winning_quotes = db.query(models.Quotation).filter(
+        models.Quotation.ticket_number == po.ticket_number,
+        models.Quotation.is_selected == True
+    ).all()
+    
+    # 🎯 FIX 1: EXPLICIT FLOAT CONVERSION (Prevents 500 Internal Server Error)
+    grand_total = float(sum((q.total_amount or 0) for q in winning_quotes)) if winning_quotes else 0.0
+
+    # Accumulate previous payouts with the new tranche
+    previous_disbursed = float(getattr(po, 'disbursed_amount', 0) or 0)
+    
+    # 🎯 FIX 2: EXPLICIT FLOAT CASTING FOR MATH
+    new_total_disbursed = previous_disbursed + float(disbursed_amount)
+    po.disbursed_amount = new_total_disbursed
+    
+    po.utr_no = utr_no
+    po.payment_date = payment_date
+    po.payment_remark = payment_remark
+    
+    if file:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
+            raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"BANK_RECEIPT_{po_number}_{timestamp}"
+        
+        try:
+            upload_result = cloudinary.uploader.upload(
+                file.file, 
+                public_id=filename,
+                folder="aarvi_payment_advices",
+                resource_type="auto"
+            )
+            po.payment_advice_url = upload_result.get("secure_url")
+        except Exception as e:
+            logger.error(f"Cloudinary Upload Failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to upload payment receipt to cloud storage.")
+    
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+    if ticket:
+        remaining_balance = grand_total - new_total_disbursed
+
+        # 🎯 TRANCHE EVALUATION: If balance > ₹1.00, set to 'Partially Disbursed'
+        if remaining_balance > 1.0:
+            ticket.status = "Partially Disbursed"
+            log_msg = f"Partial Payment UTR {utr_no} logged (Tranche: ₹{float(disbursed_amount):,.2f}). Total Disbursed: ₹{new_total_disbursed:,.2f} / ₹{grand_total:,.2f}. Outstanding Balance: ₹{remaining_balance:,.2f}."
+        else:
+            ticket.status = "Dispatched"
+            log_msg = f"Final Payment UTR {utr_no} logged (Tranche: ₹{float(disbursed_amount):,.2f}). Order 100% Disbursed (Total: ₹{new_total_disbursed:,.2f}) and released for site dispatch."
+
+        # 🎯 FIX 3: ADD PROOF URL TO LOG (Enables the frontend 'View Bank Receipt' button)
+        if po.payment_advice_url:
+            log_msg += f" | Proof File: {po.payment_advice_url}"
+
+        db.add(models.TicketHistory(
+            ticket_number=ticket.ticket_number,
+            user_name="Accounts Executive",
+            action_taken=f"Disbursement Logged ({ticket.status})",
+            remarks=log_msg
+        ))
+
+        # 🎯 AUTOMATED EMAIL: Alert Coordinator
+        coordinator = db.query(models.User).filter(models.User.id == ticket.coordinator_id).first()
+        if coordinator and coordinator.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=coordinator.email,
+                recipient_name=coordinator.name,
+                subject=f"Disbursement Update: {ticket.ticket_number} ({ticket.status})",
+                ticket_number=ticket.ticket_number,
+                project_name=ticket.project_name,
+                status=ticket.status
+            )
+        
+        # Alert Purchase Executives
+        purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
+        for pe in purchase_execs:
+            if pe.email:
+                background_tasks.add_task(
+                    send_workflow_email,
+                    recipient_email=pe.email,
+                    recipient_name=pe.name,
+                    subject=f"Disbursement Update for {ticket.ticket_number}",
+                    ticket_number=ticket.ticket_number,
+                    project_name=ticket.project_name,
+                    status=ticket.status
+                )
+        
+    db.commit()
+    return {
+        "message": "Disbursement successfully logged.",
+        "status": ticket.status if ticket else "Dispatched",
+        "total_disbursed": new_total_disbursed,
+        "remaining_balance": max(0.0, grand_total - new_total_disbursed)
+    }
+
+
+# -------------------------------------------------------------------
+# 📦 PHASE 5: GRN & MATERIAL DISCREPANCY HANDLING ENDPOINT
+# -------------------------------------------------------------------
+@app.put("/api/requisitions/{ticket_number}/grn")
+async def process_goods_receipt_note(
+    ticket_number: str,
+    background_tasks: BackgroundTasks,
+    user_name: str = Form(...),
+    receipt_type: str = Form("CLEAN"),
+    discrepancy_category: str = Form(""),
+    remarks: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
+):
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Requisition ticket not found.")
+        
+    grn_url = None
+    if file:
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in [".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg"]:
+            raise HTTPException(status_code=400, detail="Allowed file types: PDF, Word Doc, PNG, JPG.")
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"GRN_{receipt_type}_{ticket_number}_{timestamp}"
+        
+        try:
+            upload_result = cloudinary.uploader.upload(
+                file.file, 
+                public_id=filename,
+                folder="aarvi_grn_documents",
+                resource_type="auto"
+            )
+            grn_url = upload_result.get("secure_url")
+        except Exception as e:
+            logger.error(f"Cloudinary Upload Failed for GRN: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to upload GRN/Proof document to cloud storage.")
+            
+    if receipt_type == "CLEAN":
+        ticket.status = "Delivered - GRN Logged"
+        action = "Material Delivered & Clean GRN Verified"
+        detail_text = f"100% Goods verified at site by {user_name}. Remarks: {remarks or 'None'}"
+        
+    elif receipt_type == "PARTIAL":
+        ticket.status = "Partially Delivered"
+        action = "Partial Delivery Logged at Site"
+        detail_text = f"Partial quantity received by {user_name}. Remarks: {remarks or 'None'}"
+        
+    else:
+        ticket.status = "Material Discrepancy Raised"
+        action = f"CRITICAL ALERT: Material Discrepancy ({discrepancy_category})"
+        detail_text = f"Issue flagged by {user_name} [{discrepancy_category}]: {remarks or 'No remarks provided'}"
+
+    if grn_url:
+        detail_text += f" | Proof File: {grn_url}"
+        
+    db.add(models.TicketHistory(
+        ticket_number=ticket.ticket_number,
+        user_name=user_name,
+        action_taken=action,
+        remarks=detail_text
+    ))
+
+    # 🎯 AUTOMATED EMAIL: Alert Procurement & PM if there is a shortage or damage
+    if receipt_type in ["PARTIAL", "DISCREPANCY"]:
+        pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
+        if pm and pm.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=pm.email,
+                recipient_name=pm.name,
+                subject=f"URGENT ALERT: {receipt_type} Delivery on {ticket_number}",
+                ticket_number=ticket_number,
+                project_name=ticket.project_name,
+                status=ticket.status
+            )
+        
+        purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
+        for pe in purchase_execs:
+            if pe.email:
+                background_tasks.add_task(
+                    send_workflow_email,
+                    recipient_email=pe.email,
+                    recipient_name=pe.name,
+                    subject=f"URGENT ALERT: {receipt_type} Delivery on {ticket_number}",
+                    ticket_number=ticket_number,
+                    project_name=ticket.project_name,
+                    status=ticket.status
+                )
+    
+    db.commit()
+    return {"message": "Receipt status processed successfully.", "status": ticket.status, "grn_url": grn_url}
 
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
