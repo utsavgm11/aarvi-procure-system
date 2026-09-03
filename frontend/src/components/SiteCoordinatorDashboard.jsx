@@ -553,8 +553,8 @@ export default function SiteCoordinatorDashboard() {
                   </div>
                 </div>
 
-                {/* 🎯 ACTION ZONE: Show Inspection & GRN Button when Dispatched or Partially Delivered */}
-                {(ticket.status === 'Dispatched' || ticket.status === 'Partially Delivered') && (
+                {/* 🎯 ACTION ZONE: Show Inspection & GRN Button when Dispatched, Partially Delivered, or Partially Disbursed */}
+                {['Dispatched', 'Partially Delivered', 'Partially Disbursed'].includes(ticket.status) && (
                   <div className="bg-slate-50 p-3 md:p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div>
                       <h4 className="text-slate-800 font-extrabold text-xs md:text-sm flex items-center gap-1.5"><Truck size={14} className="text-indigo-600"/> Freight Arrived!</h4>
