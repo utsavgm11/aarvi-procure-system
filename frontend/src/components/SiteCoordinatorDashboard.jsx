@@ -161,8 +161,8 @@ export default function SiteCoordinatorDashboard() {
         project_name: projectName, 
         coordinator_id: currentUserId,
         category: category,
-        assigned_site_manager_id: siteManagerId ? parseInt(siteManagerId) : null,
-        assigned_project_manager_id: parseInt(projectManagerId),
+        assigned_site_manager_id: siteManagerId ? siteManagerId : null,
+        assigned_project_manager_id: projectManagerId ? projectManagerId : null,
         items: items.map(item => ({ ...item, quantity: parseInt(item.quantity) || 1 }))
       });
       setAlert({ type: 'success', message: `Ticket ${response.data.ticket_number} launched into routing matrix.` });
@@ -293,7 +293,7 @@ export default function SiteCoordinatorDashboard() {
                     <th className="py-3 px-3 font-bold w-[20%]">Specification/Brand</th>
                     <th className="py-3 px-3 font-bold text-center w-[12%]">Quantity</th>
                     <th className="py-3 px-3 font-bold w-[18%]">Material Type</th>
-                    <th className="py-3 px-3 font-bold w-[20%]">Technical Justification</th>
+                    <th className="py-3 px-3 font-bold w-[20%]">Technical Justification (Optional)</th>
                     <th className="py-3 w-10 text-center"></th>
                   </tr>
                 </thead>
@@ -310,7 +310,7 @@ export default function SiteCoordinatorDashboard() {
                           <option value="Asset">🖥️ Asset</option>
                         </select>
                       </td>
-                      <td className="py-2 px-2"><input required value={item.purpose} onChange={e => handleItemChange(index, 'purpose', e.target.value)} placeholder="Site use case..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
+                      <td className="py-2 px-2"><input value={item.purpose} onChange={e => handleItemChange(index, 'purpose', e.target.value)} placeholder="Site use case..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                       <td className="py-2 text-center">
                         <button type="button" onClick={() => removeRow(index)} disabled={items.length === 1} className="text-slate-400 hover:text-rose-600 disabled:opacity-20 p-2"><Trash2 size={16} /></button>
                       </td>

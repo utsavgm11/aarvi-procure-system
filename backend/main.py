@@ -3,7 +3,7 @@ import logging
 import os
 import shutil
 import io
-from typing import List, Optional
+from typing import List, Optional, Union
 from datetime import date, datetime
 from pydantic import BaseModel
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
@@ -60,7 +60,7 @@ class RequisitionRowItem(BaseModel):
     product_description: str
     make_brand: Optional[str] = None
     quantity: int
-    purpose: str
+    purpose: Optional[str] = ""  # 🎯 FIX: Made optional
     item_type: Optional[str] = "Consumable"  
 
 class CreateRequisitionPayload(BaseModel):
@@ -68,8 +68,8 @@ class CreateRequisitionPayload(BaseModel):
     project_name: str
     coordinator_id: int
     category: str 
-    assigned_site_manager_id: Optional[int] = None
-    assigned_project_manager_id: int
+    assigned_site_manager_id: Optional[Union[int, str]] = None  # 🎯 FIX: Accepts empty strings
+    assigned_project_manager_id: Optional[Union[int, str]] = None # 🎯 FIX: Accepts empty strings
     items: List[RequisitionRowItem]
     is_manager_direct_route: Optional[bool] = False 
 
@@ -77,7 +77,7 @@ class DirectPOItemRow(BaseModel):
     product_description: str
     make_brand: Optional[str] = None
     quantity: int
-    purpose: str
+    purpose: Optional[str] = "" # 🎯 FIX: Made optional
     item_type: Optional[str] = "Consumable"
     vendor_name: str
     base_total_value: float
@@ -107,7 +107,7 @@ class UpdateRequisitionItem(BaseModel):
     product_description: str
     make_brand: Optional[str] = None
     quantity: int
-    purpose: str
+    purpose: Optional[str] = "" # 🎯 FIX: Made optional
     is_reimbursable: Optional[bool] = False
     item_type: Optional[str] = "Consumable"  
 
@@ -186,10 +186,15 @@ def raise_material_requisition(
 ):
     ticket_number = f"REQ-2026-{random.randint(100000, 999999)}"
     
+    # 🎯 FIX: Safely parse frontend IDs. If empty, default to None so it routes to PM
+    site_mgr_id = int(payload.assigned_site_manager_id) if payload.assigned_site_manager_id not in [None, "", "null"] else None
+    proj_mgr_id = int(payload.assigned_project_manager_id) if payload.assigned_project_manager_id not in [None, "", "null"] else None
+
     if payload.is_manager_direct_route:
         initial_status = "Pending Sourcing"
     else:
-        initial_status = "Vetting Active" if payload.assigned_site_manager_id else "Pending PM Vetting"
+        # If no site manager exists, immediately jump to Pending PM Vetting
+        initial_status = "Vetting Active" if site_mgr_id else "Pending PM Vetting"
     
     master_ticket = models.MaterialTicket(
         ticket_number=ticket_number,
@@ -197,8 +202,8 @@ def raise_material_requisition(
         project_name=payload.project_name,
         coordinator_id=payload.coordinator_id,
         category=payload.category,
-        assigned_site_manager_id=payload.assigned_site_manager_id,
-        assigned_project_manager_id=payload.assigned_project_manager_id,
+        assigned_site_manager_id=site_mgr_id,
+        assigned_project_manager_id=proj_mgr_id,
         status=initial_status
     )
     db.add(master_ticket)
@@ -218,7 +223,7 @@ def raise_material_requisition(
     if payload.is_manager_direct_route:
         remarks_text = "Manager Direct Sourcing Request. Routed directly to Purchasing Desk."
     else:
-        remarks_text = f"Material Sheet uploaded. Routed to {'Site Manager' if payload.assigned_site_manager_id else 'Project Manager'}."
+        remarks_text = f"Material Sheet uploaded. Routed to {'Site Manager' if site_mgr_id else 'Project Manager'}."
         
     history = models.TicketHistory(
         ticket_number=ticket_number,
@@ -229,9 +234,8 @@ def raise_material_requisition(
     db.add(history)
     db.commit()
     
-    target_user_id = (
-        payload.assigned_site_manager_id or payload.assigned_project_manager_id
-    ) if not payload.is_manager_direct_route else None
+    # 🎯 FIX: Automatically email the PM if the Site Manager doesn't exist
+    target_user_id = (site_mgr_id or proj_mgr_id) if not payload.is_manager_direct_route else None
     
     if target_user_id:
         target_user = db.query(models.User).filter(models.User.id == target_user_id).first()
@@ -769,7 +773,8 @@ def get_pending_purchase_approval_tickets(db: Session = Depends(get_db)):
 def get_coordinator_completed_history(coordinator_id: int, db: Session = Depends(get_db)):
     tickets = db.query(models.MaterialTicket).filter(
         models.MaterialTicket.coordinator_id == coordinator_id,
-        models.MaterialTicket.status.notin_(["Vetting Active", "Awaiting Coordinator Sign-Off"])
+        # 🎯 FIX: Removed "Vetting Active" from the exclusion list so new tickets show in pipeline
+        models.MaterialTicket.status != "Awaiting Coordinator Sign-Off"
     ).order_by(models.MaterialTicket.created_at.desc()).all()
     
     response = []
@@ -1277,7 +1282,7 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     p_vendor.add_run(f"M/s. {vendor_name}\n").bold = True
     p_vendor.add_run(f"{vendor_address}\nCell No.: {vendor_contact} | EMAIL:- {vendor_email}\n").font.size = Pt(9)
 
-    doc.add_paragraph(f"Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}.").runs[0].font.bold = True
+    doc.add_paragraph(f"Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}").runs[0].font.bold = True
     doc.add_paragraph(f"Dear Sir,\nWith reference to Quotation Dated {contract_date_str}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of goods with your company.")
 
     # Items Table
