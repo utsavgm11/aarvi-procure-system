@@ -201,14 +201,14 @@ export default function SiteCoordinatorDashboard() {
     finally { setLoading(false); }
   };
 
-  // 🎯 5-STEP STATUS MAP
+ // 🎯 5-STEP STATUS MAP
   const getStepStatus = (currentStatus, stepIndex) => {
     const statusMap = {
       'Vetting Active': 1, 'Awaiting Coordinator Sign-Off': 1, 'Approved by Manager': 1, 'Approved by Coordinator': 1, 'Pending PM Vetting': 1, 
       'Pending Sourcing': 2,
       'Pending Purchase Approval': 3, 'Pending Project Manager': 3, 'Pending Director': 3, 'Query Raised': 3,
       'Awaiting Digital Signature': 4, 'Approved': 4, 'PI Pending PM Approval': 4, 'PI Approved - Sent to Accounts': 4, 
-      'Dispatched': 5, 'Partially Delivered': 5, 'Material Discrepancy Raised': 5,
+      'Partially Disbursed': 5, 'Dispatched': 5, 'Partially Delivered': 5, 'Material Discrepancy Raised': 5, // 🎯 Added 'Partially Disbursed' here
       'Delivered - GRN Logged': 6 
     };
     const currentStep = statusMap[currentStatus] || 1;
