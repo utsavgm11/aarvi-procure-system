@@ -5,7 +5,7 @@ import {
   FileCheck, Search, ChevronDown, ChevronUp, Landmark, Layers3, 
   Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
   UploadCloud, Paperclip, Trash2, FileText, CheckCircle2,
-  ShieldAlert, AlertOctagon, Wallet, ExternalLink
+  ShieldAlert, AlertOctagon, Wallet, ExternalLink, Download
 } from 'lucide-react';
 import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
 
@@ -28,6 +28,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   // Filter Dropdown Selection States
   const [selectedProjectFilter, setSelectedProjectFilter] = useState('ALL');
   const [selectedTimeFilter, setSelectedTimeFilter] = useState('ALL'); 
+  const [selectedPMFilter, setSelectedPMFilter] = useState('ALL'); 
 
   // Form states for PI, Tax Invoice, and Signed PO
   const [invoiceForms, setInvoiceForms] = useState({});
@@ -39,6 +40,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [editingPOs, setEditingPOs] = useState({});
   
   const isPurchaseExecutive = currentUser?.role === 'Purchase Executive';
+  const isDirectorOrPurchase = currentUser?.role === 'Director' || currentUser?.role === 'Purchase Executive' || currentUser?.role === 'Admin';
 
   const fetchLedgerPOs = useCallback(async () => {
     setLoading(true);
@@ -200,7 +202,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     } catch (err) { alert("Failed to save Final Tax Invoice."); }
   };
 
-  // --- Delete API Calls ---
   const handleDeleteInvoiceFile = async (poNumber) => {
     if (!window.confirm("Are you sure you want to permanently delete this attached Proforma Invoice?")) return;
     try {
@@ -235,16 +236,44 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     } catch(e) { return true; }
   };
 
+  // 🎯 CORE FILTER ALGORITHM (Ensures PMs only see their rows, Directors see all)
+  const filteredLedger = useMemo(() => {
+    return ledgerList.filter(po => {
+      
+      // 1. Strict Security Filter: Is this a normal PM looking at someone else's data? Hide it.
+      if (!isDirectorOrPurchase) {
+        if (po.pm_id !== currentUser?.id && po.project_manager !== currentUser?.name) return false;
+      } else {
+        // Directors/Purchasers can use the Dropdown to filter by specific PMs
+        if (selectedPMFilter !== 'ALL' && po.project_manager !== selectedPMFilter) return false;
+      }
+
+      // 2. Standard Filters
+      if (selectedProjectFilter !== 'ALL' && po.project_code !== selectedProjectFilter) return false;
+      if (selectedTimeFilter === '6_MONTHS' && !isWithinLast6Months(po.generated_at)) return false;
+      
+      // 3. Keyword Search
+      if (searchQuery) {
+        const search = searchQuery.toLowerCase();
+        const matchesSearch = po.po_number.toLowerCase().includes(search) ||
+          po.project_code.toLowerCase().includes(search) ||
+          po.project_name.toLowerCase().includes(search) ||
+          po.vendor_name.toLowerCase().includes(search);
+        if (!matchesSearch) return false;
+      }
+      
+      return true;
+    });
+  }, [ledgerList, selectedProjectFilter, selectedTimeFilter, selectedPMFilter, searchQuery, currentUser, isDirectorOrPurchase]);
+
+  // 🎯 DYNAMIC ANALYTICS (Updates based on the active filters above!)
   const analyticsMetrics = useMemo(() => {
     let totalSpend = 0;
     let reimbursableTotal = 0;
     let nonReimbursableTotal = 0;
     const projectCodes = new Set();
 
-    ledgerList.forEach(po => {
-      if (selectedTimeFilter === '6_MONTHS' && !isWithinLast6Months(po.generated_at)) return;
-      if (selectedProjectFilter !== 'ALL' && po.project_code !== selectedProjectFilter) return;
-
+    filteredLedger.forEach(po => {
       totalSpend += po.grand_total;
       projectCodes.add(po.project_code);
 
@@ -263,20 +292,53 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     const nonReimbursablePercentage = totalSpend > 0 ? (nonReimbursableTotal / totalSpend) * 100 : 0;
 
     return { totalSpend, reimbursableTotal, nonReimbursableTotal, reimbursablePercentage, nonReimbursablePercentage, uniqueSitesCount: projectCodes.size };
-  }, [ledgerList, selectedProjectFilter, selectedTimeFilter]);
+  }, [filteredLedger]);
 
-  const filteredLedger = useMemo(() => {
-    return ledgerList.filter(po => {
-      if (selectedProjectFilter !== 'ALL' && po.project_code !== selectedProjectFilter) return false;
-      if (selectedTimeFilter === '6_MONTHS' && !isWithinLast6Months(po.generated_at)) return false;
-      return po.po_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        po.project_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        po.project_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        po.vendor_name.toLowerCase().includes(searchQuery.toLowerCase());
-    });
-  }, [ledgerList, selectedProjectFilter, selectedTimeFilter, searchQuery]);
-
+  // Dropdown Option Generators
   const uniqueProjectFilterOptions = useMemo(() => ['ALL', ...new Set(ledgerList.map(po => po.project_code))], [ledgerList]);
+  const uniquePMOptions = useMemo(() => ['ALL', ...new Set(ledgerList.map(po => po.project_manager).filter(pm => pm && pm !== "Pending / N/A"))], [ledgerList]);
+
+  // 🎯 EXPORT MASTER LEDGER TO EXCEL (CSV)
+  const handleExportToExcel = () => {
+    if (!filteredLedger || filteredLedger.length === 0) {
+      alert("No records to export based on current filters.");
+      return;
+    }
+
+    const headers = [
+      "PO Number", "PO Date", "Project Manager", "Project Code", "Project Name", "Vendor Name", 
+      "Product Descriptions", "Quantities", "Duration of Contract", "Payment Terms", 
+      "Base Amount", "GST Amount", "Total Amount", 
+      "Tax Invoice No", "Tax Invoice Date", 
+      "Disbursed Payment", "Remaining Balance", "Payment UTR", "Payment Date", "Current Status"
+    ];
+
+    const csvRows = filteredLedger.map(po => {
+      // Join multiple products and quantities into a single clean string. Prevent commas from breaking columns.
+      const products = po.items ? po.items.map(i => i.desc).join(" | ").replace(/"/g, '""') : "N/A";
+      const quantities = po.items ? po.items.map(i => i.qty).join(" | ") : "0";
+      
+      const balance = Math.max(0, po.grand_total - po.disbursed_amount);
+
+      return [
+        `"${po.po_number}"`, `"${po.generated_at}"`, `"${po.project_manager}"`, `"${po.project_code}"`, `"${po.project_name}"`, `"${po.vendor_name}"`,
+        `"${products}"`, `"${quantities}"`, `"${po.contract_duration}"`, `"${po.payment_terms}"`,
+        `"${po.base_total}"`, `"${po.gst_amount}"`, `"${po.grand_total}"`,
+        `"${po.tax_invoice_no}"`, `"${po.tax_invoice_date}"`,
+        `"${po.disbursed_amount}"`, `"${balance}"`, `"${po.utr_no}"`, `"${po.payment_date}"`, `"${po.status}"`
+      ].join(',');
+    });
+
+    const csvString = [headers.join(','), ...csvRows].join('\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.setAttribute('href', url);
+    a.setAttribute('download', `Aarvi_Master_PO_Ledger_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
 
   return (
     <div className="space-y-6 relative sm:px-2 md:px-4 lg:px-0 pb-12">
@@ -447,7 +509,20 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                 className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-1.5 text-xs text-slate-800 outline-none focus:border-[#2c2a57] shadow-3xs"
               />
             </div>
+            
             <div className="flex flex-wrap items-center gap-2">
+              
+              {/* 🎯 NEW: PROJECT MANAGER FILTER (Only for Directors/Purchase Execs) */}
+              {isDirectorOrPurchase && (
+                <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
+                  <Filter size={12} className="text-slate-400" />
+                  <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Manager:</span>
+                  <select value={selectedPMFilter} onChange={(e) => setSelectedPMFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer max-w-[120px] truncate">
+                    {uniquePMOptions.map(pm => <option key={pm} value={pm}>{pm}</option>)}
+                  </select>
+                </div>
+              )}
+
               <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
                 <Filter size={12} className="text-slate-400" />
                 <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Site:</span>
@@ -455,6 +530,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   {uniqueProjectFilterOptions.map(code => <option key={code} value={code}>{code}</option>)}
                 </select>
               </div>
+              
               <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
                 <Calendar size={12} className="text-slate-400" />
                 <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Duration:</span>
@@ -463,6 +539,14 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   <option value="6_MONTHS">Last 6 Months</option>
                 </select>
               </div>
+
+              {/* 🎯 NEW: EXPORT TO EXCEL BUTTON */}
+              <button 
+                onClick={handleExportToExcel}
+                className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-1.5 px-3 py-1.5 text-[11px] font-bold shadow-3xs w-full sm:w-auto"
+              >
+                <Download size={13} /> <span>Export CSV</span>
+              </button>
             </div>
           </div>
 
@@ -684,6 +768,8 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                             <td className="p-4 space-y-1 align-top">
                               <div><strong className="text-slate-900">{po.project_code}</strong></div>
                               <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
+                              {/* 👇 Add this line to show the PM name on the screen! */}
+  <div className="text-[9px] font-bold text-indigo-500 uppercase mt-1">PM: {po.project_manager}</div>
                               <div className={`mt-2 text-[9px] font-bold px-2 py-0.5 rounded w-max uppercase tracking-wider ${
                                 isDiscrepancy ? 'bg-rose-100 text-rose-800 border border-rose-200 animate-pulse' : 
                                 isShortage ? 'bg-amber-100 text-amber-800 border border-amber-200' : 

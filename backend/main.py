@@ -1388,34 +1388,37 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             models.Quotation.is_selected == True
         ).all()
         
-        grand_total = sum(q.total_amount for q in winning_quotes)
+        # 🎯 FALLBACK: If no explicit winners selected, grab all to prevent empty rows
+        if not winning_quotes:
+            winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po_obj.ticket_number).all()
+
         primary_quote = winning_quotes[0] if winning_quotes else None
         primary_vendor = primary_quote.vendor_name if primary_quote else "N/A"
         
+        # 🎯 EXPORT MATH & TERMS
+        grand_total = float(sum((q.total_amount or 0) for q in winning_quotes)) if winning_quotes else 0.0
+        base_total = float(sum((q.base_total_value or 0) for q in winning_quotes)) if winning_quotes else 0.0
+        gst_amount = grand_total - base_total
+        payment_terms = getattr(primary_quote, 'payment_terms', '100% Payment') if primary_quote else '100% Payment'
+        contract_duration = getattr(primary_quote, 'time_of_delivery', 'N/A') if primary_quote else 'N/A'
+        
         items = db.query(models.TicketItem).filter(models.TicketItem.ticket_number == po_obj.ticket_number).all()
-        item_list = [
-            {
-                "desc": i.product_description, 
-                "qty": i.quantity, 
-                "is_reimbursable": getattr(i, 'is_reimbursable', False)
-            } for i in items
-        ]
+        item_list = [{"desc": i.product_description, "qty": i.quantity, "is_reimbursable": getattr(i, 'is_reimbursable', False)} for i in items]
         purposes = list(set([i.purpose for i in items if getattr(i, 'purpose', None)]))
         aggregated_purpose = ", ".join(purposes) if purposes else "General Maintenance"
         
+        # 🎯 PRECISE MANAGER LINKING
+        pm_user = db.query(models.User).filter(models.User.id == ticket_obj.assigned_project_manager_id).first()
+        project_manager = pm_user.name if pm_user else "Pending / N/A"
+        pm_id = pm_user.id if pm_user else None
+
         sm_log = db.query(models.TicketHistory).filter(
             models.TicketHistory.ticket_number == po_obj.ticket_number,
             models.TicketHistory.action_taken == "Explicit Sign-Off Applied",
             models.TicketHistory.remarks.contains("Site Manager")
         ).order_by(models.TicketHistory.timestamp.desc()).first()
         site_manager = sm_log.user_name if sm_log else "Pending / N/A"
-        
-        pm_log = db.query(models.TicketHistory).filter(
-            models.TicketHistory.ticket_number == po_obj.ticket_number,
-            models.TicketHistory.action_taken == "Approve"
-        ).order_by(models.TicketHistory.timestamp.desc()).first()
-        project_manager = pm_log.user_name if pm_log else "Pending / N/A"
-        
+
         response.append({
             "po_number": po_obj.po_number,
             "ticket_number": po_obj.ticket_number,
@@ -1426,11 +1429,16 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             "vendor_email": getattr(primary_quote, 'vendor_email', 'N/A') if primary_quote else 'N/A',
             "vendor_contact": getattr(primary_quote, 'vendor_contact', 'N/A') if primary_quote else 'N/A',
             "purpose": aggregated_purpose,
-            "grand_total": float(grand_total),
+            "payment_terms": payment_terms,
+            "contract_duration": contract_duration,
+            "base_total": base_total,
+            "gst_amount": gst_amount,
+            "grand_total": grand_total,
             "project_name": ticket_obj.project_name,
             "project_code": ticket_obj.project_code,
             "site_manager": site_manager,
             "project_manager": project_manager,
+            "pm_id": pm_id,  # 🎯 Added for strict access control
             "items": item_list,
             "category": ticket_obj.category,
             "status": ticket_obj.status,
