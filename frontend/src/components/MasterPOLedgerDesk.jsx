@@ -40,7 +40,17 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [editingPOs, setEditingPOs] = useState({});
   
   const isPurchaseExecutive = currentUser?.role === 'Purchase Executive';
-  const isDirectorOrPurchase = currentUser?.role === 'Director' || currentUser?.role === 'Purchase Executive' || currentUser?.role === 'Admin';
+  
+  // 🎯 FIX: Added Accounts roles so they don't get locked out by the PM filter!
+  const canViewAll = [
+    'Director', 
+    'Purchase Executive', 
+    'Admin', 
+    'Accounts', 
+    'Accounts Executive', 
+    'Finance Manager',
+    'IT Manager'
+  ].includes(currentUser?.role);
 
   const fetchLedgerPOs = useCallback(async () => {
     setLoading(true);
@@ -236,15 +246,15 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     } catch(e) { return true; }
   };
 
-  // 🎯 CORE FILTER ALGORITHM (Ensures PMs only see their rows, Directors see all)
+  // 🎯 CORE FILTER ALGORITHM (Ensures PMs only see their rows, Accounts/Directors see all)
   const filteredLedger = useMemo(() => {
     return ledgerList.filter(po => {
       
       // 1. Strict Security Filter: Is this a normal PM looking at someone else's data? Hide it.
-      if (!isDirectorOrPurchase) {
+      if (!canViewAll) {
         if (po.pm_id !== currentUser?.id && po.project_manager !== currentUser?.name) return false;
       } else {
-        // Directors/Purchasers can use the Dropdown to filter by specific PMs
+        // Directors/Purchasers/Accounts can use the Dropdown to filter by specific PMs
         if (selectedPMFilter !== 'ALL' && po.project_manager !== selectedPMFilter) return false;
       }
 
@@ -264,7 +274,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       
       return true;
     });
-  }, [ledgerList, selectedProjectFilter, selectedTimeFilter, selectedPMFilter, searchQuery, currentUser, isDirectorOrPurchase]);
+  }, [ledgerList, selectedProjectFilter, selectedTimeFilter, selectedPMFilter, searchQuery, currentUser, canViewAll]);
 
   // 🎯 DYNAMIC ANALYTICS (Updates based on the active filters above!)
   const analyticsMetrics = useMemo(() => {
@@ -512,8 +522,8 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             
             <div className="flex flex-wrap items-center gap-2">
               
-              {/* 🎯 NEW: PROJECT MANAGER FILTER (Only for Directors/Purchase Execs) */}
-              {isDirectorOrPurchase && (
+              {/* 🎯 NEW: PROJECT MANAGER FILTER (For Directors, Purchase Execs, and Accounts) */}
+              {canViewAll && (
                 <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
                   <Filter size={12} className="text-slate-400" />
                   <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Manager:</span>
@@ -768,8 +778,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                             <td className="p-4 space-y-1 align-top">
                               <div><strong className="text-slate-900">{po.project_code}</strong></div>
                               <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
-                              {/* 👇 Add this line to show the PM name on the screen! */}
-  <div className="text-[9px] font-bold text-indigo-500 uppercase mt-1">PM: {po.project_manager}</div>
+                              <div className="text-[9px] font-bold text-indigo-500 uppercase mt-1">PM: {po.project_manager}</div>
                               <div className={`mt-2 text-[9px] font-bold px-2 py-0.5 rounded w-max uppercase tracking-wider ${
                                 isDiscrepancy ? 'bg-rose-100 text-rose-800 border border-rose-200 animate-pulse' : 
                                 isShortage ? 'bg-amber-100 text-amber-800 border border-amber-200' : 
