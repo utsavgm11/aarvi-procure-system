@@ -28,7 +28,8 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 # 1. System Logging Configurations
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AarviProcure")
-app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.1.0")
+
+app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.2.0")
 
 # 🎯 Configure Cloudinary securely
 cloudinary.config(
@@ -40,7 +41,6 @@ cloudinary.config(
 
 UPLOAD_DIR = "storage/quotation_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-# 🎯 Directory for saved PO HTML templates
 os.makedirs("storage/po_templates", exist_ok=True)
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
@@ -60,7 +60,7 @@ class RequisitionRowItem(BaseModel):
     product_description: str
     make_brand: Optional[str] = None
     quantity: int
-    purpose: Optional[str] = ""  # 🎯 FIX: Made optional
+    purpose: Optional[str] = ""  
     item_type: Optional[str] = "Consumable"  
 
 class CreateRequisitionPayload(BaseModel):
@@ -68,8 +68,8 @@ class CreateRequisitionPayload(BaseModel):
     project_name: str
     coordinator_id: int
     category: str 
-    assigned_site_manager_id: Optional[Union[int, str]] = None  # 🎯 FIX: Accepts empty strings
-    assigned_project_manager_id: Optional[Union[int, str]] = None # 🎯 FIX: Accepts empty strings
+    assigned_site_manager_id: Optional[Union[int, str]] = None  
+    assigned_project_manager_id: Optional[Union[int, str]] = None 
     items: List[RequisitionRowItem]
     is_manager_direct_route: Optional[bool] = False 
 
@@ -77,7 +77,7 @@ class DirectPOItemRow(BaseModel):
     product_description: str
     make_brand: Optional[str] = None
     quantity: int
-    purpose: Optional[str] = "" # 🎯 FIX: Made optional
+    purpose: Optional[str] = "" 
     item_type: Optional[str] = "Consumable"
     vendor_name: str
     base_total_value: float
@@ -107,7 +107,7 @@ class UpdateRequisitionItem(BaseModel):
     product_description: str
     make_brand: Optional[str] = None
     quantity: int
-    purpose: Optional[str] = "" # 🎯 FIX: Made optional
+    purpose: Optional[str] = "" 
     is_reimbursable: Optional[bool] = False
     item_type: Optional[str] = "Consumable"  
 
@@ -147,6 +147,13 @@ class QuotationRowItem(BaseModel):
     site_contact_phone: Optional[str] = None
     base_total_value: Optional[float] = 0.0
     net_amount_payable: Optional[float] = 0.0
+    # 🎯 RECURRING & SUBSCRIPTION FIELDS
+    is_recurring: Optional[bool] = False
+    recurring_type: Optional[str] = "FIXED_LEASE" 
+    billing_cycle: Optional[str] = "MONTHLY"       
+    contract_tenure_months: Optional[int] = 1
+    monthly_rate: Optional[float] = 0.0
+    approved_spending_cap: Optional[float] = 0.0
 
 class SubmitQuotationsPayload(BaseModel):
     quotations: List[QuotationRowItem]
@@ -159,10 +166,8 @@ class FinanceApprovalPayload(BaseModel):
     selected_bids: Optional[dict] = None  
     items: Optional[List[UpdateRequisitionItem]] = None 
 
-# 🎯 Payload for saving custom edited PO templates
 class SaveTemplatePayload(BaseModel):
     html_content: str
-
 
 # -------------------------------------------------------------------
 # STAGE 0: LIVE PERSONNEL ROUTING
@@ -186,14 +191,12 @@ def raise_material_requisition(
 ):
     ticket_number = f"REQ-2026-{random.randint(100000, 999999)}"
     
-    # 🎯 FIX: Safely parse frontend IDs. If empty, default to None so it routes to PM
     site_mgr_id = int(payload.assigned_site_manager_id) if payload.assigned_site_manager_id not in [None, "", "null"] else None
     proj_mgr_id = int(payload.assigned_project_manager_id) if payload.assigned_project_manager_id not in [None, "", "null"] else None
-
+    
     if payload.is_manager_direct_route:
         initial_status = "Pending Sourcing"
     else:
-        # If no site manager exists, immediately jump to Pending PM Vetting
         initial_status = "Vetting Active" if site_mgr_id else "Pending PM Vetting"
     
     master_ticket = models.MaterialTicket(
@@ -234,7 +237,6 @@ def raise_material_requisition(
     db.add(history)
     db.commit()
     
-    # 🎯 FIX: Automatically email the PM if the Site Manager doesn't exist
     target_user_id = (site_mgr_id or proj_mgr_id) if not payload.is_manager_direct_route else None
     
     if target_user_id:
@@ -526,14 +528,19 @@ def attach_vendor_quotations(
             site_contact_person=quote.site_contact_person,
             site_contact_phone=quote.site_contact_phone,
             base_total_value=quote.base_total_value,
-            net_amount_payable=quote.net_amount_payable
+            net_amount_payable=quote.net_amount_payable,
+            is_recurring=quote.is_recurring,
+            recurring_type=quote.recurring_type,
+            billing_cycle=quote.billing_cycle,
+            contract_tenure_months=quote.contract_tenure_months,
+            monthly_rate=quote.monthly_rate,
+            approved_spending_cap=quote.approved_spending_cap
         )
         db.add(db_quote)
         
         single_unit_price = float(quote.unit_price or 0.0)
         if single_unit_price > 250000:
             any_unit_price_exceeds_2_5l = True
-
         if quote.vendor_name:
             clean_name = quote.vendor_name.strip()
             existing_vendor = db.query(models.Vendor).filter(models.Vendor.name == clean_name).first()
@@ -552,7 +559,7 @@ def attach_vendor_quotations(
             
     exceeds_10l_total = highest_landed_total > 1000000
     requires_director_review = exceeds_10l_total or any_unit_price_exceeds_2_5l
-
+    
     if not requires_director_review:
         ticket.status = "Pending Project Manager"
         routing_msg = f"Order matrix value (Highest Total: ₹{highest_landed_total:,.2f}) routed directly to Project Manager for mandatory clearance."
@@ -640,7 +647,8 @@ def process_financial_signoff(
         new_po = models.PurchaseOrder(
             po_number=po_number,
             ticket_number=ticket_number,
-            pdf_url=f"/storage/aarvi_pos/{po_number}.pdf"
+            pdf_url=f"/storage/aarvi_pos/{po_number}.pdf",
+            gst_status="Pending" # 🎯 Initialize GST Hold
         )
         db.add(new_po)
         remarks_text = f"Budget cleared by {payload.user_name}. Winning vendor bids locked. Draft PO template {po_number} generated and sent to Purchasing Department."
@@ -773,7 +781,6 @@ def get_pending_purchase_approval_tickets(db: Session = Depends(get_db)):
 def get_coordinator_completed_history(coordinator_id: int, db: Session = Depends(get_db)):
     tickets = db.query(models.MaterialTicket).filter(
         models.MaterialTicket.coordinator_id == coordinator_id,
-        # 🎯 FIX: Removed "Vetting Active" from the exclusion list so new tickets show in pipeline
         models.MaterialTicket.status != "Awaiting Coordinator Sign-Off"
     ).order_by(models.MaterialTicket.created_at.desc()).all()
     
@@ -1025,7 +1032,6 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
         
     primary_quote = winning_quotes[0] if winning_quotes else None
     
-    # 🎯 FIX: Correctly handle 'None' values with strict fallbacks
     vendor_name = getattr(primary_quote, 'vendor_name', None) or "N/A"
     vendor_address = getattr(primary_quote, 'vendor_address', None) or "Address Not Provided"
     vendor_contact = getattr(primary_quote, 'vendor_contact', None) or "N/A"
@@ -1038,11 +1044,10 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
     contract_date = getattr(primary_quote, 'contract_start_date', None)
     contract_date_str = contract_date.strftime('%d/%m/%Y') if contract_date else "Recently Submitted"
     project_name = ticket.project_name if ticket else "N/A"
-
     base_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
     net_total = sum(float(q.net_amount_payable or q.total_amount or 0) for q in winning_quotes)
     gst_adj = net_total - base_total
-
+    
     def number_to_words(num):
         if num == 0: return 'Zero'
         ones = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen ']
@@ -1062,9 +1067,8 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
         if thousand > 0: str_val += convert_less_thousand(thousand) + 'Thousand '
         if num > 0: str_val += convert_less_thousand(num)
         return str_val.strip() + ' Only'
-
+        
     amount_in_words = f"Rupees {number_to_words(int(round(net_total)))}"
-
     table_rows_html = ""
     for idx, q in enumerate(winning_quotes, start=1):
         qty = q.quantity or 1
@@ -1079,8 +1083,7 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
             <td style="text-align: right; border: 1px solid #94a3b8; padding: 5px; font-weight: bold;">{q.base_total_value:,.2f}</td>
         </tr>
         """
-
-    # 🎯 FIX: Injected Full Terms & Conditions into PDF Template
+        
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -1113,10 +1116,8 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
                 </td>
             </tr>
         </table>
-
         <p style="margin-top: 15px;"><b>Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}.</b></p>
         <p>Dear Sir,<br/>With reference to Quotation Dated {contract_date_str}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of goods with your company.</p>
-
         <table class="border-table">
             <thead>
                 <tr>
@@ -1146,7 +1147,6 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
                 </tr>
             </tbody>
         </table>
-
         <div class="tc-section" style="margin-top: 15px;">
             <p><b>a) TERMS OF PAYMENTS:</b> {payment_terms}</p>
             <p><b>b) DELIVERY:</b> Time is an essence of this Purchase Order. The material has to be delivered within {time_of_delivery} from the date of issue of PO.</p>
@@ -1168,7 +1168,6 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
             <p style="margin-top: 15px;">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.</p>
             <p>Thanking you,</p>
         </div>
-
         <table style="width: 100%; margin-top: 40px; page-break-inside: avoid;">
             <tr>
                 <td style="width: 50%;">
@@ -1186,7 +1185,6 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
     </body>
     </html>
     """
-
     pdf_buffer = io.BytesIO()
     pisa.CreatePDF(html_content, dest=pdf_buffer)
     pdf_buffer.seek(0)
@@ -1208,10 +1206,8 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po.ticket_number, models.Quotation.is_selected == True).all()
     if not winning_quotes:
         winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po.ticket_number).all()
-
     primary_quote = winning_quotes[0] if winning_quotes else None
     
-    # 🎯 FIX: Correctly handle 'None' values with strict fallbacks
     vendor_name = getattr(primary_quote, 'vendor_name', None) or "N/A"
     vendor_address = getattr(primary_quote, 'vendor_address', None) or "Address Not Provided"
     vendor_contact = getattr(primary_quote, 'vendor_contact', None) or "N/A"
@@ -1224,11 +1220,10 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     contract_date = getattr(primary_quote, 'contract_start_date', None)
     contract_date_str = contract_date.strftime('%d/%m/%Y') if contract_date else "Recently Submitted"
     project_name = ticket.project_name if ticket else "N/A"
-
     base_total = sum(float(q.base_total_value or 0) for q in winning_quotes)
     net_total = sum(float(q.net_amount_payable or q.total_amount or 0) for q in winning_quotes)
     gst_adj = net_total - base_total
-
+    
     def number_to_words(num):
         if num == 0: return 'Zero'
         ones = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen ']
@@ -1248,59 +1243,50 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
         if thousand > 0: str_val += convert_less_thousand(thousand) + 'Thousand '
         if num > 0: str_val += convert_less_thousand(num)
         return str_val.strip() + ' Only'
-
+        
     amount_in_words = f"Rupees {number_to_words(int(round(net_total)))}"
-
     doc = Document()
     for section in doc.sections:
         section.top_margin = Inches(0.4)
         section.bottom_margin = Inches(0.4)
         section.left_margin = Inches(0.5)
         section.right_margin = Inches(0.5)
-
-    # 🎯 EMBED LETTERHEAD IMAGE AT THE TOP
+        
     letterhead_path = "assets/letter_head.jpg"
     if os.path.exists(letterhead_path):
         p_lh = doc.add_paragraph()
         p_lh.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p_lh.add_run().add_picture(letterhead_path, width=Inches(7.2))
-
-    # Ref & Title
+        
     p_ref = doc.add_paragraph()
     p_ref.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     run_ref = p_ref.add_run(f"Ref: AEL/{vendor_name[:6].upper()}-PO/2026-27/{po_number.split('-')[-1]}\nDate: {date.today().strftime('%d/%m/%Y')}")
     run_ref.font.size = Pt(9)
-
     p_title = doc.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run_title = p_title.add_run("PURCHASE ORDER")
     run_title.font.bold = True
     run_title.font.size = Pt(12)
-
-    # Vendor Details
+    
     p_vendor = doc.add_paragraph()
     p_vendor.add_run(f"M/s. {vendor_name}\n").bold = True
     p_vendor.add_run(f"{vendor_address}\nCell No.: {vendor_contact} | EMAIL:- {vendor_email}\n").font.size = Pt(9)
-
     doc.add_paragraph(f"Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}").runs[0].font.bold = True
     doc.add_paragraph(f"Dear Sir,\nWith reference to Quotation Dated {contract_date_str}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of goods with your company.")
-
-    # Items Table
+    
     table = doc.add_table(rows=1, cols=5)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.style = 'Table Grid'
     table.autofit = False
-
     hdr_cells = table.rows[0].cells
     headers = ["Sr.", "Description", "Qty", "Rate", "Total (Rs.)"]
     widths = [Inches(0.5), Inches(3.2), Inches(0.8), Inches(1.0), Inches(1.2)]
-
     for i, h in enumerate(headers):
         hdr_cells[i].text = h
         hdr_cells[i].width = widths[i]
         hdr_cells[i].paragraphs[0].runs[0].font.bold = True
         hdr_cells[i].paragraphs[0].runs[0].font.size = Pt(9)
-
+        
     for idx, q in enumerate(winning_quotes, start=1):
         row_cells = table.add_row().cells
         qty = q.quantity or 1
@@ -1310,7 +1296,7 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
         row_cells[2].text = f"{qty} Nos"
         row_cells[3].text = f"{unit_rate:,.2f}"
         row_cells[4].text = f"{q.base_total_value:,.2f}"
-
+        
     r1 = table.add_row().cells
     r1[3].text = "Basic Total Value"
     r1[4].text = f"{base_total:,.2f}"
@@ -1318,22 +1304,17 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     r2 = table.add_row().cells
     r2[3].text = "GST Adjustment"
     r2[4].text = f"{gst_adj:,.2f}"
-
     r3 = table.add_row().cells
     r3[3].text = "Net Amount Payable"
     r3[4].text = f"{net_total:,.2f}"
     r3[4].paragraphs[0].runs[0].font.bold = True
-
     doc.add_paragraph(f"({amount_in_words})").alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    # Full Terms
+    
     doc.add_paragraph().add_run(f"a) TERMS OF PAYMENTS: {payment_terms}").font.bold = True
     doc.add_paragraph().add_run(f"b) DELIVERY: Time is an essence of this Purchase Order. The material has to be delivered within {time_of_delivery} from the date of issue of PO.").font.bold = True
     doc.add_paragraph().add_run(f"c) PROJECT: {project_name}").font.bold = True
-
     doc.add_paragraph("Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)")
     doc.add_paragraph("The placement of order is subject to the following Terms & Conditions:-").runs[0].font.bold = True
-
     terms = [
         f"1. PRICE: The cost of Purchase with GST as shown above is Rs. {net_total:,.2f}/-. This is a fixed-price order and no escalation is applicable.",
         "2. QUALITY: If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.",
@@ -1350,13 +1331,11 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
         p.runs[0].font.size = Pt(9)
         
     doc.add_paragraph("Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.\nThanking you,\nYours faithfully")
-
     sig_table = doc.add_table(rows=1, cols=2)
     sig_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     c1, c2 = sig_table.rows[0].cells
     c1.text = "\n\nFor AARVI ENCON LIMITED\n_____________________\nAuthorized Signatory"
     c2.text = "\n\nAccepted By Vendor\n_____________________\nSignature & Seal"
-
     stream = io.BytesIO()
     doc.save(stream)
     stream.seek(0)
@@ -1388,14 +1367,11 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             models.Quotation.is_selected == True
         ).all()
         
-        # 🎯 FALLBACK: If no explicit winners selected, grab all to prevent empty rows
         if not winning_quotes:
             winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po_obj.ticket_number).all()
-
         primary_quote = winning_quotes[0] if winning_quotes else None
         primary_vendor = primary_quote.vendor_name if primary_quote else "N/A"
         
-        # 🎯 EXPORT MATH & TERMS
         grand_total = float(sum((q.total_amount or 0) for q in winning_quotes)) if winning_quotes else 0.0
         base_total = float(sum((q.base_total_value or 0) for q in winning_quotes)) if winning_quotes else 0.0
         gst_amount = grand_total - base_total
@@ -1407,18 +1383,16 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
         purposes = list(set([i.purpose for i in items if getattr(i, 'purpose', None)]))
         aggregated_purpose = ", ".join(purposes) if purposes else "General Maintenance"
         
-        # 🎯 PRECISE MANAGER LINKING
         pm_user = db.query(models.User).filter(models.User.id == ticket_obj.assigned_project_manager_id).first()
         project_manager = pm_user.name if pm_user else "Pending / N/A"
         pm_id = pm_user.id if pm_user else None
-
         sm_log = db.query(models.TicketHistory).filter(
             models.TicketHistory.ticket_number == po_obj.ticket_number,
             models.TicketHistory.action_taken == "Explicit Sign-Off Applied",
             models.TicketHistory.remarks.contains("Site Manager")
         ).order_by(models.TicketHistory.timestamp.desc()).first()
         site_manager = sm_log.user_name if sm_log else "Pending / N/A"
-
+        
         response.append({
             "po_number": po_obj.po_number,
             "ticket_number": po_obj.ticket_number,
@@ -1438,7 +1412,7 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             "project_code": ticket_obj.project_code,
             "site_manager": site_manager,
             "project_manager": project_manager,
-            "pm_id": pm_id,  # 🎯 Added for strict access control
+            "pm_id": pm_id,  
             "items": item_list,
             "category": ticket_obj.category,
             "status": ticket_obj.status,
@@ -1456,11 +1430,14 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             "payment_date": getattr(po_obj, 'payment_date', '') or '',
             "payment_remark": getattr(po_obj, 'payment_remark', '') or '',
             "payment_advice_url": getattr(po_obj, 'payment_advice_url', None),
-            "disbursed_amount": float(getattr(po_obj, 'disbursed_amount', 0) or 0)
+            "disbursed_amount": float(getattr(po_obj, 'disbursed_amount', 0) or 0),
+            # 🎯 GST STATUS INJECTION
+            "gst_status": getattr(po_obj, 'gst_status', 'Pending') or 'Pending',
+            "gst_clearance_date": getattr(po_obj, 'gst_clearance_date', 'N/A') or 'N/A',
+            "gst_verified_by": getattr(po_obj, 'gst_verified_by', 'N/A') or 'N/A'
         })
     return response
 
-# 🚀 UPDATED: Uploads the physical PDF attachment directly to Cloudinary
 @app.put("/api/purchase-orders/{po_number}/invoice")
 async def update_po_invoice_details(
     po_number: str, 
@@ -1511,8 +1488,6 @@ async def update_po_invoice_details(
                 action_taken="Proforma Invoice Uploaded",
                 remarks=f"Vendor PI {invoice_no} securely uploaded to cloud and routed to Project Manager for financial clearance."
             ))
-
-            # 🎯 AUTOMATED EMAIL: Alert Project Manager that PI is ready for approval
             pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
             if pm and pm.email:
                 background_tasks.add_task(
@@ -1552,7 +1527,6 @@ def delete_po_invoice_file(po_number: str, db: Session = Depends(get_db)):
                 
         except Exception as e:
             logger.error(f"Failed to delete Cloudinary file: {str(e)}")
-
         po.proforma_invoice_url = None
         
         ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
@@ -1563,13 +1537,9 @@ def delete_po_invoice_file(po_number: str, db: Session = Depends(get_db)):
                 action_taken="Proforma Invoice Attachment Removed",
                 remarks=f"Proforma invoice attachment deleted for PO {po_number}."
             ))
-
     db.commit()
     return {"message": "Attachment deleted successfully from Cloudinary and Database."}    
 
-# -------------------------------------------------------------------
-# 🎯 SIGNED PO UPLOAD ENDPOINT
-# -------------------------------------------------------------------
 @app.put("/api/purchase-orders/{po_number}/signed-po")
 async def upload_signed_po_document(
     po_number: str, 
@@ -1602,9 +1572,6 @@ async def upload_signed_po_document(
     db.commit()
     return {"message": "Signed PO uploaded successfully.", "signed_po_url": po.signed_po_url}
 
-# -------------------------------------------------------------------
-# 🧾 TAX INVOICE UPLOAD ENDPOINT
-# -------------------------------------------------------------------
 @app.put("/api/purchase-orders/{po_number}/tax-invoice")
 async def update_po_tax_invoice_details(
     po_number: str, 
@@ -1652,15 +1619,78 @@ async def update_po_tax_invoice_details(
     db.commit()
     return {"message": "Tax Invoice details saved successfully.", "tax_invoice_url": po.tax_invoice_url}
 
+# -------------------------------------------------------------------
+# 🧾 GST PORTAL REFLECTION & CLEARANCE ENDPOINT
+# -------------------------------------------------------------------
+class MarkGstPaidPayload(BaseModel):
+    user_name: str
+    remarks: Optional[str] = "GST reflected on Government Portal (GSTR-2B verified)."
+
+@app.put("/api/purchase-orders/{po_number}/mark-gst-paid")
+def mark_po_gst_as_paid(
+    po_number: str, 
+    payload: MarkGstPaidPayload, 
+    db: Session = Depends(get_db)
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase Order not found.")
+        
+    po.gst_status = "Paid"
+    po.gst_clearance_date = datetime.now().strftime('%d-%b-%Y %I:%M %p')
+    po.gst_verified_by = payload.user_name
+
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+    
+    log_msg = f"GST Portal Reflection Verified by {payload.user_name}. GST Status marked as PAID. Remarks: {payload.remarks}"
+    
+    # Check if Order is 100% complete (Delivered + Fully Disbursed + GST Reflected)
+    winning_quotes = db.query(models.Quotation).filter(
+        models.Quotation.ticket_number == po.ticket_number,
+        models.Quotation.is_selected == True
+    ).all()
+    grand_total = float(sum((q.total_amount or 0) for q in winning_quotes)) if winning_quotes else 0.0
+    disbursed = float(getattr(po, 'disbursed_amount', 0) or 0)
+    
+    is_fully_paid = (grand_total - disbursed) <= 1.0
+    is_delivered = ticket and ticket.status in ["Delivered - GRN Logged", "Dispatched"]
+
+    if is_fully_paid and is_delivered:
+        ticket.status = "Delivered - GRN Logged"
+        log_msg += " | All financial, delivery, and GST liabilities fulfilled. Order officially closed."
+
+    db.add(models.TicketHistory(
+        ticket_number=po.ticket_number,
+        user_name=payload.user_name,
+        action_taken="GST Portal Verified & Released",
+        remarks=log_msg
+    ))
+    
+    db.commit()
+    return {
+        "po_number": po_number, 
+        "gst_status": "Paid", 
+        "ticket_status": ticket.status if ticket else "N/A",
+        "message": "GST verified and marked as Paid."
+    }
 
 # -------------------------------------------------------------------
-# 🏢 VENDOR MASTER DIRECTORY LAYER
+# 🏢 VENDOR MASTER DIRECTORY LAYER & DOCUMENT VAULT
 # -------------------------------------------------------------------
 class VendorCreatePayload(BaseModel):
     name: str
     address: Optional[str] = ""
     contact_number: Optional[str] = ""
     email: Optional[str] = ""
+
+class VendorUpdatePayload(BaseModel):
+    name: str
+    address: Optional[str] = ""
+    contact_number: Optional[str] = ""
+    email: Optional[str] = ""
+    gst_number: Optional[str] = ""
+    pan_number: Optional[str] = ""
+    bank_details: Optional[str] = ""
 
 @app.post("/api/vendors", status_code=201)
 def add_new_vendor(payload: VendorCreatePayload, db: Session = Depends(get_db)):
@@ -1682,7 +1712,93 @@ def add_new_vendor(payload: VendorCreatePayload, db: Session = Depends(get_db)):
 @app.get("/api/vendors", response_model=List[dict])
 def get_all_vendors(db: Session = Depends(get_db)):
     vendors = db.query(models.Vendor).filter(models.Vendor.is_active == True).order_by(models.Vendor.name.asc()).all()
-    return [{"id": v.id, "name": v.name, "address": v.address, "contact_number": v.contact_number, "email": v.email} for v in vendors]    
+    return [
+        {
+            "id": v.id, 
+            "name": v.name, 
+            "address": v.address, 
+            "contact_number": v.contact_number, 
+            "email": v.email,
+            "gst_number": getattr(v, 'gst_number', ''),
+            "pan_number": getattr(v, 'pan_number', ''),
+            "bank_details": getattr(v, 'bank_details', ''),
+            "aadhar_url": getattr(v, 'aadhar_url', None),
+            "pan_url": getattr(v, 'pan_url', None),
+            "reg_cert_url": getattr(v, 'reg_cert_url', None),
+            "gst_cert_url": getattr(v, 'gst_cert_url', None),
+            "electricity_bill_url": getattr(v, 'electricity_bill_url', None),
+            "cancelled_cheque_url": getattr(v, 'cancelled_cheque_url', None),
+            "iso_cert_url": getattr(v, 'iso_cert_url', None)
+        } 
+        for v in vendors
+    ]    
+
+@app.put("/api/vendors/{vendor_id}")
+def update_vendor_profile(vendor_id: int, payload: VendorUpdatePayload, db: Session = Depends(get_db)):
+    vendor = db.query(models.Vendor).filter(models.Vendor.id == vendor_id).first()
+    if not vendor: 
+        raise HTTPException(status_code=404, detail="Vendor not found")
+        
+    vendor.name = payload.name
+    vendor.address = payload.address
+    vendor.contact_number = payload.contact_number
+    vendor.email = payload.email
+    
+    # Safely assign optional fields in case DB model wasn't migrated yet
+    if hasattr(vendor, 'gst_number'): vendor.gst_number = payload.gst_number
+    if hasattr(vendor, 'pan_number'): vendor.pan_number = payload.pan_number
+    if hasattr(vendor, 'bank_details'): vendor.bank_details = payload.bank_details
+    
+    db.commit()
+    return {"message": "Vendor profile updated successfully."}
+
+@app.put("/api/vendors/{vendor_id}/documents")
+async def upload_vendor_documents(
+    vendor_id: int,
+    aadhar_file: Optional[UploadFile] = File(None),
+    pan_file: Optional[UploadFile] = File(None),
+    reg_cert_file: Optional[UploadFile] = File(None),
+    gst_cert_file: Optional[UploadFile] = File(None),
+    electricity_bill_file: Optional[UploadFile] = File(None),
+    cancelled_cheque_file: Optional[UploadFile] = File(None),
+    iso_cert_file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db)
+):
+    vendor = db.query(models.Vendor).filter(models.Vendor.id == vendor_id).first()
+    if not vendor: 
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    def upload_to_cloud(file_obj, doc_name):
+        if not file_obj: return None
+        ext = os.path.splitext(file_obj.filename)[1].lower()
+        if ext not in [".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg"]:
+            raise HTTPException(status_code=400, detail=f"Invalid format for {doc_name}. Use PDF, Word, or Image.")
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"VENDOR_{vendor_id}_{doc_name}_{timestamp}"
+        try:
+            res = cloudinary.uploader.upload(
+                file_obj.file, 
+                public_id=filename, 
+                folder="aarvi_vendor_docs", 
+                resource_type="auto"
+            )
+            return res.get("secure_url")
+        except Exception as e:
+            logger.error(f"Failed to upload {doc_name}: {str(e)}")
+            return None
+
+    # Safely assign URLs if files are uploaded
+    if aadhar_file and hasattr(vendor, 'aadhar_url'): vendor.aadhar_url = upload_to_cloud(aadhar_file, "AADHAR")
+    if pan_file and hasattr(vendor, 'pan_url'): vendor.pan_url = upload_to_cloud(pan_file, "PAN")
+    if reg_cert_file and hasattr(vendor, 'reg_cert_url'): vendor.reg_cert_url = upload_to_cloud(reg_cert_file, "REG")
+    if gst_cert_file and hasattr(vendor, 'gst_cert_url'): vendor.gst_cert_url = upload_to_cloud(gst_cert_file, "GST")
+    if electricity_bill_file and hasattr(vendor, 'electricity_bill_url'): vendor.electricity_bill_url = upload_to_cloud(electricity_bill_file, "ELECTRICITY")
+    if cancelled_cheque_file and hasattr(vendor, 'cancelled_cheque_url'): vendor.cancelled_cheque_url = upload_to_cloud(cancelled_cheque_file, "CHEQUE")
+    if iso_cert_file and hasattr(vendor, 'iso_cert_url'): vendor.iso_cert_url = upload_to_cloud(iso_cert_file, "ISO")
+
+    db.commit()
+    return {"message": "Vendor documents securely uploaded and linked to profile."}
 
 # -------------------------------------------------------------------
 # 🔐 AUTHENTICATION & LOGIN LAYER
@@ -1827,7 +1943,7 @@ def get_user_notifications(user_id: int, db: Session = Depends(get_db)):
     return notifications
 
 # -------------------------------------------------------------------
-# 🎯 NEW: LIVE SIDEBAR COUNTS ENDPOINT
+# 🎯 LIVE SIDEBAR COUNTS ENDPOINT
 # -------------------------------------------------------------------
 @app.get("/api/sidebar-counts", response_model=dict)
 def get_sidebar_counts(user_id: int, role: str, db: Session = Depends(get_db)):
@@ -1878,10 +1994,8 @@ def get_sidebar_counts(user_id: int, role: str, db: Session = Depends(get_db)):
     if role in ["Accounts Executive", "Accounts", "Finance Manager"]:
         counts["pending_disbursements"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "PI Approved - Sent to Accounts").count()
         counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
-
     if role in ["Admin", "IT Manager"]:
         counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
-
     return counts
 
 @app.get("/api/requisitions/{ticket_number}/po", response_model=dict)
@@ -1922,8 +2036,7 @@ def approve_proforma_invoice(
         action_taken="Proforma Invoice Approved",
         remarks=payload.remarks or "Proforma Invoice verified and approved by PM. Routed to Accounts Desk for disbursement."
     ))
-
-    # 🎯 AUTOMATED EMAIL: Alert Accounts that PI is approved and ready for payment
+    
     accounts_users = db.query(models.User).filter(models.User.role.in_(["Accounts Executive", "Accounts", "Finance Manager"]), models.User.is_active == True).all()
     for acc in accounts_users:
         if acc.email:
@@ -1940,13 +2053,11 @@ def approve_proforma_invoice(
     db.commit()
     return {"ticket_number": ticket_number, "status": ticket.status}
 
-
 # -------------------------------------------------------------------
 # 💳 PHASE 4: ACCOUNTS DESK & PAYMENT DISBURSEMENT ENDPOINTS
 # -------------------------------------------------------------------
 @app.get("/api/accounts/pending-disbursement", response_model=List[dict])
 def get_pending_disbursement_pos(db: Session = Depends(get_db)):
-    # 1. Fetch tickets across all relevant Accounts & Disbursement lifecycle stages
     tickets = db.query(models.MaterialTicket).filter(
         models.MaterialTicket.status.in_([
             "PI Approved - Sent to Accounts", 
@@ -1960,12 +2071,10 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
     
     response = []
     for ticket_obj in tickets:
-        # 2. Safely look up Purchase Order entity if generated
         po_obj = db.query(models.PurchaseOrder).filter(
             models.PurchaseOrder.ticket_number == ticket_obj.ticket_number
         ).first()
         
-        # 3. Retrieve winning quotes or fallback to any attached bid
         winning_quotes = db.query(models.Quotation).filter(
             models.Quotation.ticket_number == ticket_obj.ticket_number,
             models.Quotation.is_selected == True
@@ -1976,7 +2085,6 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
                 models.Quotation.ticket_number == ticket_obj.ticket_number
             ).all()
             
-        # FIX: Explicitly cast sum to float and guard against None values
         grand_total = float(sum(q.total_amount or 0 for q in winning_quotes)) if winning_quotes else 0.0
         primary_quote = winning_quotes[0] if winning_quotes else None
         primary_vendor = primary_quote.vendor_name if primary_quote else "Pending Vendor Linking"
@@ -2008,11 +2116,12 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
             "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None) if po_obj else None,
             "utr_no": getattr(po_obj, 'utr_no', '') or '' if po_obj else '',
             "payment_date": getattr(po_obj, 'payment_date', '') or '' if po_obj else '',
-            "payment_remark": getattr(po_obj, 'payment_remark', '') or '' if po_obj else ''
+            "payment_remark": getattr(po_obj, 'payment_remark', '') or '' if po_obj else '',
+            # 🎯 INCLUDE GST STATUS FOR ACCOUNTS TO SEE
+            "gst_status": getattr(po_obj, 'gst_status', 'Pending') or 'Pending'
         })
         
     return response
-
 
 @app.put("/api/purchase-orders/{po_number}/disbursement")
 async def process_po_disbursement(
@@ -2022,6 +2131,7 @@ async def process_po_disbursement(
     payment_date: str = Form(""),
     payment_remark: str = Form(""),
     disbursed_amount: float = Form(0.0),
+    tds_amount: float = Form(0.0), # 🎯 NEW: Accounts TDS Deduction Input
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
@@ -2029,20 +2139,16 @@ async def process_po_disbursement(
     if not po:
         raise HTTPException(status_code=404, detail="Purchase Order entity not found.")
     
-    # 🎯 Calculate Total Order Value from Winning Bids
     winning_quotes = db.query(models.Quotation).filter(
         models.Quotation.ticket_number == po.ticket_number,
         models.Quotation.is_selected == True
     ).all()
     
-    # 🎯 FIX 1: EXPLICIT FLOAT CONVERSION (Prevents 500 Internal Server Error)
     grand_total = float(sum((q.total_amount or 0) for q in winning_quotes)) if winning_quotes else 0.0
-
-    # Accumulate previous payouts with the new tranche
     previous_disbursed = float(getattr(po, 'disbursed_amount', 0) or 0)
     
-    # 🎯 FIX 2: EXPLICIT FLOAT CASTING FOR MATH
-    new_total_disbursed = previous_disbursed + float(disbursed_amount)
+    # 🎯 NEW MATH: Total offsets = Base Bank Transfer + Any TDS Deducted by Accounts
+    new_total_disbursed = previous_disbursed + float(disbursed_amount) + float(tds_amount)
     po.disbursed_amount = new_total_disbursed
     
     po.utr_no = utr_no
@@ -2072,27 +2178,25 @@ async def process_po_disbursement(
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
     if ticket:
         remaining_balance = grand_total - new_total_disbursed
-
-        # 🎯 TRANCHE EVALUATION: If balance > ₹1.00, set to 'Partially Disbursed'
+        
+        # 🎯 Adjust log message to clearly denote the TDS withheld by Accounts
         if remaining_balance > 1.0:
             ticket.status = "Partially Disbursed"
-            log_msg = f"Partial Payment UTR {utr_no} logged (Tranche: ₹{float(disbursed_amount):,.2f}). Total Disbursed: ₹{new_total_disbursed:,.2f} / ₹{grand_total:,.2f}. Outstanding Balance: ₹{remaining_balance:,.2f}."
+            log_msg = f"Partial Payment UTR {utr_no} logged (Bank Transfer: ₹{float(disbursed_amount):,.2f} | TDS Deducted: ₹{float(tds_amount):,.2f}). Total Disbursed: ₹{new_total_disbursed:,.2f} / ₹{grand_total:,.2f}. Outstanding Balance: ₹{remaining_balance:,.2f}."
         else:
             ticket.status = "Dispatched"
-            log_msg = f"Final Payment UTR {utr_no} logged (Tranche: ₹{float(disbursed_amount):,.2f}). Order 100% Disbursed (Total: ₹{new_total_disbursed:,.2f}) and released for site dispatch."
-
-        # 🎯 FIX 3: ADD PROOF URL TO LOG (Enables the frontend 'View Bank Receipt' button)
+            log_msg = f"Final Payment UTR {utr_no} logged (Bank Transfer: ₹{float(disbursed_amount):,.2f} | TDS Deducted: ₹{float(tds_amount):,.2f}). Order 100% Financially Cleared (Total: ₹{new_total_disbursed:,.2f}) and released for site dispatch."
+            
         if po.payment_advice_url:
             log_msg += f" | Proof File: {po.payment_advice_url}"
-
+            
         db.add(models.TicketHistory(
             ticket_number=ticket.ticket_number,
             user_name="Accounts Executive",
             action_taken=f"Disbursement Logged ({ticket.status})",
             remarks=log_msg
         ))
-
-        # 🎯 AUTOMATED EMAIL: Alert Coordinator
+        
         coordinator = db.query(models.User).filter(models.User.id == ticket.coordinator_id).first()
         if coordinator and coordinator.email:
             background_tasks.add_task(
@@ -2105,7 +2209,6 @@ async def process_po_disbursement(
                 status=ticket.status
             )
         
-        # Alert Purchase Executives
         purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
         for pe in purchase_execs:
             if pe.email:
@@ -2126,7 +2229,6 @@ async def process_po_disbursement(
         "total_disbursed": new_total_disbursed,
         "remaining_balance": max(0.0, grand_total - new_total_disbursed)
     }
-
 
 # -------------------------------------------------------------------
 # 📦 PHASE 5: GRN & MATERIAL DISCREPANCY HANDLING ENDPOINT
@@ -2181,7 +2283,6 @@ async def process_goods_receipt_note(
         ticket.status = "Material Discrepancy Raised"
         action = f"CRITICAL ALERT: Material Discrepancy ({discrepancy_category})"
         detail_text = f"Issue flagged by {user_name} [{discrepancy_category}]: {remarks or 'No remarks provided'}"
-
     if grn_url:
         detail_text += f" | Proof File: {grn_url}"
         
@@ -2191,8 +2292,7 @@ async def process_goods_receipt_note(
         action_taken=action,
         remarks=detail_text
     ))
-
-    # 🎯 AUTOMATED EMAIL: Alert Procurement & PM if there is a shortage or damage
+    
     if receipt_type in ["PARTIAL", "DISCREPANCY"]:
         pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
         if pm and pm.email:
