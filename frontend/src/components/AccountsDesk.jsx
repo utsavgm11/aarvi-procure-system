@@ -4,7 +4,8 @@ import axios from 'axios';
 import { 
   Landmark, Search, Calendar, FileText, UploadCloud, CheckCircle2, 
   Clock, ExternalLink, Paperclip, ShieldCheck, ArrowRight, X, Building2,
-  Filter, CheckSquare, Download, Wallet, AlertCircle, Printer, ChevronDown, ChevronUp
+  Filter, CheckSquare, Download, Wallet, AlertCircle, Printer, ChevronDown, ChevronUp,
+  DollarSign, Calculator
 } from 'lucide-react';
 import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
 
@@ -35,6 +36,7 @@ export default function AccountsDesk({ currentUser }) {
   const [paymentDate, setPaymentDate] = useState('');
   const [paymentRemark, setPaymentRemark] = useState('');
   const [disbursedAmount, setDisbursedAmount] = useState(0);
+  const [tdsAmount, setTdsAmount] = useState(''); // 🎯 NEW: TDS State
   const [paymentFile, setPaymentFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState(null);
@@ -113,6 +115,7 @@ export default function AccountsDesk({ currentUser }) {
     // Ensure we only grab the date portion YYYY-MM-DD
     setPaymentDate(new Date().toISOString().split('T')[0]);
     setPaymentRemark('');
+    setTdsAmount(''); // 🎯 Reset TDS amount
     
     // Auto-calculate the amount defaulting to remaining balance
     const calculatedPayable = (po.remaining_balance && po.remaining_balance > 0) 
@@ -129,8 +132,20 @@ export default function AccountsDesk({ currentUser }) {
       setAlert({ type: 'error', message: "Bank UTR / Transaction Reference No. is mandatory." });
       return;
     }
-    if (disbursedAmount <= 0) {
-      setAlert({ type: 'error', message: "Payment amount must be greater than zero." });
+
+    // 🎯 NEW MATH: Bank Transfer + TDS
+    const bankTransfer = parseFloat(disbursedAmount) || 0;
+    const taxDeducted = parseFloat(tdsAmount) || 0;
+    const totalCleared = bankTransfer + taxDeducted;
+
+    if (totalCleared <= 0) {
+      setAlert({ type: 'error', message: "Payment clearance amount must be greater than zero." });
+      return;
+    }
+
+    // 🎯 Safeguard: Prevent overpaying
+    if (totalCleared > (selectedPo.remaining_balance || selectedPo.grand_total) + 1) {
+      setAlert({ type: 'error', message: "Error: The total cleared amount (Transfer + TDS) exceeds the remaining PO balance!" });
       return;
     }
 
@@ -139,7 +154,8 @@ export default function AccountsDesk({ currentUser }) {
     formData.append('utr_no', utrNo);
     formData.append('payment_date', paymentDate);
     formData.append('payment_remark', paymentRemark);
-    formData.append('disbursed_amount', disbursedAmount);
+    formData.append('disbursed_amount', bankTransfer); // Actual Money Sent
+    formData.append('tds_amount', taxDeducted); // 🎯 TDS Amount
     
     if (paymentFile) {
       formData.append('file', paymentFile);
@@ -149,10 +165,9 @@ export default function AccountsDesk({ currentUser }) {
       await axios.put(`${API_BASE_URL}/purchase-orders/${selectedPo.po_number}/disbursement`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-
       setAlert({ type: 'success', message: `Payment UTR ${utrNo} recorded successfully!` });
       setTimeout(() => {
-        const fullPaymentCleared = disbursedAmount >= (selectedPo.remaining_balance || selectedPo.grand_total);
+        const fullPaymentCleared = totalCleared >= (selectedPo.remaining_balance || selectedPo.grand_total);
         setSelectedPo(null);
         fetchAccountsOrders();
         if (fullPaymentCleared) setActiveTab('history');
@@ -176,7 +191,6 @@ export default function AccountsDesk({ currentUser }) {
       const matchesTab = activeTab === 'pending' 
         ? (po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed')
         : (po.status === 'Dispatched' || po.status === 'Partially Delivered' || po.status === 'Material Discrepancy Raised' || po.status === 'Delivered - GRN Logged');
-
       return matchesSearch && matchesTab;
     });
   }, [orders, searchQuery, activeTab]);
@@ -350,7 +364,6 @@ export default function AccountsDesk({ currentUser }) {
             <h3 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">{pendingCount} Orders</h3>
           </div>
         </Card>
-
         <Card className="p-4 flex items-center space-x-4 border-l-4 border-emerald-500 bg-white shadow-2xs">
           <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600"><CheckCircle2 size={20} /></div>
           <div>
@@ -358,7 +371,6 @@ export default function AccountsDesk({ currentUser }) {
             <h3 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">{completedCount} Orders</h3>
           </div>
         </Card>
-
         <Card className="p-4 flex items-center space-x-4 border-l-4 border-amber-500 bg-white shadow-2xs sm:col-span-2 md:col-span-1">
           <div className="p-3 rounded-xl bg-amber-50 text-amber-600"><Building2 size={20} /></div>
           <div>
@@ -482,7 +494,6 @@ export default function AccountsDesk({ currentUser }) {
                         <ExternalLink size={10} />
                       </button>
                     )}
-
                     {/* 2. PI */}
                     {po.proforma_invoice_url ? (
                       <button 
@@ -495,7 +506,6 @@ export default function AccountsDesk({ currentUser }) {
                     ) : (
                       <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded w-full block">No PI Attached</span>
                     )}
-
                     {/* 3. Tax Invoice */}
                     {po.tax_invoice_url ? (
                       <button 
@@ -557,7 +567,7 @@ export default function AccountsDesk({ currentUser }) {
                   const isExpanded = !!expandedRows[po.po_number];
                   const logs = rowLogs[po.po_number] || [];
                   const paymentLogs = logs.filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"));
-
+                  
                   return (
                     <React.Fragment key={po.po_number}>
                       <tr className={`hover:bg-slate-50/50 transition-colors ${isPartiallyPaid ? 'bg-amber-50/20' : ''} ${isExpanded ? 'bg-indigo-50/20' : ''}`}>
@@ -617,13 +627,11 @@ export default function AccountsDesk({ currentUser }) {
                                 <span className="font-bold text-slate-700 flex items-center gap-1">📄 System PO</span><span className="text-[9px] font-black text-indigo-600 uppercase">View</span>
                               </button>
                             )}
-
                             {po.proforma_invoice_url ? (
                               <button onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)} className="flex items-center justify-between bg-amber-50/60 border border-amber-200 px-2 py-1 rounded text-[10px] hover:border-amber-400 transition-colors shadow-3xs w-full text-left">
                                 <span className="font-bold text-amber-800 flex items-center gap-1 truncate max-w-[130px]">📄 PI #{po.invoice_no}</span><ExternalLink size={10} className="text-amber-500 flex-shrink-0" />
                               </button>
                             ) : <span className="text-[9px] italic text-slate-400 pl-1 block">No PI Attached</span>}
-
                             {po.tax_invoice_url ? (
                               <button onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)} className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 px-2 py-1 rounded text-[10px] hover:border-emerald-400 transition-colors shadow-3xs w-full text-left">
                                 <span className="font-bold text-emerald-800 flex items-center gap-1 truncate max-w-[130px]">🧾 Tax Inv #{po.tax_invoice_no}</span><ExternalLink size={10} className="text-emerald-500 flex-shrink-0" />
@@ -631,11 +639,11 @@ export default function AccountsDesk({ currentUser }) {
                             ) : <span className="text-[9px] italic text-slate-400 pl-1 block">Tax Inv Pending</span>}
                           </div>
                         </td>
-
+                        
                         <td className="p-4 align-top text-center">
                           <StatusBadge status={po.status} />
                         </td>
-
+                        
                         {/* Accounts Action */}
                         <td className="p-4 text-center align-top border-l border-slate-100">
                           {po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed' ? (
@@ -700,7 +708,7 @@ export default function AccountsDesk({ currentUser }) {
         </div>
       </Card>
 
-      {/* 🎯 DISBURSEMENT PAYMENT MODAL */}
+      {/* 🎯 DISBURSEMENT & TDS MODAL */}
       {selectedPo && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
@@ -717,7 +725,7 @@ export default function AccountsDesk({ currentUser }) {
                 <X size={18} />
               </button>
             </div>
-
+            
             {/* Modal Body */}
             <div className="p-5 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar flex-1">
               
@@ -753,23 +761,48 @@ export default function AccountsDesk({ currentUser }) {
                 </div>
               </div>
 
-              {/* Form Fields */}
+              {/* Form Fields & TDS Setup */}
               <div className="space-y-4">
-                <div>
-                  <Input 
-                    label="Amount Paying Now (₹) *" 
-                    type="number"
-                    value={disbursedAmount} 
-                    onChange={e => setDisbursedAmount(parseFloat(e.target.value) || 0)} 
-                    placeholder="0.00" 
-                    className="font-mono font-black text-base bg-white border-emerald-300 focus:ring-emerald-500 text-emerald-900"
-                  />
-                  <div className="flex justify-between items-center mt-1.5">
-                    <p className="text-[9px] text-emerald-600 font-medium pl-1">Edit manually for custom partial payments.</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1 col-span-2 sm:col-span-1">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><DollarSign size={12}/> Bank Transfer (₹) *</label>
+                    <input 
+                      type="number" step="0.01" required autoFocus
+                      value={disbursedAmount} 
+                      onChange={e => setDisbursedAmount(e.target.value)} 
+                      placeholder="0.00" 
+                      className="w-full bg-white border border-emerald-300 rounded-lg px-3 py-2 text-sm font-bold text-emerald-900 outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                    />
+                  </div>
+                  <div className="space-y-1 col-span-2 sm:col-span-1">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><Calculator size={12}/> TDS Deducted (₹)</label>
+                    <input 
+                      type="number" step="0.01"
+                      value={tdsAmount} 
+                      onChange={e => setTdsAmount(e.target.value)} 
+                      placeholder="Tax withheld (Optional)" 
+                      className="w-full bg-white border border-rose-300 rounded-lg px-3 py-2 text-sm font-bold text-rose-900 outline-none focus:border-rose-500 focus:bg-rose-50"
+                    />
                   </div>
                 </div>
 
-                <div className="space-y-1">
+                {/* 🎯 LIVE MATH PREVIEW */}
+                <div className="bg-slate-100 p-3 rounded-lg border border-slate-200 space-y-1.5 mt-2 mb-2">
+                  <div className="flex justify-between text-[11px] text-slate-600 font-bold">
+                    <span>Current Outstanding Balance:</span>
+                    <span className="font-mono">₹{(selectedPo.remaining_balance || selectedPo.grand_total).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-emerald-700 font-black">
+                    <span>Total PO Value Cleared (Transfer + TDS):</span>
+                    <span className="font-mono">- ₹{((parseFloat(disbursedAmount)||0) + (parseFloat(tdsAmount)||0)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                  </div>
+                  <div className="flex justify-between text-[12px] text-[#2c2a57] font-black pt-1 border-t border-slate-300">
+                    <span>New Outstanding Balance:</span>
+                    <span className="font-mono">₹{Math.max(0, (selectedPo.remaining_balance || selectedPo.grand_total) - ((parseFloat(disbursedAmount)||0) + (parseFloat(tdsAmount)||0))).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1 mt-2">
                   <Input 
                     label="Bank UTR / Transaction Reference Number *" 
                     value={utrNo} 
@@ -778,23 +811,24 @@ export default function AccountsDesk({ currentUser }) {
                     className="font-mono text-sm uppercase"
                   />
                 </div>
-
+                
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Input 
-                    label="Payment Execution Date" 
+                    label="Payment Execution Date *" 
                     type="date"
+                    required
                     value={paymentDate} 
                     onChange={e => setPaymentDate(e.target.value)} 
                   />
                 </div>
-
+                
                 <Input 
                   label="Disbursement Notes / Payment Mode" 
                   value={paymentRemark} 
                   onChange={e => setPaymentRemark(e.target.value)} 
                   placeholder="e.g. RTGS Payment via HDFC Bank / 50% Advance cleared..." 
                 />
-
+                
                 <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50 space-y-2">
                   <label className="text-[10px] font-extrabold text-indigo-800 uppercase tracking-widest flex items-center gap-1.5">
                     <Paperclip size={12} /> Attach Bank Transfer Advice (Optional)
@@ -812,8 +846,8 @@ export default function AccountsDesk({ currentUser }) {
                   )}
                 </div>
               </div>
-
             </div>
+            
             {/* Modal Footer */}
             <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex justify-end space-x-3 shrink-0">
               <Button variant="ghost" onClick={() => setSelectedPo(null)} disabled={submitting} className="px-5 text-xs font-bold">
@@ -822,7 +856,7 @@ export default function AccountsDesk({ currentUser }) {
               <Button 
                 variant="primary" 
                 onClick={handleDisbursementSubmit} 
-                disabled={submitting} 
+                disabled={submitting || ((parseFloat(disbursedAmount)||0) + (parseFloat(tdsAmount)||0)) <= 0} 
                 className="bg-[#0b9c54] hover:bg-emerald-600 px-6 py-2 shadow-sm text-xs"
               >
                 {submitting ? "Processing Upload..." : "Confirm & Send Funds"}
@@ -831,6 +865,7 @@ export default function AccountsDesk({ currentUser }) {
           </div>
         </div>
       )}
+
     </div>
   );
 }
