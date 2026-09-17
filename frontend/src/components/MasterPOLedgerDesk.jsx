@@ -5,7 +5,7 @@ import {
   FileCheck, Search, ChevronDown, ChevronUp, Landmark, Layers3, 
   Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
   UploadCloud, Paperclip, Trash2, FileText, CheckCircle2,
-  ShieldAlert, AlertOctagon, Wallet, ExternalLink, Download
+  ShieldAlert, AlertOctagon, Wallet, ExternalLink, Download, Scissors
 } from 'lucide-react';
 import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
 
@@ -40,8 +40,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [editingPOs, setEditingPOs] = useState({});
   
   const isPurchaseExecutive = currentUser?.role === 'Purchase Executive';
+  const isManagerOrDirector = ['Director', 'Project Manager', 'Admin', 'IT Manager'].includes(currentUser?.role);
   
-  // 🎯 FIX: Added Accounts roles so they don't get locked out by the PM filter!
+  // 🎯 Accounts & Management can see everything. Project Managers only see their rows.
   const canViewAll = [
     'Director', 
     'Purchase Executive', 
@@ -120,28 +121,52 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     setPreviewDoc({ url: fullUrl, title });
   };
 
+  // 🎯 NEW: PO TRUNCATION ENGINE HANDLER
+  const handleTruncatePO = async (poNumber) => {
+    const actualMonthsUsed = prompt("Early Contract Closure.\nHow many total months were actually consumed? (e.g. 4)");
+    if (!actualMonthsUsed || isNaN(actualMonthsUsed)) return;
+
+    const depositAdjusted = prompt("Security Deposit Recovery.\nEnter amount of deposit being offset/adjusted from final payout: (e.g. 100000)");
+    if (!depositAdjusted || isNaN(depositAdjusted)) return;
+
+    const remarks = prompt("Provide reasoning for early termination (Required):");
+    if (!remarks) return;
+
+    if (!window.confirm(`WARNING: You are about to permanently truncate PO ${poNumber} to ${actualMonthsUsed} months and adjust ₹${depositAdjusted} from the final payout. This will close the contract. Proceed?`)) return;
+
+    try {
+      await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/truncate`, {
+        user_name: currentUser?.name || "System User",
+        remarks: remarks,
+        actual_months_used: parseInt(actualMonthsUsed),
+        deposit_adjusted_amount: parseFloat(depositAdjusted)
+      });
+
+      alert(`Success! Contract PO ${poNumber} truncated and unspent funds returned to project ledger.`);
+      fetchLedgerPOs();
+    } catch (err) {
+      alert("Failed to truncate contract: " + (err.response?.data?.detail || "System Error"));
+    }
+  };
+
   // --- Signed PO Form Handlers ---
   const handlePoFileChange = (poNumber, event) => {
     const file = event.target.files[0];
     setPoFileForms(prev => ({ ...prev, [poNumber]: { file } }));
   };
-
   const toggleEditPO = (poNumber) => {
     setEditingPOs(prev => ({ ...prev, [poNumber]: !prev[poNumber] }));
     if (editingInvoices[poNumber]) setEditingInvoices(prev => ({...prev, [poNumber]: false}));
     if (editingTaxInvoices[poNumber]) setEditingTaxInvoices(prev => ({...prev, [poNumber]: false}));
   };
-
   const handleSaveSignedPo = async (poNumber) => {
     const formState = poFileForms[poNumber];
     if (!formState?.file) {
       alert("Please select a signed PO file first.");
       return;
     }
-
     const formData = new FormData();
     formData.append('file', formState.file);
-
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/signed-po`, formData, { 
         headers: { 'Content-Type': 'multipart/form-data'} 
@@ -190,7 +215,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     formData.append('invoice_duration', formState.payment_terms); 
     formData.append('invoice_remark', ""); 
     if (formState.file) formData.append('file', formState.file);
-
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice`, formData, { headers: { 'Content-Type': 'multipart/form-data'} });
       setEditingInvoices(prev => ({ ...prev, [poNumber]: false }));
@@ -204,7 +228,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     formData.append('tax_invoice_no', formState.tax_invoice_no);
     formData.append('tax_invoice_date', formState.tax_invoice_date);
     if (formState.file) formData.append('file', formState.file);
-
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/tax-invoice`, formData, { headers: { 'Content-Type': 'multipart/form-data'} });
       setEditingTaxInvoices(prev => ({ ...prev, [poNumber]: false }));
@@ -246,23 +269,19 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     } catch(e) { return true; }
   };
 
-  // 🎯 CORE FILTER ALGORITHM (Ensures PMs only see their rows, Accounts/Directors see all)
+  // 🎯 CORE FILTER ALGORITHM
   const filteredLedger = useMemo(() => {
     return ledgerList.filter(po => {
       
-      // 1. Strict Security Filter: Is this a normal PM looking at someone else's data? Hide it.
       if (!canViewAll) {
         if (po.pm_id !== currentUser?.id && po.project_manager !== currentUser?.name) return false;
       } else {
-        // Directors/Purchasers/Accounts can use the Dropdown to filter by specific PMs
         if (selectedPMFilter !== 'ALL' && po.project_manager !== selectedPMFilter) return false;
       }
 
-      // 2. Standard Filters
       if (selectedProjectFilter !== 'ALL' && po.project_code !== selectedProjectFilter) return false;
       if (selectedTimeFilter === '6_MONTHS' && !isWithinLast6Months(po.generated_at)) return false;
       
-      // 3. Keyword Search
       if (searchQuery) {
         const search = searchQuery.toLowerCase();
         const matchesSearch = po.po_number.toLowerCase().includes(search) ||
@@ -276,7 +295,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     });
   }, [ledgerList, selectedProjectFilter, selectedTimeFilter, selectedPMFilter, searchQuery, currentUser, canViewAll]);
 
-  // 🎯 DYNAMIC ANALYTICS (Updates based on the active filters above!)
+  // 🎯 DYNAMIC ANALYTICS
   const analyticsMetrics = useMemo(() => {
     let totalSpend = 0;
     let reimbursableTotal = 0;
@@ -324,7 +343,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     ];
 
     const csvRows = filteredLedger.map(po => {
-      // Join multiple products and quantities into a single clean string. Prevent commas from breaking columns.
       const products = po.items ? po.items.map(i => i.desc).join(" | ").replace(/"/g, '""') : "N/A";
       const quantities = po.items ? po.items.map(i => i.qty).join(" | ") : "0";
       
@@ -452,10 +470,12 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   </div>
                 </div>
               </div>
+
             </div>
           </div>
         </div>
       ) : (
+
         /* SECTION VIEW B: MAIN SHEET INTERFACE */
         <>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
@@ -522,7 +542,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             
             <div className="flex flex-wrap items-center gap-2">
               
-              {/* 🎯 NEW: PROJECT MANAGER FILTER (For Directors, Purchase Execs, and Accounts) */}
               {canViewAll && (
                 <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
                   <Filter size={12} className="text-slate-400" />
@@ -550,7 +569,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                 </select>
               </div>
 
-              {/* 🎯 NEW: EXPORT TO EXCEL BUTTON */}
               <button 
                 onClick={handleExportToExcel}
                 className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-1.5 px-3 py-1.5 text-[11px] font-bold shadow-3xs w-full sm:w-auto"
@@ -596,13 +614,11 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                         <span className="font-bold text-slate-800 line-clamp-1">{po.vendor_name}</span>
                       </div>
                       
-                      {/* Financials Mobile */}
                       <div className="col-span-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
                         <div className="flex justify-between items-center text-xs mb-1">
                           <span className="font-bold text-slate-600">Total Amount:</span>
                           <span className="font-mono font-black text-slate-900">₹{total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                         </div>
-                        {/* Progress Bar */}
                         <div className="w-full bg-slate-200 rounded-full h-1.5 my-2">
                           <div className={`h-1.5 rounded-full ${progressPct === 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${progressPct}%` }}></div>
                         </div>
@@ -626,7 +642,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                     {isExpanded && (
                       <div className="pt-2 space-y-4 border-t border-slate-200 animate-in fade-in">
                         
-                        {/* GRN Banner */}
                         {(isDiscrepancy || isShortage || isDelivered) && (
                            <div className={`p-3 rounded-xl border ${isDiscrepancy ? 'bg-rose-50 border-rose-200' : isShortage ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
                               <span className={`text-[10px] font-black uppercase ${isDiscrepancy ? 'text-rose-800' : isShortage ? 'text-amber-800' : 'text-emerald-800'}`}>Delivery Status</span>
@@ -634,7 +649,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                            </div>
                         )}
 
-                        {/* Documents Section */}
                         <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
                            <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Documents</span>
                            <div className="flex flex-col gap-2">
@@ -660,7 +674,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                            </div>
                         </div>
 
-                        {/* Ordered Items */}
                         <div className="space-y-2">
                           <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Ordered Items</span>
                           <div className="flex flex-col gap-2">
@@ -673,7 +686,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                           </div>
                         </div>
 
-                        {/* Payment History */}
                         <div className="space-y-2">
                           <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Payment History</span>
                           <div className="flex flex-col gap-2">
@@ -690,9 +702,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   )}
                                 </div>
                               ))}
-                            {(rowLogs[po.po_number] || []).filter(l => l.action_taken.includes("Disbursement")).length === 0 && (
-                               <p className="text-xs text-slate-400 italic p-2 border border-dashed rounded text-center">No payments recorded yet.</p>
-                            )}
                           </div>
                         </div>
 
@@ -739,8 +748,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                       const isShortage = po.status === 'Partially Delivered';
                       const isDelivered = po.status === 'Delivered - GRN Logged';
                       const hasGrn = isDiscrepancy || isShortage || isDelivered;
-
-                      // Extract the specific GRN log if available
+                      
                       const poLogs = rowLogs[po.po_number] || [];
                       const grnLogEntry = poLogs.find(l => 
                         l.action_taken.includes("Material Delivered") || 
@@ -949,12 +957,42 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   </div>
                                 )}
 
+                                {/* 🎯 DEPOSIT OFFSET ALERT BANNER (Only for Recurring Contracts) */}
+                                {['VEHICLE', 'ACCOMMODATION', 'SUBSCRIPTION'].includes(po.category) && pending > 0 && po.status !== 'Contract Terminated & Closed' && (
+                                  <div className="mb-6 p-4 rounded-xl border bg-indigo-50 border-indigo-200 flex items-start gap-4 shadow-3xs">
+                                    <div className="p-2 rounded-full mt-1 bg-indigo-100 text-indigo-600">
+                                      <AlertTriangle size={24} />
+                                    </div>
+                                    <div className="flex-1">
+                                      <h4 className="text-sm font-black uppercase tracking-wider text-indigo-800">
+                                        Security Deposit Adjustment Alert
+                                      </h4>
+                                      <p className="text-xs text-indigo-900 mt-1 font-medium leading-relaxed">
+                                        If this is a recurring contract approaching its end date, Accounts must pause monthly payouts and offset the remaining balance against the initial Security Deposit given to the vendor.
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
+
                                 {/* 50/50 Split Grid: Items & Payments */}
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                   
                                   {/* Left Pane: Ordered Items */}
                                   <div className="space-y-3">
-                                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-200 pb-2">Ordered Items</h4>
+                                    <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-200 pb-2 flex justify-between items-center">
+                                      <span>Contract Scope & Items</span>
+                                      
+                                      {/* 🎯 EARLY CLOSE BUTTON FOR PM/DIRECTORS */}
+                                      {isManagerOrDirector && ['VEHICLE', 'ACCOMMODATION', 'SUBSCRIPTION'].includes(po.category) && po.status !== 'Contract Terminated & Closed' && (
+                                        <button 
+                                          onClick={() => handleTruncatePO(po.po_number)}
+                                          className="text-[9px] bg-rose-50 text-rose-600 border border-rose-200 px-2 py-1 rounded flex items-center gap-1 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer"
+                                        >
+                                          <Scissors size={10} /> Truncate & Close Contract
+                                        </button>
+                                      )}
+                                    </h4>
+
                                     <div className="flex flex-col gap-2">
                                       {(po.items || []).map((item, idx) => (
                                         <div key={idx} className="bg-white border border-slate-200 px-4 py-2.5 rounded-xl flex justify-between items-center shadow-3xs transition-colors hover:border-[#2c2a57]/30">
@@ -978,17 +1016,18 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                     </div>
                                     <div className="flex flex-col gap-2">
                                       {(rowLogs[po.po_number] || [])
-                                        .filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"))
+                                        .filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment") || l.action_taken.includes("Closure"))
                                         .map((log, idx) => {
                                           const logText = log.remarks.split(' | Proof')[0];
-                                          const isFinal = logText.toLowerCase().includes("final") || logText.toLowerCase().includes("100%");
+                                          const isFinal = logText.toLowerCase().includes("final") || logText.toLowerCase().includes("100%") || logText.toLowerCase().includes("closure");
+                                          
                                           return (
-                                            <div key={idx} className="bg-white p-3 border border-slate-200 rounded-xl shadow-3xs flex flex-col gap-2">
+                                            <div key={idx} className={`p-3 border rounded-xl shadow-3xs flex flex-col gap-2 ${log.action_taken.includes("Closure") ? "bg-rose-50 border-rose-200" : "bg-white border-slate-200"}`}>
                                               <div className="flex justify-between items-start">
                                                 <div className="flex gap-2">
-                                                  <span className={`mt-1 h-2 w-2 rounded-full ${isFinal ? 'bg-emerald-500' : 'bg-amber-400'}`}></span>
+                                                  <span className={`mt-1 h-2 w-2 rounded-full shrink-0 ${isFinal ? (log.action_taken.includes("Closure") ? 'bg-rose-500' : 'bg-emerald-500') : 'bg-amber-400'}`}></span>
                                                   <div>
-                                                    <p className="font-bold text-xs text-slate-800 leading-snug">{logText}</p>
+                                                    <p className={`font-bold text-xs leading-snug ${log.action_taken.includes("Closure") ? "text-rose-900" : "text-slate-800"}`}>{logText}</p>
                                                     <p className="text-[10px] font-mono text-slate-400 mt-1">Date: {log.timestamp.split(' ')[0]} • Exec: {log.user_name}</p>
                                                   </div>
                                                 </div>
@@ -1003,7 +1042,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                             </div>
                                           );
                                       })}
-                                      {(rowLogs[po.po_number] || []).filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment")).length === 0 && (
+                                      {(rowLogs[po.po_number] || []).filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment") || l.action_taken.includes("Closure")).length === 0 && (
                                          <div className="p-4 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-400 text-[11px] font-bold">
                                             No payments have been recorded yet.
                                          </div>
