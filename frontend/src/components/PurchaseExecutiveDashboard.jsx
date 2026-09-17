@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
   ShoppingCart, FileCheck, CheckCircle2, Clock, Trash2, Send, Plus, 
   Download, Edit3, FileText, AlertCircle, ShieldAlert, Truck, ExternalLink, 
-  MessageSquare, X, AlertOctagon, Paperclip, Save 
+  MessageSquare, X, AlertOctagon, Paperclip, Save, Check
 } from 'lucide-react';
 import { Card, Button, StatusBadge } from './ui/SharedUI';
 
@@ -15,6 +15,12 @@ import Letterhead from '../assets/letter_head.jpg';
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
 export default function PurchaseExecutiveDashboard({ currentUser }) {
+  // 🎯 Extract active user details for auditing
+  const storedSession = localStorage.getItem('aarvi_session') || sessionStorage.getItem('aarvi_session');
+  const activeUser = storedSession ? JSON.parse(storedSession) : {};
+  const currentUserName = activeUser.name || "Purchase Executive";
+  const currentUserRole = activeUser.role || "Purchase Executive";
+
   const [activeTab, setActiveTab] = useState('sourcing');
   
   // Sourcing State
@@ -38,9 +44,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const [saveLoading, setSaveLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
+  // 🎯 NEW: Variable Usage Escalate Remark State
+  const [usageEscalateRemarks, setUsageEscalateRemarks] = useState('');
+
   // Vendor Master State
   const [vendors, setVendors] = useState([]);
-
   const fetchVendors = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/vendors`);
@@ -52,8 +60,17 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const fetchPendingSourcing = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/requisitions/pending-sourcing`);
-      setSourcingTickets(res.data);
+      // 🎯 Fetch both generic pending sourcing AND the Extra Usage interceptions
+      const [sourcingRes, extraUsageRes] = await Promise.all([
+        axios.get(`${API_BASE_URL}/requisitions/pending-sourcing`),
+        axios.get(`${API_BASE_URL}/requisitions/purchase-history`) 
+      ]);
+      
+      const standardSourcing = sourcingRes.data;
+      const extraUsageIntercepts = extraUsageRes.data.filter(t => t.status === "Extra Usage - Pending Purchase");
+      
+      // Combine both into the inbox view
+      setSourcingTickets([...standardSourcing, ...extraUsageIntercepts]);
     } catch (err) { console.error(err); } 
     finally { setLoading(false); }
   }, []);
@@ -89,11 +106,17 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     setSelectedTicket(ticket);
     setQuotes({});
     setAlert(null);
+    setUsageEscalateRemarks('');
+
     try {
       const itemRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
       setItems(itemRes.data);
+
+      // Fetch history logs so we can see the extra usage remarks
+      const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
+      setHistoryLogs(histRes.data);
+
       const initialQuotes = {};
-      
       itemRes.data.forEach(item => {
         initialQuotes[item.item_index] = [{
           vendor_name: '',
@@ -135,11 +158,9 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       
       const calcTotal = winningLines.reduce((acc, curr) => acc + (curr.net_amount_payable || curr.base_total_value || 0), 0);
       setSelectedHistoryTicket(prev => ({ ...prev, grand_total: calcTotal }));
-
       const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
       setHistoryLogs(histRes.data);
 
-      // 🎯 Fetch PO Number and check for saved HTML Template
       try {
         const poRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/po`);
         if (poRes.data && poRes.data.po_number) {
@@ -151,7 +172,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       } catch (err) {
         // Ignore errors; just means no template has been saved yet
       }
-
       setTimeout(() => {
         document.getElementById('history-detail-view')?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
@@ -173,7 +193,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     if (!selectedHistoryTicket) return;
     const element = document.getElementById('printable-po');
     if (!element) return;
-
     setSaveLoading(true);
     try {
       const poRes = await axios.get(`${API_BASE_URL}/requisitions/${selectedHistoryTicket.ticket_number}/po`);
@@ -224,11 +243,9 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
 
   const handleItemQuantityChange = (indexToUpdate, newQuantity) => {
     const qty = parseInt(newQuantity) || 1;
-
     setItems(prevItems => prevItems.map(item =>
       item.item_index === indexToUpdate ? { ...item, quantity: qty } : item
     ));
-
     setQuotes(prev => {
       const updatedItemQuotes = [...(prev[indexToUpdate] || [])];
       const recalculatedQuotes = updatedItemQuotes.map(quote => {
@@ -332,6 +349,31 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     finally { setLoading(false); }
   };
 
+  // 🎯 NEW: HANDLE EXTRA USAGE / VARIABLE CHARGES INTERCEPTS
+  const handleVariableUsageDecision = async (actionDecision) => {
+    if (actionDecision === 'ESCALATE' && !usageEscalateRemarks.trim()) {
+      setAlert({ type: 'error', message: 'You must provide remarks to the Project Manager when escalating.' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await axios.put(`${API_BASE_URL}/requisitions/${selectedTicket.ticket_number}/usage-approval`, {
+        user_name: currentUserName,
+        user_role: currentUserRole,
+        action: actionDecision,
+        remarks: usageEscalateRemarks || "Purchase Executive verified and approved extra variable charges."
+      });
+      setAlert({ type: 'success', message: `Variable Usage processed: ${actionDecision}` });
+      setSelectedTicket(null);
+      fetchPendingSourcing();
+    } catch (err) {
+      setAlert({ type: 'error', message: "Failed to process usage approval." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getContextualUiSettings = () => {
     const category = selectedTicket?.category || selectedHistoryTicket?.category || 'GOODS';
     switch (category) {
@@ -367,16 +409,13 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         };
     }
   };
-
   const ui = getContextualUiSettings();
 
-  // 🎯 THE PERFECT AND SIMPLEST PDF DOWNLOAD METHOD
   const handlePrintToPDF = () => {
     if (!selectedHistoryTicket) return;
     window.print();
   };
 
-  // 🎯 NATIVE DOCX DOWNLOAD
   const handleDownloadWord = async () => {
     if (!selectedHistoryTicket) return;
     try {
@@ -487,7 +526,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             overflow: visible !important;
             position: static !important;
           }
-
           html, body {
             background: #ffffff !important;
             margin: 0 !important;
@@ -495,17 +533,14 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
-
           /* Hide everything in the UI by default */
           body * {
             visibility: hidden;
           }
-
           /* Make ONLY the PO visible */
           #printable-po, #printable-po * {
             visibility: visible;
           }
-
           /* Anchor the PO strictly to the top-left of the paper */
           #printable-po {
             position: absolute !important;
@@ -519,7 +554,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             box-shadow: none !important;
             box-sizing: border-box !important;
           }
-
           table {
             width: 100% !important;
             table-layout: fixed !important;
@@ -529,11 +563,9 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             overflow-wrap: break-word !important;
             word-wrap: break-word !important;
           }
-
           .print\\:hidden, .seal-footer {
             display: none !important;
           }
-
           .avoid-break {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
@@ -573,20 +605,31 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
           {/* TICKETS LIST */}
           <div className="xl:col-span-4 space-y-3">
-            <h2 className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Awaiting Vendor Bids</h2>
+            <h2 className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Awaiting Bids & Verification</h2>
             {sourcingTickets.length === 0 ? (
               <Card className="p-6 text-center text-slate-400 border-dashed border-2 text-sm bg-white">Queue cleared.</Card>
             ) : (
-              sourcingTickets.map((t) => (
-                <div key={t.ticket_number} onClick={() => openSourcingTicket(t)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedTicket?.ticket_number === t.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-3xs'}`}>
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="font-mono text-[#2c2a57] font-black text-xs md:text-sm">{t.ticket_number}</span>
-                    <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase ${t.category === 'GOODS' ? 'bg-blue-100 text-blue-700' : t.category === 'VEHICLE' ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'}`}>{t.category}</span>
+              sourcingTickets.map((t) => {
+                const isUsageIntercept = t.status === "Extra Usage - Pending Purchase";
+                
+                return (
+                  <div key={t.ticket_number} onClick={() => openSourcingTicket(t)} className={`p-4 rounded-xl border transition-all cursor-pointer block ${selectedTicket?.ticket_number === t.ticket_number ? 'bg-indigo-50/40 border-[#2c2a57] shadow-xs' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-3xs'} ${isUsageIntercept ? 'border-l-4 border-l-amber-500' : ''}`}>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="font-mono text-[#2c2a57] font-black text-xs md:text-sm">{t.ticket_number}</span>
+                      <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase ${t.category === 'GOODS' ? 'bg-blue-100 text-blue-700' : t.category === 'VEHICLE' ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'}`}>{t.category}</span>
+                    </div>
+                    <p className="text-[11px] md:text-xs font-semibold text-slate-600 truncate mb-2">{t.project_name}</p>
+                    
+                    {isUsageIntercept ? (
+                      <span className="text-[10px] font-black text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-md flex items-center gap-1.5 w-max shadow-3xs">
+                        <AlertTriangle size={12}/> Variable Usage Verification
+                      </span>
+                    ) : (
+                      <StatusBadge status={t.status} />
+                    )}
                   </div>
-                  <p className="text-[11px] md:text-xs font-semibold text-slate-600 truncate mb-2">{t.project_name}</p>
-                  <StatusBadge status={t.status} />
-                </div>
-              ))
+                );
+              })
             )}
           </div>
           
@@ -594,238 +637,279 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           <div id="sourcing-detail-view" className="xl:col-span-8 scroll-mt-24">
             {selectedTicket ? (
               <div className="space-y-6 animate-in fade-in duration-300">
-                <Card className="p-4 bg-slate-50 border-slate-200 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
-                  <div className="flex items-center space-x-3">
-                    <div className="bg-indigo-900/10 p-2.5 rounded-lg text-[#2c2a57] shrink-0"><ShoppingCart size={18} /></div>
-                    <div>
-                      <h2 className="font-bold text-[#2c2a57] text-xs md:text-sm uppercase tracking-wider">{selectedTicket.category} Sourcing Specification Terminal</h2>
-                      <p className="text-[10px] md:text-xs text-slate-500 font-mono mt-0.5">{selectedTicket.ticket_number} • {selectedTicket.project_name}</p>
+                
+                {/* 🎯 NEW: INTERCEPTED EXTRA USAGE REVIEW MODAL VIEW */}
+                {selectedTicket.status === "Extra Usage - Pending Purchase" ? (
+                  <Card className="p-6 bg-white border-amber-200 shadow-sm border-t-4 border-t-amber-500">
+                    <div className="flex items-center space-x-3 border-b border-slate-100 pb-4 mb-4">
+                      <div className="bg-amber-50 p-2.5 rounded-lg text-amber-600 shrink-0"><AlertTriangle size={24} /></div>
+                      <div>
+                        <h2 className="font-black text-amber-800 text-sm md:text-base uppercase tracking-wider">Verify Extra Variable Usage</h2>
+                        <p className="text-[11px] md:text-xs text-slate-500 font-mono mt-0.5">Ticket {selectedTicket.ticket_number} • Coordinator flagged extra usage on {selectedTicket.category}</p>
+                      </div>
                     </div>
-                  </div>
-                  <Button variant="success" onClick={handlePushToManagement} disabled={loading} className="text-xs py-2 shadow-sm w-full sm:w-auto">
-                    <Send size={14} className="mr-1.5 inline" /> <span>Submit Matrix</span>
-                  </Button>
-                </Card>
 
-                <div className="space-y-5">
-                  {items.map((item) => (
-                    <Card key={item.item_index} className="overflow-hidden border-slate-200 shadow-xs">
-                      <div className="bg-slate-50 border-b border-slate-200 p-3 md:p-4 flex flex-col md:flex-row justify-between md:items-center gap-3">
+                    {historyLogs.find(l => l.action_taken === "Variable Usage Logged - Pending Verification") && (
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-sm space-y-2 mb-6">
+                        <p className="font-bold text-slate-800">Coordinator Log details:</p>
+                        <p className="font-mono text-indigo-700 bg-indigo-50 p-2 rounded border border-indigo-100 font-bold">
+                          {historyLogs.find(l => l.action_taken === "Variable Usage Logged - Pending Verification").remarks}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="space-y-4">
+                      <Input 
+                        label="Purchase Remark / Justification (Mandatory if Escalating)" 
+                        value={usageEscalateRemarks} 
+                        onChange={e => setUsageEscalateRemarks(e.target.value)} 
+                        placeholder="e.g. Fuel prices spiked, logs verified..." 
+                      />
+                      
+                      <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                        <Button 
+                          variant="primary" 
+                          onClick={() => handleVariableUsageDecision("APPROVE")} 
+                          disabled={loading} 
+                          className="w-full bg-[#0b9c54] hover:bg-emerald-600 shadow-sm"
+                        >
+                          <Check size={16} className="mr-1.5" /> Approve & Push to Accounts
+                        </Button>
+                        <Button 
+                          variant="danger" 
+                          onClick={() => handleVariableUsageDecision("ESCALATE")} 
+                          disabled={loading} 
+                          className="w-full shadow-sm"
+                        >
+                          <ShieldAlert size={16} className="mr-1.5" /> Escalate to Project Manager
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ) : (
+                  <>
+                    <Card className="p-4 bg-slate-50 border-slate-200 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                      <div className="flex items-center space-x-3">
+                        <div className="bg-indigo-900/10 p-2.5 rounded-lg text-[#2c2a57] shrink-0"><ShoppingCart size={18} /></div>
                         <div>
-                          <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                            <span className="bg-[#2c2a57] text-white text-[10px] font-black px-2 py-0.5 rounded font-mono">Row {item.item_index}</span>
-                            
-                            {/* 🎯 EDITABLE QUANTITY BADGE */}
-                            <div className="flex items-center bg-[#0b9c54]/10 border border-[#0b9c54]/20 rounded px-1.5 py-0.5">
-                              <label className="text-[9px] sm:text-[10px] text-[#0b9c54] font-bold uppercase tracking-wider mr-1.5">
-                                Procure Qty:
-                              </label>
-                              <input 
-                                type="number" 
-                                min="1"
-                                value={item.quantity} 
-                                onChange={(e) => handleItemQuantityChange(item.item_index, e.target.value)}
-                                className="w-12 sm:w-16 bg-white border border-[#0b9c54]/30 rounded text-[10px] sm:text-xs font-black text-emerald-900 text-center outline-none focus:ring-1 focus:ring-[#0b9c54] transition-all"
-                                title="Edit Quantity if partial stock is already available"
-                              />
-                            </div>
-
-                            <select
-                              value={item.item_type || 'Consumable'}
-                              onChange={(e) => handleItemClassificationChange(item.item_index, e.target.value)}
-                              className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border outline-none cursor-pointer bg-slate-100 text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors"
-                            >
-                              <option value="Consumable">📦 Consumable</option>
-                              <option value="Asset">🖥️ Asset</option>
-                            </select>
-                          </div>
-                          <h3 className="text-xs md:text-sm font-bold text-[#2c2a57] leading-tight mt-1">{item.product_description}</h3>
+                          <h2 className="font-bold text-[#2c2a57] text-xs md:text-sm uppercase tracking-wider">{selectedTicket.category} Sourcing Specification Terminal</h2>
+                          <p className="text-[10px] md:text-xs text-slate-500 font-mono mt-0.5">{selectedTicket.ticket_number} • {selectedTicket.project_name}</p>
                         </div>
                       </div>
-
-                      <div className="p-3 sm:p-4 bg-white">
-                        <div className="grid grid-cols-1 gap-4">
-                          {(quotes[item.item_index] || []).map((quote, qIdx) => (
-                            <div key={qIdx} className="bg-slate-50/50 border border-slate-200 rounded-xl p-3 sm:p-5 relative group hover:border-slate-400 transition-all">
-                              <button onClick={() => removeQuoteBox(item.item_index, qIdx)} className="absolute top-2 right-2 md:top-3 md:right-3 text-slate-400 hover:text-rose-600 transition-colors p-1"><Trash2 size={14} md:size={15} /></button>
-                              <h4 className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Option {qIdx + 1}</h4>
+                      <Button variant="success" onClick={handlePushToManagement} disabled={loading} className="text-xs py-2 shadow-sm w-full sm:w-auto">
+                        <Send size={14} className="mr-1.5 inline" /> <span>Submit Matrix</span>
+                      </Button>
+                    </Card>
+                    <div className="space-y-5">
+                      {items.map((item) => (
+                        <Card key={item.item_index} className="overflow-hidden border-slate-200 shadow-xs">
+                          <div className="bg-slate-50 border-b border-slate-200 p-3 md:p-4 flex flex-col md:flex-row justify-between md:items-center gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                                <span className="bg-[#2c2a57] text-white text-[10px] font-black px-2 py-0.5 rounded font-mono">Row {item.item_index}</span>
+                                
+                                <div className="flex items-center bg-[#0b9c54]/10 border border-[#0b9c54]/20 rounded px-1.5 py-0.5">
+                                  <label className="text-[9px] sm:text-[10px] text-[#0b9c54] font-bold uppercase tracking-wider mr-1.5">
+                                    Procure Qty:
+                                  </label>
+                                  <input 
+                                    type="number" 
+                                    min="1"
+                                    value={item.quantity} 
+                                    onChange={(e) => handleItemQuantityChange(item.item_index, e.target.value)}
+                                    className="w-12 sm:w-16 bg-white border border-[#0b9c54]/30 rounded text-[10px] sm:text-xs font-black text-emerald-900 text-center outline-none focus:ring-1 focus:ring-[#0b9c54] transition-all"
+                                    title="Edit Quantity if partial stock is already available"
+                                  />
+                                </div>
+                                <select
+                                  value={item.item_type || 'Consumable'}
+                                  onChange={(e) => handleItemClassificationChange(item.item_index, e.target.value)}
+                                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border outline-none cursor-pointer bg-slate-100 text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors"
+                                >
+                                  <option value="Consumable">📦 Consumable</option>
+                                  <option value="Asset">🖥️ Asset</option>
+                                </select>
+                              </div>
+                              <h3 className="text-xs md:text-sm font-bold text-[#2c2a57] leading-tight mt-1">{item.product_description}</h3>
+                            </div>
+                          </div>
+                          <div className="p-3 sm:p-4 bg-white">
+                            <div className="grid grid-cols-1 gap-4">
+                              {(quotes[item.item_index] || []).map((quote, qIdx) => (
+                                <div key={qIdx} className="bg-slate-50/50 border border-slate-200 rounded-xl p-3 sm:p-5 relative group hover:border-slate-400 transition-all">
+                                  <button onClick={() => removeQuoteBox(item.item_index, qIdx)} className="absolute top-2 right-2 md:top-3 md:right-3 text-slate-400 hover:text-rose-600 transition-colors p-1"><Trash2 size={14} md:size={15} /></button>
+                                  <h4 className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Option {qIdx + 1}</h4>
+                                  
+                                  <div className="space-y-4">
+                                    {/* Vendor Details Row (Responsive Stacking) */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
+                                        <input 
+                                          list={`vendor-list-${item.item_index}-${qIdx}`}
+                                          type="text" 
+                                          value={quote.vendor_name} 
+                                          onChange={(e) => {
+                                            const selectedName = e.target.value;
+                                            handleQuoteChange(item.item_index, qIdx, 'vendor_name', selectedName);
+                                            const matchedVendor = vendors.find(v => v.name === selectedName);
+                                            if (matchedVendor) {
+                                              handleQuoteChange(item.item_index, qIdx, 'vendor_address', matchedVendor.address || '');
+                                              handleQuoteChange(item.item_index, qIdx, 'vendor_contact', matchedVendor.contact_number || '');
+                                              handleQuoteChange(item.item_index, qIdx, 'vendor_email', matchedVendor.email || '');
+                                            }
+                                          }} 
+                                          placeholder="Type to search or enter new..." 
+                                          className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all" 
+                                        />
+                                        <datalist id={`vendor-list-${item.item_index}-${qIdx}`}>
+                                          {vendors.map(v => <option key={v.id} value={v.name} />)}
+                                        </datalist>
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Office Address</label>
+                                        <input type="text" value={quote.vendor_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_address', e.target.value)} placeholder="Full operating address..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                      </div>
+                                    </div>
+                                    {/* Math & Contact Row (Responsive Stacking) */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Phone/Cell</label>
+                                        <input type="text" value={quote.vendor_contact} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_contact', e.target.value)} placeholder="+91-987..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Email ID</label>
+                                        <input type="email" value={quote.vendor_email} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_email', e.target.value)} placeholder="sales@vendor.com" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                      </div>
+                                      {/* Unit Price Input triggers Auto-Math */}
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.amountLabel} *</label>
+                                        <input 
+                                          type="number" 
+                                          value={quote.unit_price} 
+                                          onChange={(e) => handleAmountChange(item.item_index, qIdx, e.target.value, quote.gst_percentage, item.quantity)} 
+                                          placeholder="0.00" 
+                                          className="w-full bg-emerald-50 border border-emerald-300 rounded-lg px-3 py-2 text-[11px] md:text-xs font-bold text-emerald-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all" 
+                                        />
+                                      </div>
+                                      {/* GST Input triggers Auto-Math */}
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">GST Percentage (%)</label>
+                                        <input 
+                                          type="number" 
+                                          value={quote.gst_percentage} 
+                                          onChange={(e) => handleAmountChange(item.item_index, qIdx, quote.unit_price, e.target.value, item.quantity)} 
+                                          className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" 
+                                        />
+                                      </div>
+                                    </div>
+                                    {/* Delivery Info Row */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.addressLabel}</label>
+                                        <input type="text" value={quote.delivery_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'delivery_address', e.target.value)} placeholder={ui.addressPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.contactLabel}</label>
+                                        <input type="text" value={quote.site_contact_person} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_person', e.target.value)} placeholder="Personnel reference name..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">Contact Phone Number</label>
+                                        <input type="text" value={quote.site_contact_phone} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_phone', e.target.value)} placeholder="+91-886..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                      </div>
+                                    </div>
+                                    {/* Math Result & Terms Row */}
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
+                                        <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                      </div>
+                                      {/* CALCULATED NET VALUE DISPLAY */}
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
+                                        <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner">
+                                          <span className="text-sm font-black tracking-tight">
+                                            ₹{(quote.net_amount_payable || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                          </span>
+                                          <span className="text-[9px] sm:text-[10px] font-bold text-emerald-700/70 font-mono hidden sm:block">
+                                            (Total Base: ₹{(quote.base_total_value || 0).toLocaleString('en-IN')})
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {/* Remarks Row */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">Contract / Service Custom Clauses</label>
+                                        <input type="text" value={quote.special_terms} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'special_terms', e.target.value)} placeholder={ui.remarksPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-amber-600 uppercase mb-1">Quality / Technical Remarks</label>
+                                        <input type="text" value={quote.quality_remarks || ''} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'quality_remarks', e.target.value)} placeholder="e.g. OEM 1-yr warranty active..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-amber-500 focus:ring-1 transition-all" />
+                                      </div>
+                                    </div>
+                                    {/* ATTACHMENT CONTROLLER LAYER */}
+                                    <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
+                                      <div>
+                                        <label className="block text-[9px] md:text-[10px] font-bold text-indigo-600 uppercase mb-1">
+                                          Attach Supplier Quotation Document (Optional)
+                                        </label>
+                                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-white p-2 border border-slate-300 rounded-lg">
+                                          <input 
+                                            type="file" 
+                                            accept=".pdf,.doc,.docx"
+                                            className="text-[10px] sm:text-xs font-medium text-slate-600 outline-none file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[9px] file:sm:text-[10px] file:font-bold file:uppercase file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer w-full"
+                                            onChange={async (e) => {
+                                              const selectedFile = e.target.files[0];
+                                              if (!selectedFile) return;
+                                              const formData = new FormData();
+                                              formData.append("file", selectedFile);
+                                              try {
+                                                setAlert({ type: 'success', message: `Uploading document...` });
+                                                const res = await axios.post(
+                                                  `${API_BASE_URL}/upload/quotation?ticket_number=${selectedTicket.ticket_number}&item_index=${item.item_index}&option_index=${qIdx + 1}`, 
+                                                  formData, 
+                                                  { headers: { 'Content-Type': 'multipart/form-data' } }
+                                                );
+                                                handleQuoteChange(item.item_index, qIdx, 'file_url', res.data.file_url);
+                                                setAlert({ type: 'success', message: `Attached successfully: ${selectedFile.name}` });
+                                              } catch (err) {
+                                                setAlert({ type: 'error', message: "Document upload execution failure." });
+                                              }
+                                            }}
+                                          />
+                                          {quote.file_url && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handlePreviewFile(quote.file_url, `Quotation Document`)}
+                                              className="text-[9px] sm:text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md shrink-0 text-center w-full sm:w-auto hover:bg-emerald-100 flex items-center gap-1 justify-center"
+                                            >
+                                              ✓ VIEW ATTACHED
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
                               
-                              <div className="space-y-4">
-                                {/* Vendor Details Row (Responsive Stacking) */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
-                                    <input 
-                                      list={`vendor-list-${item.item_index}-${qIdx}`}
-                                      type="text" 
-                                      value={quote.vendor_name} 
-                                      onChange={(e) => {
-                                        const selectedName = e.target.value;
-                                        handleQuoteChange(item.item_index, qIdx, 'vendor_name', selectedName);
-                                        const matchedVendor = vendors.find(v => v.name === selectedName);
-                                        if (matchedVendor) {
-                                          handleQuoteChange(item.item_index, qIdx, 'vendor_address', matchedVendor.address || '');
-                                          handleQuoteChange(item.item_index, qIdx, 'vendor_contact', matchedVendor.contact_number || '');
-                                          handleQuoteChange(item.item_index, qIdx, 'vendor_email', matchedVendor.email || '');
-                                        }
-                                      }} 
-                                      placeholder="Type to search or enter new..." 
-                                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all" 
-                                    />
-                                    <datalist id={`vendor-list-${item.item_index}-${qIdx}`}>
-                                      {vendors.map(v => <option key={v.id} value={v.name} />)}
-                                    </datalist>
-                                  </div>
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Office Address</label>
-                                    <input type="text" value={quote.vendor_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_address', e.target.value)} placeholder="Full operating address..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
-                                  </div>
-                                </div>
-
-                                {/* Math & Contact Row (Responsive Stacking) */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Phone/Cell</label>
-                                    <input type="text" value={quote.vendor_contact} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_contact', e.target.value)} placeholder="+91-987..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Email ID</label>
-                                    <input type="email" value={quote.vendor_email} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_email', e.target.value)} placeholder="sales@vendor.com" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
-                                  </div>
-
-                                  {/* Unit Price Input triggers Auto-Math */}
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.amountLabel} *</label>
-                                    <input 
-                                      type="number" 
-                                      value={quote.unit_price} 
-                                      onChange={(e) => handleAmountChange(item.item_index, qIdx, e.target.value, quote.gst_percentage, item.quantity)} 
-                                      placeholder="0.00" 
-                                      className="w-full bg-emerald-50 border border-emerald-300 rounded-lg px-3 py-2 text-[11px] md:text-xs font-bold text-emerald-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all" 
-                                    />
-                                  </div>
-
-                                  {/* GST Input triggers Auto-Math */}
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">GST Percentage (%)</label>
-                                    <input 
-                                      type="number" 
-                                      value={quote.gst_percentage} 
-                                      onChange={(e) => handleAmountChange(item.item_index, qIdx, quote.unit_price, e.target.value, item.quantity)} 
-                                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" 
-                                    />
-                                  </div>
-                                </div>
-
-                                {/* Delivery Info Row */}
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.addressLabel}</label>
-                                    <input type="text" value={quote.delivery_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'delivery_address', e.target.value)} placeholder={ui.addressPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.contactLabel}</label>
-                                    <input type="text" value={quote.site_contact_person} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_person', e.target.value)} placeholder="Personnel reference name..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">Contact Phone Number</label>
-                                    <input type="text" value={quote.site_contact_phone} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_phone', e.target.value)} placeholder="+91-886..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
-                                  </div>
-                                </div>
-
-                                {/* Math Result & Terms Row */}
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
-                                    <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
-                                  </div>
-
-                                  {/* CALCULATED NET VALUE DISPLAY */}
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
-                                    <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner">
-                                      <span className="text-sm font-black tracking-tight">
-                                        ₹{(quote.net_amount_payable || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                      </span>
-                                      <span className="text-[9px] sm:text-[10px] font-bold text-emerald-700/70 font-mono hidden sm:block">
-                                        (Total Base: ₹{(quote.base_total_value || 0).toLocaleString('en-IN')})
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Remarks Row */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">Contract / Service Custom Clauses</label>
-                                    <input type="text" value={quote.special_terms} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'special_terms', e.target.value)} placeholder={ui.remarksPlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-amber-600 uppercase mb-1">Quality / Technical Remarks</label>
-                                    <input type="text" value={quote.quality_remarks || ''} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'quality_remarks', e.target.value)} placeholder="e.g. OEM 1-yr warranty active..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-amber-500 focus:ring-1 transition-all" />
-                                  </div>
-                                </div>
-
-                                {/* ATTACHMENT CONTROLLER LAYER */}
-                                <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
-                                  <div>
-                                    <label className="block text-[9px] md:text-[10px] font-bold text-indigo-600 uppercase mb-1">
-                                      Attach Supplier Quotation Document (Optional)
-                                    </label>
-                                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-white p-2 border border-slate-300 rounded-lg">
-                                      <input 
-                                        type="file" 
-                                        accept=".pdf,.doc,.docx"
-                                        className="text-[10px] sm:text-xs font-medium text-slate-600 outline-none file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[9px] file:sm:text-[10px] file:font-bold file:uppercase file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer w-full"
-                                        onChange={async (e) => {
-                                          const selectedFile = e.target.files[0];
-                                          if (!selectedFile) return;
-                                          const formData = new FormData();
-                                          formData.append("file", selectedFile);
-                                          try {
-                                            setAlert({ type: 'success', message: `Uploading document...` });
-                                            const res = await axios.post(
-                                              `${API_BASE_URL}/upload/quotation?ticket_number=${selectedTicket.ticket_number}&item_index=${item.item_index}&option_index=${qIdx + 1}`, 
-                                              formData, 
-                                              { headers: { 'Content-Type': 'multipart/form-data' } }
-                                            );
-                                            handleQuoteChange(item.item_index, qIdx, 'file_url', res.data.file_url);
-                                            setAlert({ type: 'success', message: `Attached successfully: ${selectedFile.name}` });
-                                          } catch (err) {
-                                            setAlert({ type: 'error', message: "Document upload execution failure." });
-                                          }
-                                        }}
-                                      />
-                                      {quote.file_url && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handlePreviewFile(quote.file_url, `Quotation Document`)}
-                                          className="text-[9px] sm:text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-md shrink-0 text-center w-full sm:w-auto hover:bg-emerald-100 flex items-center gap-1 justify-center"
-                                        >
-                                          ✓ VIEW ATTACHED
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
+                              <div onClick={() => addQuoteBox(item.item_index)} className="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center text-slate-500 hover:text-[#0b9c54] hover:border-[#0b9c54]/50 cursor-pointer py-4 shadow-3xs">
+                                <Plus size={18} className="mb-1" />
+                                <span className="text-[10px] sm:text-xs font-bold uppercase">Add Alternative Quote Option</span>
                               </div>
                             </div>
-                          ))}
-                          
-                          <div onClick={() => addQuoteBox(item.item_index)} className="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/50 flex flex-col items-center justify-center text-slate-500 hover:text-[#0b9c54] hover:border-[#0b9c54]/50 cursor-pointer py-4 shadow-3xs">
-                            <Plus size={18} className="mb-1" />
-                            <span className="text-[10px] sm:text-xs font-bold uppercase">Add Alternative Quote Option</span>
                           </div>
-                        </div>
-                      </div>
-                    </Card>
-                  ))}
-                </div>
+                        </Card>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
               <div className="h-64 border border-dashed border-slate-300 rounded-xl bg-white flex flex-col items-center justify-center text-slate-400 text-sm p-6 text-center">
                 <span className="text-3xl mb-2">🛒</span>
-                <p>Select a worksheet folder from the pipeline stack to append sourcing bids.</p>
+                <p>Select a worksheet folder from the pipeline stack to append sourcing bids or review flag.</p>
               </div>
             )}
           </div>
@@ -860,7 +944,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
               ))
             )}
           </div>
-
           <div id="isolated-print-wrapper" className="xl:col-span-8 print:col-span-12">
             <div id="history-detail-view" className="scroll-mt-24 space-y-6">
               
@@ -919,7 +1002,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                   )}
                 </>
               )}
-
               {selectedHistoryTicket && historyPoItems.length > 0 ? (
                 <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative animate-in fade-in duration-200 print:border-none print:shadow-none">
                   
@@ -937,7 +1019,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       >
                         <Save size={14} /> <span>{saveLoading ? "Saving..." : "Save Edits"}</span>
                       </button>
-
                       <button 
                         onClick={handleDownloadWord} 
                         className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all flex items-center justify-center space-x-1.5 px-3.5 py-2 text-xs font-bold shadow-xs w-full sm:w-auto"
@@ -945,7 +1026,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         <FileText size={14} /> <span className="hidden sm:inline">Word (.docx)</span>
                       </button>
                       
-                      {/* 🎯 NATIVE PDF DOWNLOAD BUTTON */}
                       <button 
                         onClick={handlePrintToPDF} 
                         className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-1.5 px-3.5 py-2 text-xs font-bold shadow-xs w-full sm:w-auto"
@@ -954,7 +1034,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       </button>
                     </div>
                   </div>
-
                   <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 flex justify-center print:p-0 print:border-none print:bg-white">
                     <div id="printable-po" className="p-6 sm:p-8 pb-16 space-y-6 font-sans bg-white select-text relative w-full h-auto overflow-visible text-justify max-w-[800px] shadow-sm print:shadow-none print:min-w-0 print:p-0">
                       
@@ -1051,7 +1130,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               </div>
                             </div>
                           )}
-
                           {/* ========================================================= */}
                           {/* 🚜 2. VEHICLE RENTAL PO */}
                           {/* ========================================================= */}
@@ -1176,7 +1254,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               </div>
                             </div>
                           )}
-
                           {/* ========================================================= */}
                           {/* 🏢 3. GUEST HOUSE ACCOMMODATION */}
                           {/* ========================================================= */}
@@ -1274,7 +1351,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               </div>
                             </div>
                           )}
-
                           {/* ========================================================= */}
                           {/* 🍱 4. FOOD SUPPLY PO */}
                           {/* ========================================================= */}
@@ -1289,7 +1365,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 <p className="text-slate-900 font-bold mt-2">Subject: Purchase Order for Food.</p>
                                 <p className="text-[12px] mt-4 leading-relaxed">With reference to your Quotation, dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `26.05.${currentYear}`}, and the subsequent discussion with our Mr Kishor Nikam (BUSINESS DEVELOPMENT), we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order for the supply of Food as mentioned below:-</p>
                               </div>
-
                               <div className="pl-6 py-6 font-bold text-[13px] text-slate-900 space-y-4 border-l-4 border-slate-300 ml-4 my-6 avoid-break w-full" contentEditable="true">
                                 {historyPoItems.map((item, idx) => (
                                   <p key={idx} className="break-words">{item.product_description} Rate Rs. {item.unit_price || item.base_total_value}/- {item.special_terms || 'per meal'}.</p>
@@ -1298,13 +1373,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                    <p>Sunday Rate Rs. {historyPoItems[0].unit_price ? historyPoItems[0].unit_price + 40 : 300}/- per meal Special Dinner.</p>
                                 )}
                               </div>
-
                               <div className="text-[12px] space-y-2 mt-4 avoid-break w-full" contentEditable="true">
                                 <p><strong>Terms of payment:-</strong> {primaryLine.payment_terms || "100% payment to be made against submission of Invoices"}</p>
                                 <p><strong>Project Name:</strong> {selectedHistoryTicket.project_name}</p>
                                 <p><strong>Our GST Registration no.:</strong> 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
                               </div>
-
                               <div className="pt-6 text-[12px] leading-relaxed text-slate-800 space-y-4 w-full" contentEditable="true">
                                 <p className="font-bold underline mb-4 avoid-break">The placement of work Order is subject to the following Terms & Conditions:-</p>
                                 
@@ -1332,7 +1405,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               </div>
                             </div>
                           )}
-
                           {/* 🎯 UNIVERSAL 2-COLUMN SIGNATURE STRIP */}
                           <div className="pt-16 mt-16 flex justify-between items-end text-xs font-sans relative z-10 avoid-break w-full" contentEditable="false">
                             <div className="w-64 text-left space-y-1">
@@ -1362,7 +1434,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                   <p className="text-xs text-slate-500 max-w-sm">Select a processed procurement run from the ledger to view its finalized printable document.</p>
                 </div>
               )}
-
               {/* AUDIT LOGS TRAIL SECTION */}
               {selectedHistoryTicket && historyLogs.length > 0 && (
                 <Card className="p-4 space-y-4 bg-white border-slate-200 print:hidden">
@@ -1398,7 +1469,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                   </div>
                 </Card>
               )}
-
             </div>
           </div>
         </div>
