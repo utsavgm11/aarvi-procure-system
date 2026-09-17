@@ -31,6 +31,7 @@ export default function SiteCoordinatorDashboard() {
   const [siteManagerId, setSiteManagerId] = useState('');
   const [projectManagerId, setProjectManagerId] = useState('');
   const [items, setItems] = useState([{ product_description: '', make_brand: '', quantity: 1, purpose: '', item_type: 'Consumable' }]);
+  
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
   
@@ -48,6 +49,11 @@ export default function SiteCoordinatorDashboard() {
   const [discrepancyCategory, setDiscrepancyCategory] = useState('Damaged Goods'); 
   const [grnFile, setGrnFile] = useState(null);
   const [grnRemarks, setGrnRemarks] = useState('');
+
+  // 🎯 NEW: VARIABLE USAGE & EXTRA CHARGES STATES
+  const [extraKm, setExtraKm] = useState('');
+  const [extraKmRate, setExtraKmRate] = useState('');
+  const [extraFuelCharges, setExtraFuelCharges] = useState('');
 
   // Initial Fetches
   useEffect(() => {
@@ -112,6 +118,7 @@ export default function SiteCoordinatorDashboard() {
     updated[index][field] = value;
     setProposalItems(updated);
   };
+
   const addProposalRow = () => setProposalItems([...proposalItems, { item_index: proposalItems.length + 1, product_description: '', make_brand: '', quantity: 1, purpose: '', item_type: 'Consumable' }]);
   const removeProposalRow = (index) => setProposalItems(proposalItems.filter((_, i) => i !== index).map((item, idx) => ({ ...item, item_index: idx + 1 })));
 
@@ -145,6 +152,7 @@ export default function SiteCoordinatorDashboard() {
   // New Request Handlers
   const addRow = () => setItems([...items, { product_description: '', make_brand: '', quantity: 1, purpose: '', item_type: 'Consumable' }]);
   const removeRow = (index) => items.length > 1 && setItems(items.filter((_, i) => i !== index));
+
   const handleItemChange = (index, field, value) => {
     const newItems = [...items];
     newItems[index][field] = value;
@@ -172,30 +180,55 @@ export default function SiteCoordinatorDashboard() {
     finally { setLoading(false); }
   };
 
-  // 🎯 GRN SUBMIT HANDLER
+  // 🎯 RESET GRN MODAL HELPER
+  const closeGrnModal = () => {
+    setGrnModalTicket(null);
+    setGrnFile(null);
+    setGrnRemarks('');
+    setReceiptType('CLEAN');
+    setExtraKm('');
+    setExtraKmRate('');
+    setExtraFuelCharges('');
+  };
+
+  // 🎯 GRN SUBMIT HANDLER (Updated with Extra Usage Data)
   const submitGrn = async () => {
     if (receiptType === 'DISCREPANCY' && !grnRemarks.trim()) {
       setAlert({ type: 'error', message: "Please describe the defect/issue in the remarks box before raising a ticket." });
       return;
     }
+    
     setLoading(true);
     const formData = new FormData();
     formData.append('receipt_type', receiptType);
     formData.append('discrepancy_category', discrepancyCategory);
-    formData.append('remarks', grnRemarks);
+    
+    // 🎯 Formatting the final remarks to include variable usage natively
+    let combinedRemarks = grnRemarks;
+    if (extraKm || extraFuelCharges) {
+      combinedRemarks += ` | [Extra Usage Logged] KM Driven: ${extraKm || 0} @ ₹${extraKmRate || 0}/km, Extra Fuel/Utility: ₹${extraFuelCharges || 0}`;
+    }
+    
+    formData.append('remarks', combinedRemarks);
     formData.append('user_name', currentUserName);
-    if (grnFile) formData.append('file', grnFile);
+    
+    // 🎯 Pass explicit form data fields so the backend can capture them for Accounts review later
+    formData.append('extra_km', extraKm || 0);
+    formData.append('extra_km_rate', extraKmRate || 0);
+    formData.append('extra_fuel_charges', extraFuelCharges || 0);
 
+    if (grnFile) formData.append('file', grnFile);
+    
     try {
       await axios.put(`${API_BASE_URL}/requisitions/${grnModalTicket.ticket_number}/grn`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       const successMsg = receiptType === 'CLEAN' 
-        ? `GRN logged successfully! Order ${grnModalTicket.ticket_number} officially closed.` 
+        ? `GRN / Monthly Log processed successfully for ${grnModalTicket.ticket_number}.` 
         : receiptType === 'PARTIAL'
         ? `Partial Delivery recorded for ${grnModalTicket.ticket_number}. Ticket remains active.`
         : `CRITICAL ALERT: Discrepancy ticket raised for ${grnModalTicket.ticket_number}. Routed to Sourcing Team.`;
-
+      
       setAlert({ type: receiptType === 'DISCREPANCY' ? 'error' : 'success', message: successMsg });
-      setGrnModalTicket(null); setGrnFile(null); setGrnRemarks(''); setReceiptType('CLEAN');
+      closeGrnModal();
       fetchPipelineHistory(); 
     } catch (err) { setAlert({ type: 'error', message: 'Failed to submit GRN/Discrepancy report.' }); } 
     finally { setLoading(false); }
@@ -208,7 +241,7 @@ export default function SiteCoordinatorDashboard() {
       'Pending Sourcing': 2,
       'Pending Purchase Approval': 3, 'Pending Project Manager': 3, 'Pending Director': 3, 'Query Raised': 3,
       'Awaiting Digital Signature': 4, 'Approved': 4, 'PI Pending PM Approval': 4, 'PI Approved - Sent to Accounts': 4, 
-      'Partially Disbursed': 5, 'Dispatched': 5, 'Partially Delivered': 5, 'Material Discrepancy Raised': 5, // 🎯 Added 'Partially Disbursed' here
+      'Partially Disbursed': 5, 'Dispatched': 5, 'Partially Delivered': 5, 'Material Discrepancy Raised': 5,
       'Delivered - GRN Logged': 6 
     };
     const currentStep = statusMap[currentStatus] || 1;
@@ -249,7 +282,6 @@ export default function SiteCoordinatorDashboard() {
               <Input label="Project Code" required value={projectCode} onChange={e => setProjectCode(e.target.value)} placeholder="e.g. REL-JAM-04" />
               <Input label="Project Name " required value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. Jamnagar Plant Block C" />
             </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4">
               <div className="flex flex-col space-y-1.5">
                 <label className="text-[10px] md:text-[11px] font-bold text-slate-500 uppercase tracking-wider">Procurement Category</label>
@@ -258,6 +290,7 @@ export default function SiteCoordinatorDashboard() {
                   <option value="VEHICLE">Vehicle & Transport Rental</option>
                   <option value="ACCOMMODATION">Guest House & Accommodation</option>
                   <option value="FOOD">Food & Canteen Services</option>
+                  <option value="SUBSCRIPTION">Software / IT Subscriptions</option>
                 </select>
               </div>
               <div className="flex flex-col space-y-1.5">
@@ -283,7 +316,6 @@ export default function SiteCoordinatorDashboard() {
               <h2 className="text-sm font-bold text-[#2c2a57] uppercase tracking-wider">Material Requirements</h2>
             </div>
             
-            {/* 🎯 Horizontal Scroll wrapper for mobile data entry */}
             <div className="overflow-x-auto custom-scrollbar">
               <table className="w-full text-left border-collapse min-w-[900px]">
                 <thead>
@@ -360,7 +392,6 @@ export default function SiteCoordinatorDashboard() {
                     <span className="font-bold text-[#2c2a57] text-xs md:text-sm uppercase tracking-wider line-clamp-1">Active Worksheet Modification Counter</span>
                   </div>
                   
-                  {/* 🎯 Horizontal Scroll for Proposal Editor */}
                   <div className="overflow-x-auto p-2 custom-scrollbar">
                     <table className="w-full text-left min-w-[850px]">
                       <thead>
@@ -454,7 +485,7 @@ export default function SiteCoordinatorDashboard() {
                   </div>
                 </div>
 
-                {/* 🎯 EXPANDED 5-STEP VISUAL TRACK MATRIX (Horizontal Scroll on Mobile) */}
+                {/* 🎯 EXPANDED 5-STEP VISUAL TRACK MATRIX */}
                 <div className="overflow-x-auto custom-scrollbar pb-2">
                   <div className="grid grid-cols-5 min-w-[550px] md:min-w-full gap-2 relative pt-2">
                     
@@ -553,19 +584,19 @@ export default function SiteCoordinatorDashboard() {
                   </div>
                 </div>
 
-                {/* 🎯 ACTION ZONE: Show Inspection & GRN Button when Dispatched, Partially Delivered, or Partially Disbursed */}
+                {/* 🎯 ACTION ZONE: Show Inspection & GRN Button */}
                 {['Dispatched', 'Partially Delivered', 'Partially Disbursed'].includes(ticket.status) && (
                   <div className="bg-slate-50 p-3 md:p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div>
-                      <h4 className="text-slate-800 font-extrabold text-xs md:text-sm flex items-center gap-1.5"><Truck size={14} className="text-indigo-600"/> Freight Arrived!</h4>
-                      <p className="text-[10px] md:text-xs text-slate-500 mt-0.5">Inspect physical goods. Log GRN or Raise Defect Issue.</p>
+                      <h4 className="text-slate-800 font-extrabold text-xs md:text-sm flex items-center gap-1.5"><Truck size={14} className="text-indigo-600"/> Site Receipt / Logbook Update</h4>
+                      <p className="text-[10px] md:text-xs text-slate-500 mt-0.5">Log physical material delivery or submit monthly vehicle/service logs.</p>
                     </div>
                     <Button 
                       variant="primary" 
                       onClick={() => setGrnModalTicket(ticket)}
                       className="w-full sm:w-auto bg-[#0b9c54] hover:bg-emerald-600 shadow-sm text-[11px] md:text-xs py-2 md:py-2.5"
                     >
-                      <UploadCloud size={14} className="mr-1.5" /> Process GRN
+                      <UploadCloud size={14} className="mr-1.5" /> Process Log / GRN
                     </Button>
                   </div>
                 )}
@@ -595,11 +626,11 @@ export default function SiteCoordinatorDashboard() {
             <div className="bg-[#2c2a57] p-4 text-white flex justify-between items-center shrink-0">
               <div className="flex items-center space-x-2.5">
                 <div className="bg-white/20 p-1.5 rounded-lg"><Truck size={16} className="text-emerald-400" /></div>
-                <h3 className="font-extrabold text-[11px] md:text-sm uppercase tracking-wider">Site Inspection & Goods Receipt</h3>
+                <h3 className="font-extrabold text-[11px] md:text-sm uppercase tracking-wider">Site Inspection / Monthly Log</h3>
               </div>
-              <button onClick={() => setGrnModalTicket(null)} className="text-slate-300 hover:text-white bg-white/10 p-1 rounded-full transition-colors"><X size={16} /></button>
+              <button onClick={closeGrnModal} className="text-slate-300 hover:text-white bg-white/10 p-1 rounded-full transition-colors"><X size={16} /></button>
             </div>
-
+            
             <div className="p-4 sm:p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1">
               
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1">
@@ -617,16 +648,14 @@ export default function SiteCoordinatorDashboard() {
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Select Delivery Inspection Outcome *</label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  
                   <button 
                     type="button" 
                     onClick={() => setReceiptType('CLEAN')}
                     className={`p-3 rounded-xl border text-center transition-all flex sm:flex-col items-center justify-start sm:justify-center gap-3 sm:gap-1.5 ${receiptType === 'CLEAN' ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-3xs font-extrabold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                   >
                     <CheckCircle2 size={16} className={receiptType === 'CLEAN' ? 'text-emerald-600' : 'text-slate-400'} />
-                    <span className="text-[11px]">100% Perfect</span>
+                    <span className="text-[11px]">100% Perfect / Log OK</span>
                   </button>
-
                   <button 
                     type="button" 
                     onClick={() => setReceiptType('PARTIAL')}
@@ -635,7 +664,6 @@ export default function SiteCoordinatorDashboard() {
                     <Clock size={16} className={receiptType === 'PARTIAL' ? 'text-amber-600' : 'text-slate-400'} />
                     <span className="text-[11px]">Short Delivery</span>
                   </button>
-
                   <button 
                     type="button" 
                     onClick={() => setReceiptType('DISCREPANCY')}
@@ -644,7 +672,6 @@ export default function SiteCoordinatorDashboard() {
                     <AlertOctagon size={16} className={receiptType === 'DISCREPANCY' ? 'text-rose-600' : 'text-slate-400'} />
                     <span className="text-[11px]">Damage / Issue</span>
                   </button>
-
                 </div>
               </div>
 
@@ -668,43 +695,74 @@ export default function SiteCoordinatorDashboard() {
                 </div>
               )}
 
+              {/* 🎯 NEW: EXTRA USAGE / SERVICE LOGGING (Vehicles, Food, Utilities) */}
+              {['VEHICLE', 'ACCOMMODATION', 'FOOD', 'UTILITIES', 'SUBSCRIPTION'].includes(grnModalTicket?.category) && (
+                <div className="bg-indigo-50/40 border border-indigo-100 p-3 sm:p-4 rounded-xl space-y-3">
+                  <label className="text-[10px] font-black text-indigo-800 uppercase tracking-widest block border-b border-indigo-100 pb-1.5">
+                    Variable Usage & Extra Charges (Optional)
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <Input 
+                      label="Extra KM Driven" 
+                      type="number" 
+                      value={extraKm} 
+                      onChange={e => setExtraKm(e.target.value)} 
+                      placeholder="e.g. 150" 
+                    />
+                    <Input 
+                      label="Rate / KM (₹)" 
+                      type="number" 
+                      value={extraKmRate} 
+                      onChange={e => setExtraKmRate(e.target.value)} 
+                      placeholder="e.g. 12" 
+                    />
+                    <Input 
+                      label="Extra Fuel / Utility (₹)" 
+                      type="number" 
+                      value={extraFuelCharges} 
+                      onChange={e => setExtraFuelCharges(e.target.value)} 
+                      placeholder="e.g. 2500" 
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Form Fields */}
               <div className="space-y-3 sm:space-y-4">
                 <Input 
                   label={receiptType === 'DISCREPANCY' ? "Detailed Defect Description & Remarks *" : "Delivery Notes & Inspector Remarks"} 
                   value={grnRemarks} 
                   onChange={e => setGrnRemarks(e.target.value)} 
-                  placeholder={receiptType === 'DISCREPANCY' ? "Describe exactly what is broken/missing..." : "e.g. All items verified against packing slip..."} 
+                  placeholder={receiptType === 'DISCREPANCY' ? "Describe exactly what is broken/missing..." : "e.g. Logbook attached for current month..."} 
                 />
-
-                <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50 space-y-2">
-                  <label className="text-[9px] sm:text-[10px] font-extrabold text-indigo-800 uppercase tracking-widest flex items-center gap-1.5">
-                    <UploadCloud size={14} /> {receiptType === 'DISCREPANCY' ? 'Attach Photo Proof *' : 'Attach GRN PDF/Word *'}
+                <div className="bg-slate-100 border border-slate-200 p-3 rounded-xl space-y-2">
+                  <label className="text-[9px] sm:text-[10px] font-extrabold text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
+                    <UploadCloud size={14} /> {receiptType === 'DISCREPANCY' ? 'Attach Photo Proof *' : 'Attach Logbook / GRN (PDF/Word) *'}
                   </label>
                   <input 
                     type="file" 
                     accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
                     onChange={e => setGrnFile(e.target.files[0])}
-                    className="w-full text-[10px] sm:text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[9px] file:sm:text-[10px] file:font-bold file:uppercase file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 bg-white border border-slate-200 rounded-lg p-1 text-slate-500 cursor-pointer"
+                    className="w-full text-[10px] sm:text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-[9px] file:sm:text-[10px] file:font-bold file:uppercase file:bg-slate-300 file:text-slate-700 hover:file:bg-slate-400 bg-white border border-slate-200 rounded-lg p-1 text-slate-500 cursor-pointer"
                   />
                   {grnFile && <p className="text-[9px] font-bold text-emerald-600 pt-1 flex items-center gap-1"><CheckCircle2 size={12} /> {grnFile.name} attached.</p>}
                 </div>
               </div>
 
             </div>
-
+            
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col-reverse sm:flex-row justify-end gap-2 shrink-0">
-              <Button variant="ghost" onClick={() => setGrnModalTicket(null)} disabled={loading} className="w-full sm:w-auto px-5 text-[11px] sm:text-xs font-bold py-2.5 sm:py-2">Cancel</Button>
+              <Button variant="ghost" onClick={closeGrnModal} disabled={loading} className="w-full sm:w-auto px-5 text-[11px] sm:text-xs font-bold py-2.5 sm:py-2">Cancel</Button>
               <Button 
                 variant="primary" 
                 onClick={submitGrn} 
                 disabled={loading} 
                 className={`w-full sm:w-auto px-6 text-[11px] sm:text-xs font-bold shadow-sm py-2.5 sm:py-2 ${receiptType === 'DISCREPANCY' ? 'bg-rose-600 hover:bg-rose-700' : 'bg-[#0b9c54] hover:bg-emerald-600'}`}
               >
-                {loading ? "Processing..." : receiptType === 'DISCREPANCY' ? "Raise Alert" : "Log GRN"}
+                {loading ? "Processing..." : receiptType === 'DISCREPANCY' ? "Raise Alert" : "Submit Receipt / Log"}
               </Button>
             </div>
-
+            
           </div>
         </div>
       )}

@@ -2230,6 +2230,7 @@ async def process_po_disbursement(
         "remaining_balance": max(0.0, grand_total - new_total_disbursed)
     }
 
+
 # -------------------------------------------------------------------
 # 📦 PHASE 5: GRN & MATERIAL DISCREPANCY HANDLING ENDPOINT
 # -------------------------------------------------------------------
@@ -2241,6 +2242,9 @@ async def process_goods_receipt_note(
     receipt_type: str = Form("CLEAN"),
     discrepancy_category: str = Form(""),
     remarks: str = Form(""),
+    extra_km: float = Form(0.0),            # 🎯 NEW: Capture Extra KM
+    extra_km_rate: float = Form(0.0),       # 🎯 NEW: Capture KM Rate
+    extra_fuel_charges: float = Form(0.0),  # 🎯 NEW: Capture Extra Fuel
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
@@ -2268,12 +2272,21 @@ async def process_goods_receipt_note(
         except Exception as e:
             logger.error(f"Cloudinary Upload Failed for GRN: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to upload GRN/Proof document to cloud storage.")
-            
+
+    # 🎯 Check if extra charges were added
+    has_extra_charges = float(extra_km or 0) > 0 or float(extra_fuel_charges or 0) > 0
+
     if receipt_type == "CLEAN":
-        ticket.status = "Delivered - GRN Logged"
-        action = "Material Delivered & Clean GRN Verified"
-        detail_text = f"100% Goods verified at site by {user_name}. Remarks: {remarks or 'None'}"
-        
+        # 🎯 Intercept if it has extra charges
+        if has_extra_charges:
+            ticket.status = "Extra Usage - Pending Purchase"
+            action = "Variable Usage Logged - Pending Verification"
+            detail_text = f"Monthly log submitted with Extra Charges (KM: {extra_km}, Fuel: ₹{extra_fuel_charges}) by {user_name}. Paused for Purchase Executive verification. Remarks: {remarks or 'None'}"
+        else:
+            ticket.status = "Delivered - GRN Logged"
+            action = "Material Delivered & Clean GRN Verified"
+            detail_text = f"100% Goods verified at site by {user_name}. Remarks: {remarks or 'None'}"
+            
     elif receipt_type == "PARTIAL":
         ticket.status = "Partially Delivered"
         action = "Partial Delivery Logged at Site"
@@ -2283,6 +2296,7 @@ async def process_goods_receipt_note(
         ticket.status = "Material Discrepancy Raised"
         action = f"CRITICAL ALERT: Material Discrepancy ({discrepancy_category})"
         detail_text = f"Issue flagged by {user_name} [{discrepancy_category}]: {remarks or 'No remarks provided'}"
+        
     if grn_url:
         detail_text += f" | Proof File: {grn_url}"
         
@@ -2321,6 +2335,151 @@ async def process_goods_receipt_note(
     
     db.commit()
     return {"message": "Receipt status processed successfully.", "status": ticket.status, "grn_url": grn_url}
+
+# -------------------------------------------------------------------
+# 🚗 VARIABLE USAGE / EXTRA CHARGES APPROVAL PIPELINE
+# -------------------------------------------------------------------
+class UsageApprovalPayload(BaseModel):
+    user_name: str
+    user_role: str
+    action: str  # "APPROVE", "ESCALATE", "REJECT"
+    remarks: str
+
+@app.put("/api/requisitions/{ticket_number}/usage-approval")
+def approve_extra_usage(
+    ticket_number: str, 
+    payload: UsageApprovalPayload, 
+    background_tasks: BackgroundTasks, 
+    db: Session = Depends(get_db)
+):
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
+    if not ticket: 
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if payload.action == "ESCALATE":
+        ticket.status = "Extra Usage - Pending PM"
+        action_taken = "Extra Charges Escalated to PM"
+        log_remarks = f"Purchase Executive ({payload.user_name}) escalated extra usage charges to the Project Manager for review. Remarks: {payload.remarks}"
+        
+        pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
+        if pm and pm.email:
+            background_tasks.add_task(send_workflow_email, pm.email, pm.name, f"Action Required: Approve Extra Usage for {ticket_number}", ticket_number, ticket.project_name, ticket.status)
+
+    elif payload.action == "APPROVE":
+        ticket.status = "Delivered - GRN Logged" 
+        action_taken = "Extra Charges Approved"
+        log_remarks = f"Extra usage charges verified and approved by {payload.user_role} ({payload.user_name}). Routed to Accounts for payout. Remarks: {payload.remarks}"
+
+    elif payload.action == "REJECT":
+        ticket.status = "Query Raised"
+        action_taken = "Extra Charges Rejected"
+        log_remarks = f"Extra usage charges rejected by {payload.user_role}. Returned to Coordinator. Remarks: {payload.remarks}"
+
+    db.add(models.TicketHistory(
+        ticket_number=ticket_number, 
+        user_name=payload.user_name, 
+        action_taken=action_taken, 
+        remarks=log_remarks
+    ))
+    db.commit()
+    return {"status": ticket.status, "message": "Variable usage review processed successfully."}
+
+# -------------------------------------------------------------------
+# ✂️ RECURRING CONTRACT EARLY CLOSURE / PO TRUNCATION
+# -------------------------------------------------------------------
+class TruncateContractPayload(BaseModel):
+    user_name: str
+    remarks: str
+    actual_months_used: int
+    deposit_adjusted_amount: float
+
+@app.put("/api/purchase-orders/{po_number}/truncate")
+def truncate_recurring_contract(
+    po_number: str, 
+    payload: TruncateContractPayload, 
+    background_tasks: BackgroundTasks, 
+    db: Session = Depends(get_db)
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase Order not found.")
+
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Material Ticket not found.")
+
+    # 1. Fetch Winning Bid
+    winning_quotes = db.query(models.Quotation).filter(
+        models.Quotation.ticket_number == po.ticket_number,
+        models.Quotation.is_selected == True
+    ).all()
+
+    if not winning_quotes:
+        raise HTTPException(status_code=400, detail="No winning bid found for this contract.")
+        
+    primary_quote = winning_quotes[0]
+    
+    # 2. Prevent Truncation on Non-Recurring Orders
+    if not getattr(primary_quote, 'is_recurring', False):
+        raise HTTPException(status_code=400, detail="Cannot truncate a standard Goods PO. Use cancellation instead.")
+
+    # 3. Recalculate Contract Value (New Cap)
+    monthly_rate = float(primary_quote.monthly_rate or 0)
+    old_cap = float(primary_quote.approved_spending_cap or primary_quote.total_amount or 0)
+    
+    # New Budget Ceiling = (Months Used * Monthly Rate) - Any Deposit being adjusted by Accounts
+    new_cap = (monthly_rate * payload.actual_months_used) - payload.deposit_adjusted_amount
+    
+    unspent_funds_released = old_cap - new_cap
+
+    # 4. Apply Changes to the database
+    primary_quote.approved_spending_cap = new_cap
+    primary_quote.total_amount = new_cap
+    primary_quote.contract_tenure_months = payload.actual_months_used
+    
+    # Mark Ticket as Closed
+    ticket.status = "Contract Terminated & Closed"
+
+    # 5. Log the Audit Trail
+    log_msg = (
+        f"Early Contract Termination: Contract reduced to {payload.actual_months_used} months. "
+        f"Deposit Adjusted: ₹{payload.deposit_adjusted_amount:,.2f}. "
+        f"New Ceiling Cap: ₹{new_cap:,.2f} (Reduced from ₹{old_cap:,.2f}). "
+        f"Unspent Funds Released to Project: ₹{unspent_funds_released:,.2f}. "
+        f"Reason: {payload.remarks}"
+    )
+
+    db.add(models.TicketHistory(
+        ticket_number=po.ticket_number,
+        user_name=payload.user_name,
+        action_taken="Contract Early Closure Executed",
+        remarks=log_msg
+    ))
+
+    # 6. Email Alerts to Finance and Accounts
+    accounts_users = db.query(models.User).filter(models.User.role.in_(["Accounts Executive", "Accounts", "Finance Manager"]), models.User.is_active == True).all()
+    for acc in accounts_users:
+        if acc.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=acc.email,
+                recipient_name=acc.name,
+                subject=f"Financial Update: Contract Truncated & Closed ({po_number})",
+                ticket_number=po.ticket_number,
+                project_name=ticket.project_name,
+                status="Contract Terminated & Closed"
+            )
+
+    db.commit()
+
+    return {
+        "po_number": po_number,
+        "old_cap": old_cap,
+        "new_cap": new_cap,
+        "funds_released": unspent_funds_released,
+        "status": ticket.status,
+        "message": "Contract truncated successfully. Unspent funds released."
+    }
 
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
