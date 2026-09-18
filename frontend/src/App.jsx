@@ -6,8 +6,7 @@ import SiteCoordinatorDashboard from './components/SiteCoordinatorDashboard';
 import SiteManagerDashboard from './components/SiteManagerDashboard';
 import PurchaseExecutiveDashboard from './components/PurchaseExecutiveDashboard';
 import ProjectManagerDashboard from './components/ProjectManagerDashboard';
-import DirectorDashboard from './components/DirectorDashboard';
-import DirectorAnalyticsDashboard from './components/DirectorAnalyticsDashboard'; // 🎯 NEW IMPORT
+import DirectorDashboard from './components/DirectorDashboard'; // 🎯 ALL-IN-ONE DIRECTOR VIEW
 import VendorMasterDesk from './components/VendorMasterDesk';
 import Login from './components/Login'; 
 import ITAdminDashboard from './components/ITAdminDashboard'; 
@@ -27,7 +26,7 @@ const getRoleHomePath = (role) => {
     case 'Accounts Executive': return '/accounts-desk'; 
     case 'Finance Manager':    return '/accounts-desk'; 
     case 'IT Manager':         return '/direct-procurement';
-    case 'Director':           return '/director-analytics'; // 🎯 UPDATED TO ANALYTICS HOME
+    case 'Director':           return '/corporate-approvals'; // Routes to the Unified Dashboard
     case 'Admin':              return '/admin';
     default:                   return '/dashboard'; 
   }
@@ -41,20 +40,14 @@ const RoleRoute = ({ allowedRoles, userRole, children }) => {
   return children;
 };
 
-// 🎯 INNER ROUTE COMPONENT (Allows us to use React Router hooks like useNavigate)
+// 🎯 INNER ROUTE COMPONENT
 function AppRoutes({ userSession, setUserSession }) {
   const currentRole = userSession.role;
   const navigate = useNavigate();
 
-  // Callbacks for Director Analytics Dashboard Routing
+  // Callback to jump from Director Analytics -> Master PO Ledger
   const handleDirectorLedgerNavigation = (projectCode) => {
-    // 🎯 Note: We can pass state to pre-filter the ledger if desired in the future, 
-    // but right now it just reliably routes the director to the ledger.
     navigate('/po-ledger');
-  };
-
-  const handleDirectorApprovalsNavigation = () => {
-    navigate('/corporate-approvals');
   };
 
   return (
@@ -63,10 +56,6 @@ function AppRoutes({ userSession, setUserSession }) {
         
         {/* ⚡ BASE REDIRECTOR */}
         <Route index element={<Navigate to={getRoleHomePath(currentRole)} replace />} />
-        
-        {/* ========================================== */}
-        {/* 🎯 EXPLICIT NAMED ROLE DASHBOARD ROUTES */}
-        {/* ========================================== */}
         
         <Route path="field-workspace" element={
           <RoleRoute allowedRoles={['Site Coordinator']} userRole={currentRole}>
@@ -92,20 +81,13 @@ function AppRoutes({ userSession, setUserSession }) {
           </RoleRoute>
         } />
 
-        {/* 🎯 NEW: DIRECTOR ANALYTICS HOME */}
-        <Route path="director-analytics" element={
-          <RoleRoute allowedRoles={['Director']} userRole={currentRole}>
-            <DirectorAnalyticsDashboard 
-              onNavigateToLedger={handleDirectorLedgerNavigation}
-              onNavigateToApprovals={handleDirectorApprovalsNavigation}
-            />
-          </RoleRoute>
-        } />
-        
-        {/* 🎯 DIRECTOR CAPEX APPROVALS QUEUE */}
+        {/* 🎯 UNIFIED DIRECTOR DASHBOARD (Analytics + Approvals + History) */}
         <Route path="corporate-approvals" element={
           <RoleRoute allowedRoles={['Director']} userRole={currentRole}>
-            <DirectorDashboard currentUser={userSession} />
+            <DirectorDashboard 
+              currentUser={userSession} 
+              onNavigateToLedger={handleDirectorLedgerNavigation}
+            />
           </RoleRoute>
         } />
         
@@ -129,10 +111,7 @@ function AppRoutes({ userSession, setUserSession }) {
           </RoleRoute>
         } />
 
-        {/* ========================================== */}
         {/* 🛠️ GLOBAL SHARED / UTILITY ROUTES */}
-        {/* ========================================== */}
-        
         <Route path="vetting" element={
           <RoleRoute allowedRoles={['Project Manager']} userRole={currentRole}>
             <SiteManagerDashboard currentUser={userSession} />
@@ -161,7 +140,6 @@ function AppRoutes({ userSession, setUserSession }) {
           </RoleRoute>
         } />
 
-        {/* Fallback Paths */}
         <Route path="inbox" element={<div className="text-center py-20 text-slate-500 font-medium mt-10">Manager Inbox Grid Gateway Coming Soon...</div>} />
         <Route path="dashboard" element={<div className="text-center py-20 text-slate-500 font-medium mt-10">Management Control Dashboard Coming Soon...</div>} />
         
