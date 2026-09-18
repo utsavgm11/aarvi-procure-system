@@ -2109,11 +2109,15 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
             "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '' if po_obj else '',
             "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '' if po_obj else '',
             "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None) if po_obj else None,
-            "utr_no": getattr(po_obj, 'utr_no', '') or '' if po_obj else '',
-            "payment_date": getattr(po_obj, 'payment_date', '') or '' if po_obj else '',
-            "payment_remark": getattr(po_obj, 'payment_remark', '') or '' if po_obj else '',
-            # 🎯 INCLUDE GST STATUS FOR ACCOUNTS TO SEE
-            "gst_status": getattr(po_obj, 'gst_status', 'Pending') or 'Pending'
+            "utr_no": getattr(po_obj, 'utr_no', '') or '',
+            "payment_date": getattr(po_obj, 'payment_date', '') or '',
+            "payment_remark": getattr(po_obj, 'payment_remark', '') or '',
+            "payment_advice_url": getattr(po_obj, 'payment_advice_url', None),
+            "disbursed_amount": float(getattr(po_obj, 'disbursed_amount', 0) or 0),
+            # 🎯 GST STATUS INJECTION
+            "gst_status": getattr(po_obj, 'gst_status', 'Pending') or 'Pending',
+            "gst_clearance_date": getattr(po_obj, 'gst_clearance_date', 'N/A') or 'N/A',
+            "gst_verified_by": getattr(po_obj, 'gst_verified_by', 'N/A') or 'N/A'
         })
         
     return response
@@ -2567,6 +2571,115 @@ def renew_recurring_contract(
     
     db.commit()
     return {"message": "Contract successfully renewed.", "new_cap": new_cap, "new_end_date": str(payload.new_end_date)}
+
+# -------------------------------------------------------------------
+# 📊 EXECUTIVE DIRECTOR ANALYTICS COMMAND CENTER
+# -------------------------------------------------------------------
+@app.get("/api/analytics/director-summary", response_model=dict)
+def get_director_analytics_summary(db: Session = Depends(get_db)):
+    closed_statuses = ["Delivered - GRN Logged", "Contract Terminated & Closed", "Rejected"]
+    
+    # 1. Active Procurement Tickets Count
+    active_count = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status.notin_(closed_statuses)
+    ).count()
+
+    # 2. Urgent Director Approvals Pending
+    pending_director_count = db.query(models.MaterialTicket).filter(
+        models.MaterialTicket.status == "Pending Director"
+    ).count()
+
+    # 3. Winning Bids & Reimbursement Aggregation
+    winning_data = db.query(models.Quotation, models.TicketItem, models.MaterialTicket)\
+        .join(models.MaterialTicket, models.Quotation.ticket_number == models.MaterialTicket.ticket_number)\
+        .join(models.TicketItem, (models.Quotation.ticket_number == models.TicketItem.ticket_number) & (models.Quotation.item_index == models.TicketItem.item_index))\
+        .filter(models.Quotation.is_selected == True).all()
+
+    total_spend = 0.0
+    reimbursable_spend = 0.0
+    non_reimbursable_spend = 0.0
+    active_monthly_spend = 0.0
+
+    category_spend = {"GOODS": 0.0, "VEHICLE": 0.0, "ACCOMMODATION": 0.0, "FOOD": 0.0, "SUBSCRIPTION": 0.0}
+    pm_spend_map = {}
+    project_spend_map = {}
+
+    for quote, item, ticket in winning_data:
+        amount = float(quote.net_amount_payable or quote.total_amount or quote.base_total_value or 0)
+        total_spend += amount
+
+        # Reimbursable vs Corporate
+        if getattr(item, 'is_reimbursable', False):
+            reimbursable_spend += amount
+        else:
+            non_reimbursable_spend += amount
+
+        # Active Monthly Lease Run-Rate
+        if getattr(quote, 'is_recurring', False) and ticket.status not in closed_statuses:
+            active_monthly_spend += float(quote.monthly_rate or 0)
+
+        # Category Distribution
+        cat_key = (ticket.category or "GOODS").upper()
+        if cat_key in category_spend:
+            category_spend[cat_key] += amount
+
+        # PM Leaderboard Grouping
+        pm_user = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
+        pm_name = pm_user.name if pm_user else "Unassigned / Direct"
+        if pm_name not in pm_spend_map:
+            pm_spend_map[pm_name] = {"pm_name": pm_name, "total_spend": 0.0, "po_count": set()}
+        pm_spend_map[pm_name]["total_spend"] += amount
+        pm_spend_map[pm_name]["po_count"].add(ticket.ticket_number)
+
+        # Projects & Sub-Projects Grouping
+        p_code = ticket.project_code or "UNKNOWN"
+        p_name = ticket.project_name or "Unclassified Site"
+        if p_code not in project_spend_map:
+            project_spend_map[p_code] = {
+                "project_code": p_code,
+                "project_name": p_name,
+                "pm_name": pm_name,
+                "category": ticket.category,
+                "total_spend": 0.0,
+                "ticket_count": set()
+            }
+        project_spend_map[p_code]["total_spend"] += amount
+        project_spend_map[p_code]["ticket_count"].add(ticket.ticket_number)
+
+    # Format PM Breakdown
+    pm_spend = [
+        {"pm_name": pm, "total_spend": data["total_spend"], "orders_count": len(data["po_count"])}
+        for pm, data in pm_spend_map.items()
+    ]
+    pm_spend.sort(key=lambda x: x["total_spend"], reverse=True)
+
+    # Format Projects Matrix
+    all_projects = [
+        {
+            "project_code": data["project_code"],
+            "project_name": data["project_name"],
+            "pm_name": data["pm_name"],
+            "category": data["category"],
+            "total_spend": data["total_spend"],
+            "orders_count": len(data["ticket_count"])
+        }
+        for code, data in project_spend_map.items()
+    ]
+    all_projects.sort(key=lambda x: x["total_spend"], reverse=True)
+
+    return {
+        "active_procurements_count": active_count,
+        "pending_director_action_count": pending_director_count,
+        "total_spend": total_spend,
+        "active_monthly_spend": active_monthly_spend,
+        "reimbursable_spend": reimbursable_spend,
+        "non_reimbursable_spend": non_reimbursable_spend,
+        "reimbursable_percentage": round((reimbursable_spend / total_spend * 100), 1) if total_spend > 0 else 0,
+        "non_reimbursable_percentage": round((non_reimbursable_spend / total_spend * 100), 1) if total_spend > 0 else 0,
+        "category_spend": category_spend,
+        "pm_spend": pm_spend,
+        "all_projects": all_projects
+    }
 
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
