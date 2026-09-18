@@ -4,7 +4,7 @@ import os
 import shutil
 import io
 from typing import List, Optional, Union
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pydantic import BaseModel
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +42,7 @@ cloudinary.config(
 UPLOAD_DIR = "storage/quotation_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs("storage/po_templates", exist_ok=True)
+
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
 # 2. Complete CORS Rules
@@ -1639,7 +1640,6 @@ def mark_po_gst_as_paid(
     po.gst_status = "Paid"
     po.gst_clearance_date = datetime.now().strftime('%d-%b-%Y %I:%M %p')
     po.gst_verified_by = payload.user_name
-
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
     
     log_msg = f"GST Portal Reflection Verified by {payload.user_name}. GST Status marked as PAID. Remarks: {payload.remarks}"
@@ -1654,11 +1654,9 @@ def mark_po_gst_as_paid(
     
     is_fully_paid = (grand_total - disbursed) <= 1.0
     is_delivered = ticket and ticket.status in ["Delivered - GRN Logged", "Dispatched"]
-
     if is_fully_paid and is_delivered:
         ticket.status = "Delivered - GRN Logged"
         log_msg += " | All financial, delivery, and GST liabilities fulfilled. Order officially closed."
-
     db.add(models.TicketHistory(
         ticket_number=po.ticket_number,
         user_name=payload.user_name,
@@ -1767,7 +1765,6 @@ async def upload_vendor_documents(
     vendor = db.query(models.Vendor).filter(models.Vendor.id == vendor_id).first()
     if not vendor: 
         raise HTTPException(status_code=404, detail="Vendor not found")
-
     def upload_to_cloud(file_obj, doc_name):
         if not file_obj: return None
         ext = os.path.splitext(file_obj.filename)[1].lower()
@@ -1787,7 +1784,6 @@ async def upload_vendor_documents(
         except Exception as e:
             logger.error(f"Failed to upload {doc_name}: {str(e)}")
             return None
-
     # Safely assign URLs if files are uploaded
     if aadhar_file and hasattr(vendor, 'aadhar_url'): vendor.aadhar_url = upload_to_cloud(aadhar_file, "AADHAR")
     if pan_file and hasattr(vendor, 'pan_url'): vendor.pan_url = upload_to_cloud(pan_file, "PAN")
@@ -1796,7 +1792,6 @@ async def upload_vendor_documents(
     if electricity_bill_file and hasattr(vendor, 'electricity_bill_url'): vendor.electricity_bill_url = upload_to_cloud(electricity_bill_file, "ELECTRICITY")
     if cancelled_cheque_file and hasattr(vendor, 'cancelled_cheque_url'): vendor.cancelled_cheque_url = upload_to_cloud(cancelled_cheque_file, "CHEQUE")
     if iso_cert_file and hasattr(vendor, 'iso_cert_url'): vendor.iso_cert_url = upload_to_cloud(iso_cert_file, "ISO")
-
     db.commit()
     return {"message": "Vendor documents securely uploaded and linked to profile."}
 
@@ -2230,7 +2225,6 @@ async def process_po_disbursement(
         "remaining_balance": max(0.0, grand_total - new_total_disbursed)
     }
 
-
 # -------------------------------------------------------------------
 # 📦 PHASE 5: GRN & MATERIAL DISCREPANCY HANDLING ENDPOINT
 # -------------------------------------------------------------------
@@ -2272,10 +2266,10 @@ async def process_goods_receipt_note(
         except Exception as e:
             logger.error(f"Cloudinary Upload Failed for GRN: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to upload GRN/Proof document to cloud storage.")
-
+            
     # 🎯 Check if extra charges were added
     has_extra_charges = float(extra_km or 0) > 0 or float(extra_fuel_charges or 0) > 0
-
+    
     if receipt_type == "CLEAN":
         # 🎯 Intercept if it has extra charges
         if has_extra_charges:
@@ -2355,7 +2349,7 @@ def approve_extra_usage(
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == ticket_number).first()
     if not ticket: 
         raise HTTPException(status_code=404, detail="Ticket not found")
-
+        
     if payload.action == "ESCALATE":
         ticket.status = "Extra Usage - Pending PM"
         action_taken = "Extra Charges Escalated to PM"
@@ -2364,17 +2358,17 @@ def approve_extra_usage(
         pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
         if pm and pm.email:
             background_tasks.add_task(send_workflow_email, pm.email, pm.name, f"Action Required: Approve Extra Usage for {ticket_number}", ticket_number, ticket.project_name, ticket.status)
-
+            
     elif payload.action == "APPROVE":
         ticket.status = "Delivered - GRN Logged" 
         action_taken = "Extra Charges Approved"
         log_remarks = f"Extra usage charges verified and approved by {payload.user_role} ({payload.user_name}). Routed to Accounts for payout. Remarks: {payload.remarks}"
-
+        
     elif payload.action == "REJECT":
         ticket.status = "Query Raised"
         action_taken = "Extra Charges Rejected"
         log_remarks = f"Extra usage charges rejected by {payload.user_role}. Returned to Coordinator. Remarks: {payload.remarks}"
-
+        
     db.add(models.TicketHistory(
         ticket_number=ticket_number, 
         user_name=payload.user_name, 
@@ -2403,17 +2397,17 @@ def truncate_recurring_contract(
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
     if not po:
         raise HTTPException(status_code=404, detail="Purchase Order not found.")
-
+        
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="Material Ticket not found.")
-
+        
     # 1. Fetch Winning Bid
     winning_quotes = db.query(models.Quotation).filter(
         models.Quotation.ticket_number == po.ticket_number,
         models.Quotation.is_selected == True
     ).all()
-
+    
     if not winning_quotes:
         raise HTTPException(status_code=400, detail="No winning bid found for this contract.")
         
@@ -2422,7 +2416,7 @@ def truncate_recurring_contract(
     # 2. Prevent Truncation on Non-Recurring Orders
     if not getattr(primary_quote, 'is_recurring', False):
         raise HTTPException(status_code=400, detail="Cannot truncate a standard Goods PO. Use cancellation instead.")
-
+        
     # 3. Recalculate Contract Value (New Cap)
     monthly_rate = float(primary_quote.monthly_rate or 0)
     old_cap = float(primary_quote.approved_spending_cap or primary_quote.total_amount or 0)
@@ -2431,7 +2425,7 @@ def truncate_recurring_contract(
     new_cap = (monthly_rate * payload.actual_months_used) - payload.deposit_adjusted_amount
     
     unspent_funds_released = old_cap - new_cap
-
+    
     # 4. Apply Changes to the database
     primary_quote.approved_spending_cap = new_cap
     primary_quote.total_amount = new_cap
@@ -2439,7 +2433,7 @@ def truncate_recurring_contract(
     
     # Mark Ticket as Closed
     ticket.status = "Contract Terminated & Closed"
-
+    
     # 5. Log the Audit Trail
     log_msg = (
         f"Early Contract Termination: Contract reduced to {payload.actual_months_used} months. "
@@ -2448,14 +2442,14 @@ def truncate_recurring_contract(
         f"Unspent Funds Released to Project: ₹{unspent_funds_released:,.2f}. "
         f"Reason: {payload.remarks}"
     )
-
+    
     db.add(models.TicketHistory(
         ticket_number=po.ticket_number,
         user_name=payload.user_name,
         action_taken="Contract Early Closure Executed",
         remarks=log_msg
     ))
-
+    
     # 6. Email Alerts to Finance and Accounts
     accounts_users = db.query(models.User).filter(models.User.role.in_(["Accounts Executive", "Accounts", "Finance Manager"]), models.User.is_active == True).all()
     for acc in accounts_users:
@@ -2469,9 +2463,8 @@ def truncate_recurring_contract(
                 project_name=ticket.project_name,
                 status="Contract Terminated & Closed"
             )
-
+            
     db.commit()
-
     return {
         "po_number": po_number,
         "old_cap": old_cap,
@@ -2480,6 +2473,100 @@ def truncate_recurring_contract(
         "status": ticket.status,
         "message": "Contract truncated successfully. Unspent funds released."
     }
+
+# -------------------------------------------------------------------
+# 🔄 PHASE 7: CONTRACT RENEWALS & EXPIRY ALERTS
+# -------------------------------------------------------------------
+@app.get("/api/purchase-orders/expiring", response_model=List[dict])
+def get_expiring_contracts(db: Session = Depends(get_db)):
+    today = date.today()
+    
+    orders = db.query(models.PurchaseOrder, models.MaterialTicket, models.Quotation)\
+        .join(models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number)\
+        .join(models.Quotation, models.Quotation.ticket_number == models.MaterialTicket.ticket_number)\
+        .filter(
+            models.Quotation.is_selected == True,
+            models.Quotation.is_recurring == True,
+            models.MaterialTicket.status.notin_(["Contract Terminated & Closed", "Rejected"])
+        ).all()
+        
+    response = []
+    for po_obj, ticket_obj, quote_obj in orders:
+        if quote_obj.contract_end_date:
+            days_left = (quote_obj.contract_end_date - today).days
+            if 0 <= days_left <= 45:
+                response.append({
+                    "po_number": po_obj.po_number,
+                    "ticket_number": po_obj.ticket_number,
+                    "project_name": ticket_obj.project_name,
+                    "vendor_name": quote_obj.vendor_name,
+                    "category": ticket_obj.category,
+                    "end_date": quote_obj.contract_end_date.strftime('%Y-%m-%d'),
+                    "days_remaining": days_left,
+                    "monthly_rate": float(quote_obj.monthly_rate or 0),
+                    "current_cap": float(quote_obj.approved_spending_cap or quote_obj.total_amount or 0)
+                })
+                
+    response.sort(key=lambda x: x["days_remaining"])
+    return response
+
+class RenewContractPayload(BaseModel):
+    user_name: str
+    user_role: str
+    additional_months: int
+    new_end_date: date
+    remarks: str
+
+@app.put("/api/purchase-orders/{po_number}/renew")
+def renew_recurring_contract(
+    po_number: str,
+    payload: RenewContractPayload,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po: 
+        raise HTTPException(status_code=404, detail="PO not found.")
+    
+    ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
+    
+    winning_quote = db.query(models.Quotation).filter(
+        models.Quotation.ticket_number == po.ticket_number,
+        models.Quotation.is_selected == True
+    ).first()
+    
+    if not winning_quote or not getattr(winning_quote, 'is_recurring', False):
+        raise HTTPException(status_code=400, detail="Only recurring contracts can be renewed.")
+        
+    monthly_rate = float(winning_quote.monthly_rate or 0)
+    old_cap = float(winning_quote.approved_spending_cap or winning_quote.total_amount or 0)
+    added_budget = monthly_rate * payload.additional_months
+    new_cap = old_cap + added_budget
+    
+    winning_quote.contract_end_date = payload.new_end_date
+    winning_quote.contract_tenure_months = (winning_quote.contract_tenure_months or 0) + payload.additional_months
+    winning_quote.approved_spending_cap = new_cap
+    winning_quote.total_amount = new_cap
+    
+    if ticket.status == "Contract Terminated & Closed":
+        ticket.status = "Delivered - GRN Logged" 
+        
+    log_msg = (
+        f"Contract Renewed & Extended by {payload.additional_months} months. "
+        f"New Expiry Date: {payload.new_end_date.strftime('%d-%b-%Y')}. "
+        f"Budget Cap increased by ₹{added_budget:,.2f}. New Total Cap: ₹{new_cap:,.2f}. "
+        f"Remarks: {payload.remarks}"
+    )
+    
+    db.add(models.TicketHistory(
+        ticket_number=po.ticket_number,
+        user_name=payload.user_name,
+        action_taken="Contract Renewed & Extended",
+        remarks=log_msg
+    ))
+    
+    db.commit()
+    return {"message": "Contract successfully renewed.", "new_cap": new_cap, "new_end_date": str(payload.new_end_date)}
 
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")

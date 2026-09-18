@@ -5,14 +5,18 @@ import {
   FileCheck, Search, ChevronDown, ChevronUp, Landmark, Layers3, 
   Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
   UploadCloud, Paperclip, Trash2, FileText, CheckCircle2,
-  ShieldAlert, AlertOctagon, Wallet, ExternalLink, Download, Scissors
+  ShieldAlert, AlertOctagon, Wallet, ExternalLink, Download, Scissors, RefreshCw, AlertTriangle
 } from 'lucide-react';
 import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
 
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
 export default function MasterPOLedgerDesk({ currentUser }) {
+  // 🎯 3-TAB ARCHITECTURE STATE
+  const [activeMasterTab, setActiveMasterTab] = useState('ledger'); // 'ledger' | 'renewals'
+
   const [ledgerList, setLedgerList] = useState([]);
+  const [expiringContracts, setExpiringContracts] = useState([]); 
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedRows, setExpandedRows] = useState({});
@@ -42,7 +46,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const isPurchaseExecutive = currentUser?.role === 'Purchase Executive';
   const isManagerOrDirector = ['Director', 'Project Manager', 'Admin', 'IT Manager'].includes(currentUser?.role);
   
-  // 🎯 Accounts & Management can see everything. Project Managers only see their rows.
   const canViewAll = [
     'Director', 
     'Purchase Executive', 
@@ -92,13 +95,25 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }
   }, []);
 
+  const fetchExpiringContracts = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/purchase-orders/expiring`);
+      setExpiringContracts(res.data);
+    } catch (err) {
+      console.error("Error fetching expiring contracts", err);
+    }
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     const timer = setTimeout(() => {
-      if (isMounted) fetchLedgerPOs();
+      if (isMounted) {
+        if (activeMasterTab === 'ledger') fetchLedgerPOs();
+        if (activeMasterTab === 'renewals') fetchExpiringContracts();
+      }
     }, 0);
     return () => { isMounted = false; clearTimeout(timer); };
-  }, [fetchLedgerPOs]);
+  }, [activeMasterTab, fetchLedgerPOs, fetchExpiringContracts]);
 
   const toggleExpandRow = async (poNumber, ticketNumber) => {
     const isCurrentlyExpanded = !!expandedRows[poNumber];
@@ -114,14 +129,12 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }
   };
 
-  // 🎯 HELPER: Handles Opening Cloudinary Documents in Modal
   const handlePreviewFile = (url, title) => {
     if (!url) return;
     let fullUrl = url.startsWith('/') ? `https://aarvi-procure-system.onrender.com${url}` : url;
     setPreviewDoc({ url: fullUrl, title });
   };
 
-  // 🎯 NEW: PO TRUNCATION ENGINE HANDLER
   const handleTruncatePO = async (poNumber) => {
     const actualMonthsUsed = prompt("Early Contract Closure.\nHow many total months were actually consumed? (e.g. 4)");
     if (!actualMonthsUsed || isNaN(actualMonthsUsed)) return;
@@ -149,7 +162,38 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }
   };
 
-  // --- Signed PO Form Handlers ---
+  // Renewal Handlers
+  const [renewalForm, setRenewalForm] = useState({});
+
+  const handleRenewSubmit = async (poNumber) => {
+    const formState = renewalForm[poNumber];
+    if (!formState || !formState.months || !formState.endDate || !formState.remarks) {
+      alert("Please fill all renewal fields.");
+      return;
+    }
+
+    try {
+      await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/renew`, {
+        user_name: currentUser?.name || "System User",
+        user_role: currentUser?.role || "Manager",
+        additional_months: parseInt(formState.months),
+        new_end_date: formState.endDate,
+        remarks: formState.remarks
+      });
+      alert(`Success! PO ${poNumber} has been successfully renewed and ceiling increased.`);
+      
+      setRenewalForm(prev => {
+        const newState = { ...prev };
+        delete newState[poNumber];
+        return newState;
+      });
+      fetchExpiringContracts();
+    } catch (err) {
+      alert("Failed to process renewal.");
+    }
+  };
+
+  // --- Form Handlers ---
   const handlePoFileChange = (poNumber, event) => {
     const file = event.target.files[0];
     setPoFileForms(prev => ({ ...prev, [poNumber]: { file } }));
@@ -178,7 +222,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }
   };
 
-  // --- PI Form Handlers ---
   const handleInputChange = (poNumber, field, value) => {
     setInvoiceForms(prev => ({ ...prev, [poNumber]: { ...prev[poNumber], [field]: value } }));
   };
@@ -192,7 +235,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     if (editingPOs[poNumber]) setEditingPOs(prev => ({...prev, [poNumber]: false}));
   };
 
-  // --- Tax Invoice Form Handlers ---
   const handleTaxInputChange = (poNumber, field, value) => {
     setTaxInvoiceForms(prev => ({ ...prev, [poNumber]: { ...prev[poNumber], [field]: value } }));
   };
@@ -206,7 +248,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     if (editingPOs[poNumber]) setEditingPOs(prev => ({...prev, [poNumber]: false}));
   };
 
-  // --- Submit API Calls ---
   const handleSaveInvoiceDetails = async (poNumber) => {
     const formState = invoiceForms[poNumber];
     const formData = new FormData();
@@ -251,7 +292,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     } catch (err) { console.error("Error generating PO template", err); }
   };
 
-  // --- Metrics & Search Logic ---
   const isWithinLast6Months = (dateStr) => {
     if (!dateStr || dateStr === 'N/A') return false;
     try {
@@ -269,7 +309,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     } catch(e) { return true; }
   };
 
-  // 🎯 CORE FILTER ALGORITHM
   const filteredLedger = useMemo(() => {
     return ledgerList.filter(po => {
       
@@ -295,7 +334,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     });
   }, [ledgerList, selectedProjectFilter, selectedTimeFilter, selectedPMFilter, searchQuery, currentUser, canViewAll]);
 
-  // 🎯 DYNAMIC ANALYTICS
   const analyticsMetrics = useMemo(() => {
     let totalSpend = 0;
     let reimbursableTotal = 0;
@@ -323,11 +361,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     return { totalSpend, reimbursableTotal, nonReimbursableTotal, reimbursablePercentage, nonReimbursablePercentage, uniqueSitesCount: projectCodes.size };
   }, [filteredLedger]);
 
-  // Dropdown Option Generators
   const uniqueProjectFilterOptions = useMemo(() => ['ALL', ...new Set(ledgerList.map(po => po.project_code))], [ledgerList]);
   const uniquePMOptions = useMemo(() => ['ALL', ...new Set(ledgerList.map(po => po.project_manager).filter(pm => pm && pm !== "Pending / N/A"))], [ledgerList]);
 
-  // 🎯 EXPORT MASTER LEDGER TO EXCEL (CSV)
   const handleExportToExcel = () => {
     if (!filteredLedger || filteredLedger.length === 0) {
       alert("No records to export based on current filters.");
@@ -345,7 +381,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     const csvRows = filteredLedger.map(po => {
       const products = po.items ? po.items.map(i => i.desc).join(" | ").replace(/"/g, '""') : "N/A";
       const quantities = po.items ? po.items.map(i => i.qty).join(" | ") : "0";
-      
       const balance = Math.max(0, po.grand_total - po.disbursed_amount);
 
       return [
@@ -403,8 +438,121 @@ export default function MasterPOLedgerDesk({ currentUser }) {
         </div>
       )}
 
-      {/* SECTION VIEW A: DOCUMENT PREVIEW */}
-      {selectedPoForView ? (
+      {/* HEADER SECTION WITH 🎯 TAB NAVIGATION */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
+        <div>
+          <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Master PO & Spend Ledger</h1>
+          <p className="text-sm text-slate-500 font-medium mt-1">Track all authorized purchases, monitor deliveries, and renew expiring contracts.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
+          <Button 
+            variant={activeMasterTab === 'ledger' ? 'primary' : 'ghost'} 
+            onClick={() => setActiveMasterTab('ledger')} 
+            className="text-[11px] md:text-xs py-2 px-3 flex-1 md:flex-none whitespace-nowrap"
+          >
+            <Wallet size={14} className="mr-1.5 inline" /> <span>Master Spend Ledger</span>
+          </Button>
+          <Button 
+            variant={activeMasterTab === 'renewals' ? 'primary' : 'ghost'} 
+            onClick={() => setActiveMasterTab('renewals')} 
+            className="text-[11px] md:text-xs py-2 px-3 flex-1 md:flex-none whitespace-nowrap"
+          >
+            <RefreshCw size={14} className="mr-1.5 inline" /> 
+            <span>Active Contracts & Renewals {expiringContracts.length > 0 && <span className="ml-1 bg-rose-500 text-white px-1.5 py-0.5 rounded-full text-[9px]">{expiringContracts.length}</span>}</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* CONDITIONAL RENDERING FOR THE 3 TABS */}
+      {activeMasterTab === 'renewals' ? (
+        
+        /* 🎯 TAB 2: ACTIVE CONTRACTS & RENEWALS DASHBOARD */
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-indigo-50 border border-indigo-200 p-5 rounded-xl">
+            <h2 className="font-black text-indigo-900 flex items-center gap-2"><RefreshCw size={18}/> Contract Expiry Monitor</h2>
+            <p className="text-sm text-indigo-700 mt-1">Displays recurring leases (Vehicles, Accommodation, Subscriptions) expiring in the next 45 days.</p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {expiringContracts.length === 0 ? (
+              <Card className="p-12 text-center text-slate-400 border-dashed border-2 col-span-full">
+                No active contracts are expiring within the next 45 days.
+              </Card>
+            ) : (
+              expiringContracts.map((contract) => {
+                const isCritical = contract.days_remaining <= 15;
+                return (
+                  <Card key={contract.po_number} className={`p-0 overflow-hidden border-2 ${isCritical ? 'border-rose-300' : 'border-amber-200'}`}>
+                    <div className={`p-3 text-white flex justify-between items-center ${isCritical ? 'bg-rose-600' : 'bg-amber-500'}`}>
+                      <span className="font-black text-xs uppercase tracking-wider flex items-center gap-1.5">
+                        <AlertTriangle size={14}/> {isCritical ? "CRITICAL: Expiring Very Soon" : "Action Required: Expiring Soon"}
+                      </span>
+                      <span className="font-bold text-sm">{contract.days_remaining} Days Left</span>
+                    </div>
+                    <div className="p-5 space-y-4">
+                      <div>
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="font-black text-[#2c2a57] font-mono">{contract.po_number}</span>
+                          <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded uppercase">{contract.category}</span>
+                        </div>
+                        <p className="text-sm font-bold text-slate-800">{contract.project_name}</p>
+                        <p className="text-xs text-slate-500 truncate mt-0.5">Vendor: {contract.vendor_name}</p>
+                      </div>
+
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <span className="text-[9px] font-bold uppercase text-slate-400 block">Current Expiry Date</span>
+                          <span className={`font-black ${isCritical ? 'text-rose-600' : 'text-slate-800'}`}>{contract.end_date}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] font-bold uppercase text-slate-400 block">Monthly Run Rate</span>
+                          <span className="font-bold text-slate-800">₹{contract.monthly_rate.toLocaleString('en-IN')}</span>
+                        </div>
+                      </div>
+
+                      {/* Renewal Form */}
+                      {isManagerOrDirector && (
+                        <div className="pt-2 border-t border-slate-100 space-y-3">
+                          <p className="text-[10px] font-black uppercase text-indigo-600 tracking-wider">Execute Renewal Extension</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input 
+                              type="number" 
+                              placeholder="Months to Add (e.g. 6)" 
+                              value={renewalForm[contract.po_number]?.months || ''}
+                              onChange={(e) => setRenewalForm(prev => ({...prev, [contract.po_number]: {...prev[contract.po_number], months: e.target.value}}))}
+                            />
+                            <Input 
+                              type="date" 
+                              label="New End Date"
+                              value={renewalForm[contract.po_number]?.endDate || ''}
+                              onChange={(e) => setRenewalForm(prev => ({...prev, [contract.po_number]: {...prev[contract.po_number], endDate: e.target.value}}))}
+                            />
+                          </div>
+                          <Input 
+                            placeholder="Reason for extension / performance remarks..." 
+                            value={renewalForm[contract.po_number]?.remarks || ''}
+                            onChange={(e) => setRenewalForm(prev => ({...prev, [contract.po_number]: {...prev[contract.po_number], remarks: e.target.value}}))}
+                          />
+                          <Button 
+                            variant="primary" 
+                            className="w-full text-xs py-2 bg-indigo-600 hover:bg-indigo-700"
+                            onClick={() => handleRenewSubmit(contract.po_number)}
+                          >
+                            Confirm Extension & Increase Cap
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+      ) : selectedPoForView ? (
+        
+        /* 🎯 TAB 3: DOCUMENT PREVIEW (Sub-view of Ledger) */
         <div className="space-y-4 animate-in fade-in duration-200 pb-10">
           <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <button onClick={() => setSelectedPoForView(null)} className="flex items-center space-x-2 text-sm font-bold text-slate-500 hover:text-[#2c2a57] transition-colors">
@@ -474,19 +622,14 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             </div>
           </div>
         </div>
+
       ) : (
 
-        /* SECTION VIEW B: MAIN SHEET INTERFACE */
-        <>
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
-            <div>
-              <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Master PO & Spend Ledger</h1>
-              <p className="text-sm text-slate-500 font-medium">Track all authorized purchases, monitor deliveries, and review financial payments.</p>
-            </div>
-          </div>
-
+        /* 🎯 TAB 1: MASTER SPEND LEDGER */
+        <div className="animate-in fade-in duration-300">
+          
           {/* 📊 ANALYTICS CARDS */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
             <Card className="p-4 flex items-center space-x-4 border-l-4 border-emerald-500 bg-white shadow-2xs">
               <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600"><Landmark size={20} /></div>
               <div>
@@ -528,7 +671,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
           </div>
 
           {/* 🔍 SEARCH & FILTERS */}
-          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 mb-6">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
               <input 
@@ -675,7 +818,18 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                         </div>
 
                         <div className="space-y-2">
-                          <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Ordered Items</span>
+                          <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider flex justify-between items-center">
+                            Ordered Items
+                            {/* 🎯 EARLY CLOSE BUTTON MOBILE */}
+                            {isManagerOrDirector && ['VEHICLE', 'ACCOMMODATION', 'SUBSCRIPTION'].includes(po.category) && po.status !== 'Contract Terminated & Closed' && (
+                              <button 
+                                onClick={() => handleTruncatePO(po.po_number)}
+                                className="text-[9px] bg-rose-50 text-rose-600 border border-rose-200 px-2 py-1 rounded flex items-center gap-1 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer"
+                              >
+                                <Scissors size={10} /> Truncate Contract
+                              </button>
+                            )}
+                          </span>
                           <div className="flex flex-col gap-2">
                             {(po.items || []).map((item, idx) => (
                               <div key={idx} className="bg-white border border-slate-200 p-2.5 rounded-lg flex justify-between items-center text-xs shadow-3xs">
@@ -690,10 +844,10 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                           <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Payment History</span>
                           <div className="flex flex-col gap-2">
                             {(rowLogs[po.po_number] || [])
-                              .filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"))
+                              .filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment") || l.action_taken.includes("Closure") || l.action_taken.includes("Renewed"))
                               .map((log, idx) => (
-                                <div key={idx} className="bg-white p-2.5 border border-slate-200 rounded-lg text-[10px] shadow-3xs">
-                                  <p className="font-bold text-slate-800">{log.remarks.split(' | ')[0]}</p>
+                                <div key={idx} className={`p-2.5 border rounded-lg text-[10px] shadow-3xs ${log.action_taken.includes("Closure") ? "bg-rose-50 border-rose-200" : log.action_taken.includes("Renewed") ? "bg-indigo-50 border-indigo-200" : "bg-white border-slate-200"}`}>
+                                  <p className={`font-bold ${log.action_taken.includes("Closure") ? "text-rose-900" : log.action_taken.includes("Renewed") ? "text-indigo-900" : "text-slate-800"}`}>{log.remarks.split(' | ')[0]}</p>
                                   <p className="text-[9px] text-slate-400 mt-1 font-mono">{log.timestamp.split(' ')[0]}</p>
                                   {log.remarks.includes('Proof File:') && (
                                     <button type="button" onClick={() => handlePreviewFile(log.remarks.split('Proof File: ')[1], `Bank Receipt: ${po.po_number}`)} className="mt-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded inline-flex items-center gap-1 font-bold transition-colors">
@@ -1016,18 +1170,18 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                     </div>
                                     <div className="flex flex-col gap-2">
                                       {(rowLogs[po.po_number] || [])
-                                        .filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment") || l.action_taken.includes("Closure"))
+                                        .filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment") || l.action_taken.includes("Closure") || l.action_taken.includes("Renewed"))
                                         .map((log, idx) => {
                                           const logText = log.remarks.split(' | Proof')[0];
                                           const isFinal = logText.toLowerCase().includes("final") || logText.toLowerCase().includes("100%") || logText.toLowerCase().includes("closure");
                                           
                                           return (
-                                            <div key={idx} className={`p-3 border rounded-xl shadow-3xs flex flex-col gap-2 ${log.action_taken.includes("Closure") ? "bg-rose-50 border-rose-200" : "bg-white border-slate-200"}`}>
+                                            <div key={idx} className={`p-3 border rounded-xl shadow-3xs flex flex-col gap-2 ${log.action_taken.includes("Closure") ? "bg-rose-50 border-rose-200" : log.action_taken.includes("Renewed") ? "bg-indigo-50 border-indigo-200" : "bg-white border-slate-200"}`}>
                                               <div className="flex justify-between items-start">
                                                 <div className="flex gap-2">
-                                                  <span className={`mt-1 h-2 w-2 rounded-full shrink-0 ${isFinal ? (log.action_taken.includes("Closure") ? 'bg-rose-500' : 'bg-emerald-500') : 'bg-amber-400'}`}></span>
+                                                  <span className={`mt-1 h-2 w-2 rounded-full shrink-0 ${isFinal ? (log.action_taken.includes("Closure") ? 'bg-rose-500' : 'bg-emerald-500') : log.action_taken.includes("Renewed") ? 'bg-indigo-500' : 'bg-amber-400'}`}></span>
                                                   <div>
-                                                    <p className={`font-bold text-xs leading-snug ${log.action_taken.includes("Closure") ? "text-rose-900" : "text-slate-800"}`}>{logText}</p>
+                                                    <p className={`font-bold text-xs leading-snug ${log.action_taken.includes("Closure") ? "text-rose-900" : log.action_taken.includes("Renewed") ? "text-indigo-900" : "text-slate-800"}`}>{logText}</p>
                                                     <p className="text-[10px] font-mono text-slate-400 mt-1">Date: {log.timestamp.split(' ')[0]} • Exec: {log.user_name}</p>
                                                   </div>
                                                 </div>
@@ -1062,7 +1216,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
               </table>
             </div>
           </Card>
-        </>
+        </div>
       )}
     </div>
   );
