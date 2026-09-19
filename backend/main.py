@@ -94,6 +94,9 @@ class DirectPOItemRow(BaseModel):
     special_terms: Optional[str] = ""
     quality_remarks: Optional[str] = ""
     file_url: Optional[str] = ""
+    # 🎯 NEW: Financial Offset & Trigger Constraints
+    security_deposit_amount: Optional[float] = 0.0
+    billing_trigger_date: Optional[int] = 5
 
 class DirectPOPayload(BaseModel):
     project_code: str
@@ -155,6 +158,9 @@ class QuotationRowItem(BaseModel):
     contract_tenure_months: Optional[int] = 1
     monthly_rate: Optional[float] = 0.0
     approved_spending_cap: Optional[float] = 0.0
+    # 🎯 NEW: Financial Offset & Trigger Constraints
+    security_deposit_amount: Optional[float] = 0.0
+    billing_trigger_date: Optional[int] = 5
 
 class SubmitQuotationsPayload(BaseModel):
     quotations: List[QuotationRowItem]
@@ -309,7 +315,10 @@ def raise_direct_manager_purchase_order(
             special_terms=row.special_terms,
             quality_remarks=row.quality_remarks,
             file_url=row.file_url,
-            is_selected=True  
+            is_selected=True,
+            # 🎯 Add explicit recurring variables for Direct POs too
+            security_deposit_amount=getattr(row, 'security_deposit_amount', 0.0),
+            billing_trigger_date=getattr(row, 'billing_trigger_date', 5)
         )
         db.add(db_quote)
         
@@ -535,7 +544,10 @@ def attach_vendor_quotations(
             billing_cycle=quote.billing_cycle,
             contract_tenure_months=quote.contract_tenure_months,
             monthly_rate=quote.monthly_rate,
-            approved_spending_cap=quote.approved_spending_cap
+            approved_spending_cap=quote.approved_spending_cap,
+            # 🎯 NEW: Financial Offset & Trigger Bindings
+            security_deposit_amount=getattr(quote, 'security_deposit_amount', 0.0),
+            billing_trigger_date=getattr(quote, 'billing_trigger_date', 5)
         )
         db.add(db_quote)
         
@@ -1432,12 +1444,47 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             "payment_remark": getattr(po_obj, 'payment_remark', '') or '',
             "payment_advice_url": getattr(po_obj, 'payment_advice_url', None),
             "disbursed_amount": float(getattr(po_obj, 'disbursed_amount', 0) or 0),
-            # 🎯 GST STATUS INJECTION
             "gst_status": getattr(po_obj, 'gst_status', 'Pending') or 'Pending',
             "gst_clearance_date": getattr(po_obj, 'gst_clearance_date', 'N/A') or 'N/A',
-            "gst_verified_by": getattr(po_obj, 'gst_verified_by', 'N/A') or 'N/A'
+            "gst_verified_by": getattr(po_obj, 'gst_verified_by', 'N/A') or 'N/A',
+            
+            # 🎯 NEW: Financial Offset & Tracking Deliverables
+            "is_recurring": getattr(primary_quote, 'is_recurring', False) if primary_quote else False,
+            "security_deposit_amount": float(getattr(primary_quote, 'security_deposit_amount', 0) or 0),
+            "monthly_rate": float(getattr(primary_quote, 'monthly_rate', getattr(primary_quote, 'unit_price', 0)) or 0),
+            "contract_start_date": str(getattr(primary_quote, 'contract_start_date', '')) if primary_quote and getattr(primary_quote, 'contract_start_date', None) else '',
+            "contract_end_date": str(getattr(primary_quote, 'contract_end_date', '')) if primary_quote and getattr(primary_quote, 'contract_end_date', None) else '',
+            "billing_trigger_date": int(getattr(primary_quote, 'billing_trigger_date', 5) or 5)
         })
     return response
+
+class UpdateBillingDatePayload(BaseModel):
+    user_name: str
+    billing_trigger_date: int
+
+@app.put("/api/purchase-orders/{po_number}/billing-date")
+def update_po_billing_date(po_number: str, payload: UpdateBillingDatePayload, db: Session = Depends(get_db)):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.po_number == po_number).first()
+    if not po: raise HTTPException(status_code=404, detail="Purchase Order not found.")
+    
+    winning_quote = db.query(models.Quotation).filter(
+        models.Quotation.ticket_number == po.ticket_number, 
+        models.Quotation.is_selected == True
+    ).first()
+    
+    if not winning_quote: raise HTTPException(status_code=404, detail="Winning quotation not found.")
+    
+    old_date = getattr(winning_quote, 'billing_trigger_date', 5)
+    winning_quote.billing_trigger_date = payload.billing_trigger_date
+    
+    db.add(models.TicketHistory(
+        ticket_number=po.ticket_number,
+        user_name=payload.user_name,
+        action_taken="Billing Trigger Date Updated",
+        remarks=f"Billing cycle shifted from the {old_date}th to the {payload.billing_trigger_date}th of the month."
+    ))
+    db.commit()
+    return {"message": f"Billing date successfully updated to the {payload.billing_trigger_date}th."}
 
 @app.put("/api/purchase-orders/{po_number}/invoice")
 async def update_po_invoice_details(
@@ -2109,15 +2156,17 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
             "tax_invoice_no": getattr(po_obj, 'tax_invoice_no', '') or '' if po_obj else '',
             "tax_invoice_date": getattr(po_obj, 'tax_invoice_date', '') or '' if po_obj else '',
             "tax_invoice_url": getattr(po_obj, 'tax_invoice_url', None) if po_obj else None,
-            "utr_no": getattr(po_obj, 'utr_no', '') or '',
-            "payment_date": getattr(po_obj, 'payment_date', '') or '',
-            "payment_remark": getattr(po_obj, 'payment_remark', '') or '',
-            "payment_advice_url": getattr(po_obj, 'payment_advice_url', None),
-            "disbursed_amount": float(getattr(po_obj, 'disbursed_amount', 0) or 0),
-            # 🎯 GST STATUS INJECTION
+            "utr_no": getattr(po_obj, 'utr_no', '') or '' if po_obj else '',
+            "payment_date": getattr(po_obj, 'payment_date', '') or '' if po_obj else '',
+            "payment_remark": getattr(po_obj, 'payment_remark', '') or '' if po_obj else '',
             "gst_status": getattr(po_obj, 'gst_status', 'Pending') or 'Pending',
-            "gst_clearance_date": getattr(po_obj, 'gst_clearance_date', 'N/A') or 'N/A',
-            "gst_verified_by": getattr(po_obj, 'gst_verified_by', 'N/A') or 'N/A'
+            # 🎯 NEW: Financial Offset & Tracking Deliverables
+            "is_recurring": getattr(primary_quote, 'is_recurring', False) if primary_quote else False,
+            "security_deposit_amount": float(getattr(primary_quote, 'security_deposit_amount', 0) or 0),
+            "monthly_rate": float(getattr(primary_quote, 'monthly_rate', getattr(primary_quote, 'unit_price', 0)) or 0),
+            "contract_start_date": str(getattr(primary_quote, 'contract_start_date', '')) if primary_quote and getattr(primary_quote, 'contract_start_date', None) else '',
+            "contract_end_date": str(getattr(primary_quote, 'contract_end_date', '')) if primary_quote and getattr(primary_quote, 'contract_end_date', None) else '',
+            "billing_trigger_date": int(getattr(primary_quote, 'billing_trigger_date', 5) or 5)
         })
         
     return response
@@ -2130,7 +2179,7 @@ async def process_po_disbursement(
     payment_date: str = Form(""),
     payment_remark: str = Form(""),
     disbursed_amount: float = Form(0.0),
-    tds_amount: float = Form(0.0), # 🎯 NEW: Accounts TDS Deduction Input
+    tds_amount: float = Form(0.0), 
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
@@ -2146,7 +2195,7 @@ async def process_po_disbursement(
     grand_total = float(sum((q.total_amount or 0) for q in winning_quotes)) if winning_quotes else 0.0
     previous_disbursed = float(getattr(po, 'disbursed_amount', 0) or 0)
     
-    # 🎯 NEW MATH: Total offsets = Base Bank Transfer + Any TDS Deducted by Accounts
+    # Total offsets = Base Bank Transfer + Any TDS Deducted by Accounts
     new_total_disbursed = previous_disbursed + float(disbursed_amount) + float(tds_amount)
     po.disbursed_amount = new_total_disbursed
     
@@ -2178,7 +2227,7 @@ async def process_po_disbursement(
     if ticket:
         remaining_balance = grand_total - new_total_disbursed
         
-        # 🎯 Adjust log message to clearly denote the TDS withheld by Accounts
+        # Adjust log message to clearly denote the TDS withheld by Accounts
         if remaining_balance > 1.0:
             ticket.status = "Partially Disbursed"
             log_msg = f"Partial Payment UTR {utr_no} logged (Bank Transfer: ₹{float(disbursed_amount):,.2f} | TDS Deducted: ₹{float(tds_amount):,.2f}). Total Disbursed: ₹{new_total_disbursed:,.2f} / ₹{grand_total:,.2f}. Outstanding Balance: ₹{remaining_balance:,.2f}."
@@ -2614,9 +2663,16 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
         else:
             non_reimbursable_spend += amount
 
-        # Active Monthly Lease Run-Rate
-        if getattr(quote, 'is_recurring', False) and ticket.status not in closed_statuses:
-            active_monthly_spend += float(quote.monthly_rate or 0)
+        # 🎯 FIX: Active Monthly Lease Run-Rate Logic
+        is_recurring_ticket = getattr(quote, 'is_recurring', False) or (ticket.category in ["VEHICLE", "ACCOMMODATION", "SUBSCRIPTION"])
+        inactive_lease_statuses = [
+            "Pending Sourcing", "Pending PM Vetting", "Vetting Active", "Awaiting Coordinator Sign-Off",
+            "Pending Project Manager", "Pending Director", "Rejected", "Contract Terminated & Closed"
+        ]
+        
+        if is_recurring_ticket and ticket.status not in inactive_lease_statuses:
+            m_rate = float(quote.monthly_rate or quote.unit_price or 0)
+            active_monthly_spend += m_rate
 
         # Category Distribution
         cat_key = (ticket.category or "GOODS").upper()

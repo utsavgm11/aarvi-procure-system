@@ -5,7 +5,7 @@ import {
   Landmark, Search, Calendar, FileText, UploadCloud, CheckCircle2, 
   Clock, ExternalLink, Paperclip, ShieldCheck, ArrowRight, X, Building2,
   Filter, CheckSquare, Download, Wallet, AlertCircle, Printer, ChevronDown, ChevronUp,
-  DollarSign, Calculator
+  DollarSign, Calculator, AlertOctagon, Repeat
 } from 'lucide-react';
 import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
 
@@ -22,13 +22,13 @@ export default function AccountsDesk({ currentUser }) {
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' or 'history'
   const [selectedPo, setSelectedPo] = useState(null);
   
-  // 🎯 Payment Ledger Expansion State
+  // Payment Ledger Expansion State
   const [expandedRows, setExpandedRows] = useState({});
   const [rowLogs, setRowLogs] = useState({});
 
-  // 🎯 Modals State
-  const [previewDoc, setPreviewDoc] = useState(null); // For Cloudinary PDFs/Images
-  const [selectedSystemPo, setSelectedSystemPo] = useState(null); // For Live System PO HTML
+  // Modals State
+  const [previewDoc, setPreviewDoc] = useState(null); 
+  const [selectedSystemPo, setSelectedSystemPo] = useState(null); 
   const [poItems, setPoItems] = useState([]);
 
   // Form States
@@ -36,7 +36,7 @@ export default function AccountsDesk({ currentUser }) {
   const [paymentDate, setPaymentDate] = useState('');
   const [paymentRemark, setPaymentRemark] = useState('');
   const [disbursedAmount, setDisbursedAmount] = useState(0);
-  const [tdsAmount, setTdsAmount] = useState(''); // 🎯 NEW: TDS State
+  const [tdsAmount, setTdsAmount] = useState(''); 
   const [paymentFile, setPaymentFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState(null);
@@ -61,12 +61,10 @@ export default function AccountsDesk({ currentUser }) {
     return () => { isMounted = false; clearTimeout(timer); };
   }, [fetchAccountsOrders]);
 
-  // 🎯 HELPER: Fetch History Log when expanding a row to see multi-payment ledger details
   const toggleExpandRow = async (poNumber, ticketNumber) => {
     const isCurrentlyExpanded = !!expandedRows[poNumber];
     setExpandedRows(prev => ({ ...prev, [poNumber]: !isCurrentlyExpanded }));
     
-    // Only fetch if opening and logs don't exist yet
     if (!isCurrentlyExpanded && !rowLogs[poNumber]) {
       try {
         const res = await axios.get(`${API_BASE_URL}/requisitions/${ticketNumber}/history`);
@@ -77,7 +75,6 @@ export default function AccountsDesk({ currentUser }) {
     }
   };
 
-  // 🎯 HELPER: Smart calculation of payable amount based on text terms (e.g. "50% Advance")
   const calculatePayableNow = (termsStr, grandTotal) => {
     if (!termsStr) return grandTotal;
     const match = termsStr.match(/(\d+)%/);
@@ -90,14 +87,40 @@ export default function AccountsDesk({ currentUser }) {
     return grandTotal;
   };
 
-  // 🎯 HELPER: Handles Opening Cloudinary Documents in Modal
+  // 🎯 NEW HELPER: Mathematical Offset Engine & Billing Logic
+  const getLeaseMetrics = (po) => {
+    if (!po.is_recurring || !po.contract_end_date) return null;
+    
+    const end = new Date(po.contract_end_date);
+    const today = new Date();
+    
+    // Calculate precise remaining months
+    const monthsLeft = Math.max(0, (end.getFullYear() - today.getFullYear()) * 12 + (end.getMonth() - today.getMonth()));
+    
+    // Offset Threshold: Security Deposit / Monthly Rent
+    const deposit = parseFloat(po.security_deposit_amount) || 0;
+    const rate = parseFloat(po.monthly_rate) || 0;
+    const threshold = rate > 0 ? Math.ceil(deposit / rate) : 0;
+    
+    // Offset active if remaining tenure matches or is less than the deposit threshold
+    const isOffsetPhase = deposit > 0 && monthsLeft <= threshold && threshold > 0;
+    
+    // Billing Cycle Alerts
+    const triggerDay = parseInt(po.billing_trigger_date) || 5;
+    const currentDay = today.getDate();
+    const daysUntilDue = triggerDay - currentDay;
+    const isDueSoon = daysUntilDue >= 0 && daysUntilDue <= 3;
+    const isOverdue = daysUntilDue < 0;
+
+    return { monthsLeft, threshold, isOffsetPhase, triggerDay, daysUntilDue, isDueSoon, isOverdue };
+  };
+
   const handlePreview = (url, title) => {
     if (!url) return;
     let fullUrl = url.startsWith('/') ? `https://aarvi-procure-system.onrender.com${url}` : url;
     setPreviewDoc({ url: fullUrl, title });
   };
 
-  // 🎯 HELPER: Fetches and Opens the Live System Generated PO
   const openSystemPoView = async (po) => {
     setSelectedSystemPo(po);
     try {
@@ -111,18 +134,26 @@ export default function AccountsDesk({ currentUser }) {
 
   const openDisbursementModal = (po) => {
     setSelectedPo(po);
-    setUtrNo('');
-    // Ensure we only grab the date portion YYYY-MM-DD
-    setPaymentDate(new Date().toISOString().split('T')[0]);
-    setPaymentRemark('');
-    setTdsAmount(''); // 🎯 Reset TDS amount
+    const metrics = getLeaseMetrics(po);
     
-    // Auto-calculate the amount defaulting to remaining balance
-    const calculatedPayable = (po.remaining_balance && po.remaining_balance > 0) 
+    let defaultUtr = '';
+    let defaultRemark = '';
+    let defaultAmount = (po.remaining_balance && po.remaining_balance > 0) 
       ? po.remaining_balance 
       : calculatePayableNow(po.payment_terms, po.grand_total);
-      
-    setDisbursedAmount(calculatedPayable);
+
+    // 🎯 IF DEPOSIT OFFSET PHASE IS ACTIVE -> Auto-fill the adjustment data
+    if (metrics?.isOffsetPhase) {
+      defaultUtr = `OFFSET-ADJ-${new Date().getTime().toString().slice(-6)}`;
+      defaultRemark = `Automatic rent offset logged against ₹${po.security_deposit_amount.toLocaleString('en-IN')} Security Deposit holding.`;
+      defaultAmount = po.monthly_rate || defaultAmount;
+    }
+
+    setUtrNo(defaultUtr);
+    setPaymentDate(new Date().toISOString().split('T')[0]);
+    setPaymentRemark(defaultRemark);
+    setTdsAmount(''); 
+    setDisbursedAmount(defaultAmount);
     setPaymentFile(null);
     setAlert(null);
   };
@@ -132,35 +163,33 @@ export default function AccountsDesk({ currentUser }) {
       setAlert({ type: 'error', message: "Bank UTR / Transaction Reference No. is mandatory." });
       return;
     }
-
-    // 🎯 NEW MATH: Bank Transfer + TDS
+    
     const bankTransfer = parseFloat(disbursedAmount) || 0;
     const taxDeducted = parseFloat(tdsAmount) || 0;
     const totalCleared = bankTransfer + taxDeducted;
-
+    
     if (totalCleared <= 0) {
       setAlert({ type: 'error', message: "Payment clearance amount must be greater than zero." });
       return;
     }
-
-    // 🎯 Safeguard: Prevent overpaying
+    
     if (totalCleared > (selectedPo.remaining_balance || selectedPo.grand_total) + 1) {
       setAlert({ type: 'error', message: "Error: The total cleared amount (Transfer + TDS) exceeds the remaining PO balance!" });
       return;
     }
-
+    
     setSubmitting(true);
     const formData = new FormData();
     formData.append('utr_no', utrNo);
     formData.append('payment_date', paymentDate);
     formData.append('payment_remark', paymentRemark);
-    formData.append('disbursed_amount', bankTransfer); // Actual Money Sent
-    formData.append('tds_amount', taxDeducted); // 🎯 TDS Amount
+    formData.append('disbursed_amount', bankTransfer); 
+    formData.append('tds_amount', taxDeducted); 
     
     if (paymentFile) {
       formData.append('file', paymentFile);
     }
-
+    
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${selectedPo.po_number}/disbursement`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
@@ -187,7 +216,6 @@ export default function AccountsDesk({ currentUser }) {
         po.vendor_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         po.project_name.toLowerCase().includes(searchQuery.toLowerCase());
       
-      // Include "Partially Disbursed" in pending tab
       const matchesTab = activeTab === 'pending' 
         ? (po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed')
         : (po.status === 'Dispatched' || po.status === 'Partially Delivered' || po.status === 'Material Discrepancy Raised' || po.status === 'Delivered - GRN Logged');
@@ -201,7 +229,7 @@ export default function AccountsDesk({ currentUser }) {
   return (
     <div className="space-y-6 relative pb-10 sm:px-2 md:px-4 lg:px-0">
       
-      {/* 🎯 1. SMOOTH INLINE DOCUMENT PREVIEW MODAL */}
+      {/* 1. SMOOTH INLINE DOCUMENT PREVIEW MODAL */}
       {previewDoc && (
         <div 
           className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
@@ -237,7 +265,7 @@ export default function AccountsDesk({ currentUser }) {
         </div>
       )}
 
-      {/* 🎯 2. LIVE SYSTEM PO VIEWER MODAL */}
+      {/* 2. LIVE SYSTEM PO VIEWER MODAL */}
       {selectedSystemPo && (
         <div 
           className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
@@ -247,7 +275,6 @@ export default function AccountsDesk({ currentUser }) {
             className="bg-slate-100 rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden relative"
             onClick={(e) => e.stopPropagation()} 
           >
-            {/* Modal Header */}
             <div className="bg-[#2c2a57] p-4 text-white flex justify-between items-center shrink-0 z-10 print:hidden">
               <div className="flex items-center gap-2">
                 <FileText size={18} className="text-indigo-300" />
@@ -262,12 +289,8 @@ export default function AccountsDesk({ currentUser }) {
                 </button>
               </div>
             </div>
-            
-            {/* Scrollable Document Area */}
             <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
               <div className="bg-white p-8 md:p-12 mx-auto border border-slate-200 shadow-sm max-w-4xl text-sm text-slate-800 font-sans print:shadow-none print:border-none print:p-0">
-                
-                {/* Branding Header */}
                 <div className="w-full text-xs text-slate-700 font-sans relative avoid-break">
                   <div className="w-full bg-white relative z-10 mb-1">
                     <img src={Letterhead} alt="Aarvi Letterhead" className="w-full h-auto object-contain select-none" onError={(e) => e.target.style.display='none'} />
@@ -280,8 +303,6 @@ export default function AccountsDesk({ currentUser }) {
                     Purchase Order
                   </h1>
                 </div>
-
-                {/* Vendor & Project Info */}
                 <div className="grid grid-cols-2 gap-12 my-8">
                   <div>
                     <h3 className="text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-1">To Vendor</h3>
@@ -295,8 +316,6 @@ export default function AccountsDesk({ currentUser }) {
                     <p className="text-slate-600 text-xs mt-1 font-mono">Project Code: {selectedSystemPo.project_code}</p>
                   </div>
                 </div>
-
-                {/* Items Table */}
                 <table className="w-full text-left mb-6 border-collapse border border-slate-400">
                   <thead>
                     <tr className="bg-slate-50 text-slate-700 text-[10px] uppercase tracking-wider border-b border-slate-400">
@@ -335,7 +354,7 @@ export default function AccountsDesk({ currentUser }) {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-extrabold text-[#2c2a57] tracking-tight">Accounts & Disbursement Desk</h1>
-          <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">Verify Proforma Invoices, execute partial or full bank transfers, and log receipts.</p>
+          <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">Verify Proforma Invoices, execute bank transfers, and manage recurring rent offsets.</p>
         </div>
         <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
           <Button 
@@ -405,8 +424,10 @@ export default function AccountsDesk({ currentUser }) {
             const isPartiallyPaid = po.status === 'Partially Disbursed';
             const isExpanded = !!expandedRows[po.po_number];
             const logs = rowLogs[po.po_number] || [];
-            // Filter logs to find payment related entries
             const paymentLogs = logs.filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"));
+            
+            // 🎯 NEW: Offset Engine Variables
+            const metrics = getLeaseMetrics(po);
 
             return (
               <Card key={po.po_number} className={`p-4 space-y-4 bg-white border-slate-200 ${isPartiallyPaid ? 'border-l-4 border-l-amber-500' : ''}`}>
@@ -447,6 +468,19 @@ export default function AccountsDesk({ currentUser }) {
                       <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/60">
                         <span className="font-bold text-rose-600">Balance Pending:</span>
                         <span className="font-mono font-black text-rose-600 text-sm">₹{(po.remaining_balance || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+                    
+                    {/* 🎯 NEW: RECURRING BILLING INFO (Mobile) */}
+                    {metrics && (
+                      <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
+                        <div className="flex justify-between text-[10px] text-purple-700 font-bold">
+                          <span>Billing Trigger: {metrics.triggerDay}{metrics.triggerDay === 1 ? 'st' : metrics.triggerDay === 2 ? 'nd' : metrics.triggerDay === 3 ? 'rd' : 'th'}</span>
+                          <span>Left: {metrics.monthsLeft} Months</span>
+                        </div>
+                        {metrics.deposit > 0 && (
+                          <div className="text-[9px] text-purple-500 font-bold mt-1 uppercase tracking-tight">Deposit Held: ₹{metrics.deposit.toLocaleString()}</div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -521,11 +555,26 @@ export default function AccountsDesk({ currentUser }) {
                   </div>
                 </div>
 
+                {/* 🎯 ACCOUNTS ACTION LAYER (Mobile) */}
                 <div className="pt-2">
                   {po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed' ? (
-                    <Button variant="primary" onClick={() => openDisbursementModal(po)} className="w-full text-xs py-2 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs">
-                      {isPartiallyPaid ? "Clear Remaining Balance" : "Process Advance Payment"}
-                    </Button>
+                    <div className="space-y-2">
+                      {metrics?.isDueSoon && !metrics?.isOffsetPhase && (
+                        <div className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-1 rounded text-center animate-pulse">
+                          ⚠️ Rent Due in {metrics.daysUntilDue} Days
+                        </div>
+                      )}
+                      
+                      {metrics?.isOffsetPhase ? (
+                        <Button variant="danger" onClick={() => openDisbursementModal(po)} className="w-full text-xs py-2 bg-rose-600 hover:bg-rose-700 shadow-3xs flex items-center justify-center gap-1.5">
+                          <AlertOctagon size={14} /> Log Deposit Offset
+                        </Button>
+                      ) : (
+                        <Button variant="primary" onClick={() => openDisbursementModal(po)} className="w-full text-xs py-2 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs">
+                          {isPartiallyPaid ? "Clear Remaining Balance" : "Process Advance Payment"}
+                        </Button>
+                      )}
+                    </div>
                   ) : (
                     <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-center space-y-1">
                       <span className="text-[11px] font-bold text-emerald-700 block">Final UTR: {po.utr_no}</span>
@@ -568,9 +617,12 @@ export default function AccountsDesk({ currentUser }) {
                   const logs = rowLogs[po.po_number] || [];
                   const paymentLogs = logs.filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"));
                   
+                  // 🎯 NEW: Offset Engine Variables
+                  const metrics = getLeaseMetrics(po);
+
                   return (
                     <React.Fragment key={po.po_number}>
-                      <tr className={`hover:bg-slate-50/50 transition-colors ${isPartiallyPaid ? 'bg-amber-50/20' : ''} ${isExpanded ? 'bg-indigo-50/20' : ''}`}>
+                      <tr className={`hover:bg-slate-50/50 transition-colors ${isPartiallyPaid ? 'bg-amber-50/20' : ''} ${isExpanded ? 'bg-indigo-50/20' : ''} ${metrics?.isOffsetPhase ? 'bg-rose-50/20' : ''}`}>
                         
                         <td className="p-4 align-top">
                           <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
@@ -592,7 +644,7 @@ export default function AccountsDesk({ currentUser }) {
                           <div className="text-[10px] font-mono text-slate-500 truncate mt-0.5">{po.vendor_contact} | {po.vendor_email}</div>
                         </td>
                         
-                        {/* 🎯 FINANCIAL BREAKDOWN */}
+                        {/* 🎯 FINANCIAL BREAKDOWN & RECURRING INFO */}
                         <td className="p-4 text-right font-mono align-top bg-slate-50/30 space-y-1 border-l border-slate-100">
                           <div>
                             <span className="text-[9px] font-bold text-slate-400 uppercase block">Total Value:</span>
@@ -608,6 +660,21 @@ export default function AccountsDesk({ currentUser }) {
                             <div className="pt-1 border-t border-slate-200/60">
                               <span className="text-[9px] font-bold text-rose-500 uppercase block">Pending Balance:</span>
                               <span className="font-black text-rose-600 text-sm">₹{(po.remaining_balance || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          )}
+                          
+                          {/* 🎯 NEW: RECURRING BILLING DATA */}
+                          {metrics && (
+                            <div className={`mt-2 p-1.5 rounded text-[9px] border text-left ${metrics.isOffsetPhase ? 'bg-rose-50 border-rose-200' : 'bg-purple-50 border-purple-100'}`}>
+                              <div className={`flex justify-between font-bold mb-0.5 ${metrics.isOffsetPhase ? 'text-rose-800' : 'text-purple-800'}`}>
+                                <span>Cycle: {metrics.triggerDay}{metrics.triggerDay === 1 ? 'st' : metrics.triggerDay === 2 ? 'nd' : metrics.triggerDay === 3 ? 'rd' : 'th'} / mo</span>
+                                <span>Left: {metrics.monthsLeft} Mos</span>
+                              </div>
+                              {metrics.deposit > 0 && (
+                                <div className={`font-bold border-t pt-0.5 mt-0.5 uppercase tracking-tight ${metrics.isOffsetPhase ? 'text-rose-600 border-rose-200' : 'text-purple-600 border-purple-100'}`}>
+                                  Deposit Held: ₹{metrics.deposit.toLocaleString()}
+                                </div>
+                              )}
                             </div>
                           )}
                         </td>
@@ -644,12 +711,28 @@ export default function AccountsDesk({ currentUser }) {
                           <StatusBadge status={po.status} />
                         </td>
                         
-                        {/* Accounts Action */}
+                        {/* 🎯 ACCOUNTS ACTION & ALERTS */}
                         <td className="p-4 text-center align-top border-l border-slate-100">
                           {po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed' ? (
-                            <Button variant="primary" onClick={() => openDisbursementModal(po)} className="text-[11px] py-2 px-3 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs w-full font-bold">
-                              {isPartiallyPaid ? "Clear Remaining Balance" : "Process Advance Payment"}
-                            </Button>
+                            <div className="space-y-2">
+                              {/* Warning Alerts */}
+                              {metrics?.isDueSoon && !metrics?.isOffsetPhase && (
+                                <div className="text-[9px] uppercase tracking-wider bg-amber-100 text-amber-800 font-bold px-2 py-1 rounded animate-pulse shadow-3xs">
+                                  ⚠️ Rent Due in {metrics.daysUntilDue} Days
+                                </div>
+                              )}
+
+                              {metrics?.isOffsetPhase ? (
+                                <Button variant="danger" onClick={() => openDisbursementModal(po)} className="text-[11px] py-2 px-2 bg-rose-600 hover:bg-rose-700 shadow-3xs w-full font-bold flex flex-col items-center justify-center gap-0.5 h-auto">
+                                  <AlertOctagon size={12} className="mb-0.5" />
+                                  <span>Log Deposit Offset</span>
+                                </Button>
+                              ) : (
+                                <Button variant="primary" onClick={() => openDisbursementModal(po)} className="text-[11px] py-2 px-2 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs w-full font-bold">
+                                  {isPartiallyPaid ? "Pay Monthly / Balance" : "Process Payment"}
+                                </Button>
+                              )}
+                            </div>
                           ) : (
                             <div className="space-y-1.5 text-center flex flex-col items-center">
                               <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200 flex flex-col w-full">
@@ -675,13 +758,15 @@ export default function AccountsDesk({ currentUser }) {
                           <td colSpan="7" className="p-4 pl-12 pr-12">
                             <div className="bg-white border border-amber-200 p-4 rounded-xl shadow-3xs">
                               <div className="flex items-center space-x-2 text-[10px] font-black uppercase text-amber-600 tracking-wider mb-3">
-                                <span>Multi-Payment Audit Ledger</span>
+                                <Repeat size={14} /> <span>Multi-Payment / Offset Audit Ledger</span>
                               </div>
                               <div className="space-y-2">
                                 {paymentLogs.map((log, idx) => (
                                   <div key={idx} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100">
                                     <div className="flex flex-col">
-                                      <span className="font-bold text-slate-800">{log.remarks.split(' | ')[0]}</span>
+                                      <span className={`font-bold ${log.remarks.includes('offset') ? 'text-rose-600' : 'text-slate-800'}`}>
+                                        {log.remarks.split(' | ')[0]}
+                                      </span>
                                       <span className="text-[9px] font-mono text-slate-400 mt-0.5">Processed by {log.user_name} on {log.timestamp}</span>
                                     </div>
                                     {log.remarks.includes('Proof File:') && (
@@ -709,162 +794,184 @@ export default function AccountsDesk({ currentUser }) {
       </Card>
 
       {/* 🎯 DISBURSEMENT & TDS MODAL */}
-      {selectedPo && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
-            
-            {/* Modal Header */}
-            <div className="bg-[#2c2a57] p-4 sm:p-5 text-white flex justify-between items-center shrink-0 shadow-sm z-10">
-              <div className="flex items-center space-x-2.5">
-                <div className="bg-white/20 p-1.5 rounded-lg">
-                  <Landmark size={18} className="text-emerald-400" />
-                </div>
-                <h3 className="font-extrabold text-sm sm:text-base uppercase tracking-wider">Execute Bank Disbursement</h3>
-              </div>
-              <button onClick={() => setSelectedPo(null)} className="text-slate-300 hover:text-white bg-white/10 p-1 rounded-full transition-colors">
-                <X size={18} />
-              </button>
-            </div>
-            
-            {/* Modal Body */}
-            <div className="p-5 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar flex-1">
+      {selectedPo && (() => {
+        const metrics = getLeaseMetrics(selectedPo);
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
               
-              {alert && (
-                <div className={`p-3 rounded-lg text-xs font-bold flex items-center gap-2 ${alert.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
-                  {alert.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-                  <span>{alert.message}</span>
-                </div>
-              )}
-
-              {/* 🎯 FINANCIAL SUMMARY BANNER */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 text-xs shadow-3xs">
-                <div className="flex justify-between items-center border-b border-slate-200/60 pb-2">
-                  <span className="font-bold text-slate-500 uppercase tracking-widest text-[9px]">PO Number:</span> 
-                  <span className="font-mono font-black text-[#2c2a57] text-sm bg-white px-2 py-0.5 rounded border border-slate-200">{selectedPo.po_number}</span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-3xs flex flex-col justify-center">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase">Total PO Value</span>
-                    <span className="font-mono font-bold text-slate-800 text-sm mt-0.5">₹{selectedPo.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+              {/* Modal Header */}
+              <div className={`p-4 sm:p-5 text-white flex justify-between items-center shrink-0 shadow-sm z-10 ${metrics?.isOffsetPhase ? 'bg-rose-700' : 'bg-[#2c2a57]'}`}>
+                <div className="flex items-center space-x-2.5">
+                  <div className="bg-white/20 p-1.5 rounded-lg">
+                    {metrics?.isOffsetPhase ? <AlertOctagon size={18} className="text-rose-200" /> : <Landmark size={18} className="text-emerald-400" />}
                   </div>
-                  
-                  <div className="bg-indigo-50 p-2.5 rounded-lg border border-indigo-200 shadow-3xs flex flex-col justify-center">
-                    <span className="text-[9px] font-bold text-indigo-500 uppercase">Payment Terms</span>
-                    <span className="font-bold text-indigo-900 text-[10px] mt-0.5 line-clamp-2 leading-tight">{selectedPo.payment_terms || '100% Payable'}</span>
-                  </div>
-                  
-                  <div className="col-span-2 bg-emerald-50 border border-emerald-200 p-3 rounded-lg shadow-3xs flex justify-between items-center">
-                    <span className="text-xs font-bold text-emerald-800 uppercase">Remaining Balance Pending:</span>
-                    <span className="font-mono font-black text-emerald-700 text-lg">₹{(selectedPo.remaining_balance || selectedPo.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                  </div>
+                  <h3 className="font-extrabold text-sm sm:text-base uppercase tracking-wider">
+                    {metrics?.isOffsetPhase ? 'Execute Deposit Offset' : 'Execute Bank Disbursement'}
+                  </h3>
                 </div>
+                <button onClick={() => setSelectedPo(null)} className="text-slate-300 hover:text-white bg-white/10 p-1 rounded-full transition-colors">
+                  <X size={18} />
+                </button>
               </div>
+              
+              {/* Modal Body */}
+              <div className="p-5 sm:p-6 space-y-5 overflow-y-auto custom-scrollbar flex-1">
+                
+                {alert && (
+                  <div className={`p-3 rounded-lg text-xs font-bold flex items-center gap-2 ${alert.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
+                    {alert.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                    <span>{alert.message}</span>
+                  </div>
+                )}
 
-              {/* Form Fields & TDS Setup */}
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1 col-span-2 sm:col-span-1">
-                    <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><DollarSign size={12}/> Bank Transfer (₹) *</label>
-                    <input 
-                      type="number" step="0.01" required autoFocus
-                      value={disbursedAmount} 
-                      onChange={e => setDisbursedAmount(e.target.value)} 
-                      placeholder="0.00" 
-                      className="w-full bg-white border border-emerald-300 rounded-lg px-3 py-2 text-sm font-bold text-emerald-900 outline-none focus:border-emerald-500 focus:bg-emerald-50"
+                {/* 🛑 DEPOSIT OFFSET CRITICAL BANNER */}
+                {metrics?.isOffsetPhase && (
+                  <div className="bg-rose-50 border border-rose-300 rounded-xl p-4 flex gap-3 items-start shadow-sm mb-2">
+                    <AlertOctagon className="text-rose-600 shrink-0 mt-0.5" size={24} />
+                    <div>
+                      <h4 className="text-rose-800 font-black text-sm uppercase tracking-wider mb-1">Deposit Offset Period Active</h4>
+                      <p className="text-rose-700 text-xs font-semibold leading-relaxed">
+                        Do not release cash. Adjust this month's rent against the ₹{selectedPo.security_deposit_amount.toLocaleString('en-IN')} Security Deposit held by the vendor.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 🎯 FINANCIAL SUMMARY BANNER */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 text-xs shadow-3xs">
+                  <div className="flex justify-between items-center border-b border-slate-200/60 pb-2">
+                    <span className="font-bold text-slate-500 uppercase tracking-widest text-[9px]">PO Number:</span> 
+                    <span className="font-mono font-black text-[#2c2a57] text-sm bg-white px-2 py-0.5 rounded border border-slate-200">{selectedPo.po_number}</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-3xs flex flex-col justify-center">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase">Total PO Value</span>
+                      <span className="font-mono font-bold text-slate-800 text-sm mt-0.5">₹{selectedPo.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    
+                    <div className="bg-indigo-50 p-2.5 rounded-lg border border-indigo-200 shadow-3xs flex flex-col justify-center">
+                      <span className="text-[9px] font-bold text-indigo-500 uppercase">Payment Terms</span>
+                      <span className="font-bold text-indigo-900 text-[10px] mt-0.5 line-clamp-2 leading-tight">{selectedPo.payment_terms || '100% Payable'}</span>
+                    </div>
+                    
+                    <div className={`col-span-2 p-3 rounded-lg shadow-3xs flex justify-between items-center border ${metrics?.isOffsetPhase ? 'bg-rose-100 border-rose-300' : 'bg-emerald-50 border-emerald-200'}`}>
+                      <span className={`text-xs font-bold uppercase ${metrics?.isOffsetPhase ? 'text-rose-800' : 'text-emerald-800'}`}>Remaining Balance Pending:</span>
+                      <span className={`font-mono font-black text-lg ${metrics?.isOffsetPhase ? 'text-rose-700' : 'text-emerald-700'}`}>₹{(selectedPo.remaining_balance || selectedPo.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form Fields & TDS Setup */}
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1 col-span-2 sm:col-span-1">
+                      <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                        <DollarSign size={12}/> {metrics?.isOffsetPhase ? 'Offset Amount (₹)' : 'Bank Transfer (₹) *'}
+                      </label>
+                      <input 
+                        type="number" step="0.01" required autoFocus
+                        value={disbursedAmount} 
+                        onChange={e => setDisbursedAmount(e.target.value)} 
+                        placeholder="0.00" 
+                        className={`w-full bg-white border rounded-lg px-3 py-2 text-sm font-bold outline-none focus:ring-1 transition-colors ${metrics?.isOffsetPhase ? 'border-rose-300 text-rose-900 focus:border-rose-500 focus:bg-rose-50' : 'border-emerald-300 text-emerald-900 focus:border-emerald-500 focus:bg-emerald-50'}`}
+                      />
+                    </div>
+                    <div className="space-y-1 col-span-2 sm:col-span-1">
+                      <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><Calculator size={12}/> TDS Deducted (₹)</label>
+                      <input 
+                        type="number" step="0.01"
+                        value={tdsAmount} 
+                        onChange={e => setTdsAmount(e.target.value)} 
+                        placeholder="Tax withheld (Optional)" 
+                        className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500 focus:bg-indigo-50"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 🎯 LIVE MATH PREVIEW */}
+                  <div className="bg-slate-100 p-3 rounded-lg border border-slate-200 space-y-1.5 mt-2 mb-2">
+                    <div className="flex justify-between text-[11px] text-slate-600 font-bold">
+                      <span>Current Outstanding Balance:</span>
+                      <span className="font-mono">₹{(selectedPo.remaining_balance || selectedPo.grand_total).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div className={`flex justify-between text-[11px] font-black ${metrics?.isOffsetPhase ? 'text-rose-600' : 'text-emerald-700'}`}>
+                      <span>Total Value Cleared ({metrics?.isOffsetPhase ? 'Offset' : 'Transfer'} + TDS):</span>
+                      <span className="font-mono">- ₹{((parseFloat(disbursedAmount)||0) + (parseFloat(tdsAmount)||0)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                    </div>
+                    <div className="flex justify-between text-[12px] text-[#2c2a57] font-black pt-1 border-t border-slate-300">
+                      <span>New Outstanding Balance:</span>
+                      <span className="font-mono">₹{Math.max(0, (selectedPo.remaining_balance || selectedPo.grand_total) - ((parseFloat(disbursedAmount)||0) + (parseFloat(tdsAmount)||0))).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 mt-2">
+                    <Input 
+                      label={metrics?.isOffsetPhase ? "Adjustment Reference Number *" : "Bank UTR / Transaction Reference Number *"} 
+                      value={utrNo} 
+                      onChange={e => setUtrNo(e.target.value)} 
+                      placeholder="e.g. UTR1234567890AX" 
+                      className="font-mono text-sm uppercase"
                     />
                   </div>
-                  <div className="space-y-1 col-span-2 sm:col-span-1">
-                    <label className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1"><Calculator size={12}/> TDS Deducted (₹)</label>
-                    <input 
-                      type="number" step="0.01"
-                      value={tdsAmount} 
-                      onChange={e => setTdsAmount(e.target.value)} 
-                      placeholder="Tax withheld (Optional)" 
-                      className="w-full bg-white border border-rose-300 rounded-lg px-3 py-2 text-sm font-bold text-rose-900 outline-none focus:border-rose-500 focus:bg-rose-50"
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Input 
+                      label="Execution Date *" 
+                      type="date"
+                      required
+                      value={paymentDate} 
+                      onChange={e => setPaymentDate(e.target.value)} 
                     />
                   </div>
-                </div>
-
-                {/* 🎯 LIVE MATH PREVIEW */}
-                <div className="bg-slate-100 p-3 rounded-lg border border-slate-200 space-y-1.5 mt-2 mb-2">
-                  <div className="flex justify-between text-[11px] text-slate-600 font-bold">
-                    <span>Current Outstanding Balance:</span>
-                    <span className="font-mono">₹{(selectedPo.remaining_balance || selectedPo.grand_total).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
-                  </div>
-                  <div className="flex justify-between text-[11px] text-emerald-700 font-black">
-                    <span>Total PO Value Cleared (Transfer + TDS):</span>
-                    <span className="font-mono">- ₹{((parseFloat(disbursedAmount)||0) + (parseFloat(tdsAmount)||0)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
-                  </div>
-                  <div className="flex justify-between text-[12px] text-[#2c2a57] font-black pt-1 border-t border-slate-300">
-                    <span>New Outstanding Balance:</span>
-                    <span className="font-mono">₹{Math.max(0, (selectedPo.remaining_balance || selectedPo.grand_total) - ((parseFloat(disbursedAmount)||0) + (parseFloat(tdsAmount)||0))).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-1 mt-2">
+                  
                   <Input 
-                    label="Bank UTR / Transaction Reference Number *" 
-                    value={utrNo} 
-                    onChange={e => setUtrNo(e.target.value)} 
-                    placeholder="e.g. UTR1234567890AX" 
-                    className="font-mono text-sm uppercase"
+                    label="Notes / Ledger Remarks" 
+                    value={paymentRemark} 
+                    onChange={e => setPaymentRemark(e.target.value)} 
+                    placeholder="e.g. RTGS Payment via HDFC Bank / Offset adjusted..." 
                   />
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Input 
-                    label="Payment Execution Date *" 
-                    type="date"
-                    required
-                    value={paymentDate} 
-                    onChange={e => setPaymentDate(e.target.value)} 
-                  />
-                </div>
-                
-                <Input 
-                  label="Disbursement Notes / Payment Mode" 
-                  value={paymentRemark} 
-                  onChange={e => setPaymentRemark(e.target.value)} 
-                  placeholder="e.g. RTGS Payment via HDFC Bank / 50% Advance cleared..." 
-                />
-                
-                <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50 space-y-2">
-                  <label className="text-[10px] font-extrabold text-indigo-800 uppercase tracking-widest flex items-center gap-1.5">
-                    <Paperclip size={12} /> Attach Bank Transfer Advice (Optional)
-                  </label>
-                  <input 
-                    type="file" 
-                    accept=".pdf,.png,.jpg,.jpeg"
-                    onChange={e => setPaymentFile(e.target.files[0])}
-                    className="w-full text-xs file:mr-3 file:py-1.5 file:px-4 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:uppercase file:tracking-wider file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 bg-white border border-slate-200 rounded-lg p-1 text-slate-500 transition-all cursor-pointer shadow-3xs"
-                  />
-                  {paymentFile && (
-                    <p className="text-[10px] font-bold text-emerald-600 pt-1 flex items-center gap-1">
-                      <CheckCircle2 size={12} /> {paymentFile.name} selected.
-                    </p>
+                  
+                  {!metrics?.isOffsetPhase && (
+                    <div className="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50 space-y-2">
+                      <label className="text-[10px] font-extrabold text-indigo-800 uppercase tracking-widest flex items-center gap-1.5">
+                        <Paperclip size={12} /> Attach Bank Transfer Advice (Optional)
+                      </label>
+                      <input 
+                        type="file" 
+                        accept=".pdf,.png,.jpg,.jpeg"
+                        onChange={e => setPaymentFile(e.target.files[0])}
+                        className="w-full text-xs file:mr-3 file:py-1.5 file:px-4 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:uppercase file:tracking-wider file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 bg-white border border-slate-200 rounded-lg p-1 text-slate-500 transition-all cursor-pointer shadow-3xs"
+                      />
+                      {paymentFile && (
+                        <p className="text-[10px] font-bold text-emerald-600 pt-1 flex items-center gap-1">
+                          <CheckCircle2 size={12} /> {paymentFile.name} selected.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
-            
-            {/* Modal Footer */}
-            <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex justify-end space-x-3 shrink-0">
-              <Button variant="ghost" onClick={() => setSelectedPo(null)} disabled={submitting} className="px-5 text-xs font-bold">
-                Cancel
-              </Button>
-              <Button 
-                variant="primary" 
-                onClick={handleDisbursementSubmit} 
-                disabled={submitting || ((parseFloat(disbursedAmount)||0) + (parseFloat(tdsAmount)||0)) <= 0} 
-                className="bg-[#0b9c54] hover:bg-emerald-600 px-6 py-2 shadow-sm text-xs"
-              >
-                {submitting ? "Processing Upload..." : "Confirm & Send Funds"}
-              </Button>
+              
+              {/* Modal Footer */}
+              <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex justify-end space-x-3 shrink-0">
+                <Button variant="ghost" onClick={() => setSelectedPo(null)} disabled={submitting} className="px-5 text-xs font-bold">
+                  Cancel
+                </Button>
+                <Button 
+                  variant="primary" 
+                  onClick={handleDisbursementSubmit} 
+                  disabled={submitting || ((parseFloat(disbursedAmount)||0) + (parseFloat(tdsAmount)||0)) <= 0} 
+                  className={`px-6 py-2 shadow-sm text-xs ${metrics?.isOffsetPhase ? 'bg-rose-600 hover:bg-rose-700' : 'bg-[#0b9c54] hover:bg-emerald-600'}`}
+                >
+                  {submitting ? "Processing..." : (metrics?.isOffsetPhase ? "Log Formal Offset" : "Confirm & Send Funds")}
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
     </div>
   );

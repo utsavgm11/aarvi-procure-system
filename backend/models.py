@@ -1,6 +1,6 @@
 # backend/models.py
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, ForeignKey, Text, Date
+from sqlalchemy import Column,Float, Integer, String, Numeric, Boolean, DateTime, ForeignKey, Text, Date 
 from database import Base
 
 class User(Base):
@@ -87,6 +87,10 @@ class Quotation(Base):
     contract_tenure_months = Column(Integer, default=1)
     monthly_rate = Column(Numeric(12, 2), default=0.00)
     approved_spending_cap = Column(Numeric(12, 2), default=0.00)
+
+    # 🎯 NEW: Financial Offset & Trigger Constraints
+    security_deposit_amount = Column(Float, default=0.0)
+    billing_trigger_date = Column(Integer, default=5)
 
 class TicketHistory(Base):
     __tablename__ = "ticket_history"

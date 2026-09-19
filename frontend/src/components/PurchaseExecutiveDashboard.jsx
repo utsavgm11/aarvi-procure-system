@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
   ShoppingCart, FileCheck, CheckCircle2, Clock, Trash2, Send, Plus, 
   Download, Edit3, FileText, AlertCircle, ShieldAlert, Truck, ExternalLink, 
-  MessageSquare, X, AlertOctagon, Paperclip, Save, Check
+  MessageSquare, X, AlertOctagon, Paperclip, Save, Check, AlertTriangle
 } from 'lucide-react';
 import { Card, Button, StatusBadge } from './ui/SharedUI';
 
@@ -20,7 +20,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const activeUser = storedSession ? JSON.parse(storedSession) : {};
   const currentUserName = activeUser.name || "Purchase Executive";
   const currentUserRole = activeUser.role || "Purchase Executive";
-
   const [activeTab, setActiveTab] = useState('sourcing');
   
   // Sourcing State
@@ -44,7 +43,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const [saveLoading, setSaveLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
-  // 🎯 NEW: Variable Usage Escalate Remark State
+  // 🎯 Variable Usage Escalate Remark State
   const [usageEscalateRemarks, setUsageEscalateRemarks] = useState('');
 
   // Vendor Master State
@@ -128,6 +127,9 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           gst_percentage: 18,
           total_amount: 0,
           net_amount_payable: 0,
+          // 🎯 INITIALIZE FINANCIAL TRACKING FIELDS
+          security_deposit_amount: '',
+          billing_trigger_date: '5',
           time_of_delivery: ticket.category === 'GOODS' ? '7 Days' : ticket.category === 'VEHICLE' ? '12 Months' : '30 Days Notice',
           delivery_address: '',
           site_contact_person: '',
@@ -283,6 +285,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         gst_percentage: 18,
         total_amount: 0,
         net_amount_payable: 0,
+        security_deposit_amount: '', 
+        billing_trigger_date: '5', 
         time_of_delivery: selectedTicket?.category === 'GOODS' ? '7 Days' : selectedTicket?.category === 'VEHICLE' ? '12 Months' : '30 Days Notice',
         delivery_address: '',
         site_contact_person: '',
@@ -302,8 +306,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
 
   const handlePushToManagement = async () => {
     const flatQuotations = [];
+    const isRecurring = ['VEHICLE', 'ACCOMMODATION', 'SUBSCRIPTION'].includes(selectedTicket?.category);
+
     for (const [itemIndex, itemQuotes] of Object.entries(quotes)) {
       const matchingLineItem = items.find(i => i.item_index === parseInt(itemIndex)) || {};
+      
       itemQuotes.forEach(q => {
         if (q.vendor_name && q.base_total_value) {
           flatQuotations.push({
@@ -325,6 +332,12 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             quality_remarks: q.quality_remarks || "",
             file_url: q.file_url || "", 
             
+            // 🎯 NEW: RECURRING BINDINGS
+            security_deposit_amount: parseFloat(q.security_deposit_amount) || 0.0,
+            billing_trigger_date: parseInt(q.billing_trigger_date) || 5,
+            is_recurring: isRecurring,
+            monthly_rate: isRecurring ? (parseFloat(q.unit_price) || 0) : 0,
+
             product_description: matchingLineItem.product_description || "",
             make_brand: matchingLineItem.make_brand || "",
             quantity: parseInt(matchingLineItem.quantity) || 1
@@ -332,10 +345,12 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         }
       });
     }
+
     if (flatQuotations.length === 0) {
       setAlert({ type: 'error', message: "Enter at least one valid vendor quote (Name & Unit Price) before submitting." });
       return;
     }
+
     setLoading(true);
     try {
       const res = await axios.post(`${API_BASE_URL}/requisitions/${selectedTicket.ticket_number}/quotations`, { 
@@ -345,17 +360,19 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       setAlert({ type: 'success', message: `Matrix Submitted! System routing triggered: ${res.data.status}.` });
       setSelectedTicket(null);
       fetchPendingSourcing();
-    } catch (err) { setAlert({ type: 'error', message: "Failed to dispatch quotations data." }); }
-    finally { setLoading(false); }
+    } catch (err) { 
+      setAlert({ type: 'error', message: "Failed to dispatch quotations data." }); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
-  // 🎯 NEW: HANDLE EXTRA USAGE / VARIABLE CHARGES INTERCEPTS
+  // 🎯 HANDLE EXTRA USAGE / VARIABLE CHARGES INTERCEPTS
   const handleVariableUsageDecision = async (actionDecision) => {
     if (actionDecision === 'ESCALATE' && !usageEscalateRemarks.trim()) {
       setAlert({ type: 'error', message: 'You must provide remarks to the Project Manager when escalating.' });
       return;
     }
-
     setLoading(true);
     try {
       await axios.put(`${API_BASE_URL}/requisitions/${selectedTicket.ticket_number}/usage-approval`, {
@@ -385,7 +402,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           contactLabel: "Reporting Supervisor Name",
           timeLabel: "Contract Tenure",
           timePlaceholder: "e.g. 12 Months",
-          remarksPlaceholder: "e.g. Diesel paid at actuals, Maintenance by contractor..."
+          remarksPlaceholder: "e.g. Diesel paid at actuals, Maintenance by contractor...",
+          showDeposit: true
         };
       case 'ACCOMMODATION':
         return {
@@ -395,7 +413,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           contactLabel: "Aarvi Warden Name",
           timeLabel: "Vacation Notice Period",
           timePlaceholder: "e.g. 30 Days Notice",
-          remarksPlaceholder: "e.g. Water bills in owner scope, Maintenance under owner..."
+          remarksPlaceholder: "e.g. Water bills in owner scope, Maintenance under owner...",
+          showDeposit: true
         };
       default:
         return {
@@ -405,10 +424,12 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           contactLabel: "Site Storekeeper Name",
           timeLabel: "Lead Time / Deadline",
           timePlaceholder: "e.g. 7 Days",
-          remarksPlaceholder: "e.g. F.O.R Site delivery, Test reports required..."
+          remarksPlaceholder: "e.g. F.O.R Site delivery, Test reports required...",
+          showDeposit: false
         };
     }
   };
+
   const ui = getContextualUiSettings();
 
   const handlePrintToPDF = () => {
@@ -518,10 +539,8 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         @media print {
           @page {
             size: A4 portrait;
-            margin: 0mm; /* 🎯 KILLS BROWSER DATE/URL WATERMARKS */
+            margin: 0mm; 
           }
-          
-          /* Reset all parent boundaries to prevent clipping */
           *, *::before, *::after {
             overflow: visible !important;
             position: static !important;
@@ -533,22 +552,19 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
-          /* Hide everything in the UI by default */
           body * {
             visibility: hidden;
           }
-          /* Make ONLY the PO visible */
           #printable-po, #printable-po * {
             visibility: visible;
           }
-          /* Anchor the PO strictly to the top-left of the paper */
           #printable-po {
             position: absolute !important;
             left: 0 !important;
             top: 0 !important;
             width: 210mm !important; 
             max-width: 210mm !important;
-            padding: 15mm !important; /* Safe white margins */
+            padding: 15mm !important; 
             margin: 0 !important;
             border: none !important;
             box-shadow: none !important;
@@ -558,7 +574,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             width: 100% !important;
             table-layout: fixed !important;
           }
-          
           th, td, p {
             overflow-wrap: break-word !important;
             word-wrap: break-word !important;
@@ -603,6 +618,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       {/* VIEW A: ACTIVE SOURCING INBOX */}
       {activeTab === 'sourcing' && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 max-w-[1500px]">
+          
           {/* TICKETS LIST */}
           <div className="xl:col-span-4 space-y-3">
             <h2 className="text-[10px] md:text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Awaiting Bids & Verification</h2>
@@ -638,7 +654,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             {selectedTicket ? (
               <div className="space-y-6 animate-in fade-in duration-300">
                 
-                {/* 🎯 NEW: INTERCEPTED EXTRA USAGE REVIEW MODAL VIEW */}
+                {/* 🎯 INTERCEPTED EXTRA USAGE REVIEW MODAL VIEW */}
                 {selectedTicket.status === "Extra Usage - Pending Purchase" ? (
                   <Card className="p-6 bg-white border-amber-200 shadow-sm border-t-4 border-t-amber-500">
                     <div className="flex items-center space-x-3 border-b border-slate-100 pb-4 mb-4">
@@ -659,12 +675,16 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                     )}
 
                     <div className="space-y-4">
-                      <Input 
-                        label="Purchase Remark / Justification (Mandatory if Escalating)" 
-                        value={usageEscalateRemarks} 
-                        onChange={e => setUsageEscalateRemarks(e.target.value)} 
-                        placeholder="e.g. Fuel prices spiked, logs verified..." 
-                      />
+                      <div className="w-full">
+                        <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">Purchase Remark / Justification (Mandatory if Escalating)</label>
+                        <input 
+                          type="text" 
+                          value={usageEscalateRemarks} 
+                          onChange={e => setUsageEscalateRemarks(e.target.value)} 
+                          placeholder="e.g. Fuel prices spiked, logs verified..." 
+                          className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all"
+                        />
+                      </div>
                       
                       <div className="flex flex-col sm:flex-row gap-3 pt-2">
                         <Button 
@@ -708,6 +728,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               <div className="flex flex-wrap items-center gap-2 mb-1.5">
                                 <span className="bg-[#2c2a57] text-white text-[10px] font-black px-2 py-0.5 rounded font-mono">Row {item.item_index}</span>
                                 
+                                {/* EDITABLE QUANTITY BADGE */}
                                 <div className="flex items-center bg-[#0b9c54]/10 border border-[#0b9c54]/20 rounded px-1.5 py-0.5">
                                   <label className="text-[9px] sm:text-[10px] text-[#0b9c54] font-bold uppercase tracking-wider mr-1.5">
                                     Procure Qty:
@@ -718,7 +739,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                     value={item.quantity} 
                                     onChange={(e) => handleItemQuantityChange(item.item_index, e.target.value)}
                                     className="w-12 sm:w-16 bg-white border border-[#0b9c54]/30 rounded text-[10px] sm:text-xs font-black text-emerald-900 text-center outline-none focus:ring-1 focus:ring-[#0b9c54] transition-all"
-                                    title="Edit Quantity if partial stock is already available"
                                   />
                                 </div>
                                 <select
@@ -733,6 +753,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               <h3 className="text-xs md:text-sm font-bold text-[#2c2a57] leading-tight mt-1">{item.product_description}</h3>
                             </div>
                           </div>
+                          
                           <div className="p-3 sm:p-4 bg-white">
                             <div className="grid grid-cols-1 gap-4">
                               {(quotes[item.item_index] || []).map((quote, qIdx) => (
@@ -741,7 +762,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   <h4 className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Option {qIdx + 1}</h4>
                                   
                                   <div className="space-y-4">
-                                    {/* Vendor Details Row (Responsive Stacking) */}
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                       <div>
                                         <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
@@ -771,7 +791,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                         <input type="text" value={quote.vendor_address} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_address', e.target.value)} placeholder="Full operating address..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                       </div>
                                     </div>
-                                    {/* Math & Contact Row (Responsive Stacking) */}
+                                    
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                                       <div>
                                         <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Phone/Cell</label>
@@ -781,7 +801,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                         <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Email ID</label>
                                         <input type="email" value={quote.vendor_email} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'vendor_email', e.target.value)} placeholder="sales@vendor.com" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                       </div>
-                                      {/* Unit Price Input triggers Auto-Math */}
                                       <div>
                                         <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">{ui.amountLabel} *</label>
                                         <input 
@@ -792,7 +811,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                           className="w-full bg-emerald-50 border border-emerald-300 rounded-lg px-3 py-2 text-[11px] md:text-xs font-bold text-emerald-900 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all" 
                                         />
                                       </div>
-                                      {/* GST Input triggers Auto-Math */}
                                       <div>
                                         <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">GST Percentage (%)</label>
                                         <input 
@@ -803,7 +821,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                         />
                                       </div>
                                     </div>
-                                    {/* Delivery Info Row */}
+
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
                                       <div>
                                         <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1">{ui.addressLabel}</label>
@@ -818,16 +836,44 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                         <input type="text" value={quote.site_contact_phone} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'site_contact_phone', e.target.value)} placeholder="+91-886..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                       </div>
                                     </div>
-                                    {/* Math Result & Terms Row */}
+
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                                      <div>
-                                        <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
-                                        <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
-                                      </div>
-                                      {/* CALCULATED NET VALUE DISPLAY */}
+                                      {/* 🎯 NEW: EXPLICIT SECURITY DEPOSIT AND TRIGGER DATE FIELDS */}
+                                      {ui.showDeposit ? (
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                          <div>
+                                            <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
+                                            <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                          </div>
+                                          <div>
+                                            <label className="block text-[9px] md:text-[10px] font-bold text-purple-700 uppercase mb-1 truncate" title="Security Deposit (Refundable)">Security Deposit (Ref)</label>
+                                            <input type="number" value={quote.security_deposit_amount} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'security_deposit_amount', e.target.value)} placeholder="0.00" className="w-full bg-purple-50 border border-purple-300 rounded-lg px-3 py-2 text-[11px] md:text-xs font-bold text-purple-900 outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" />
+                                          </div>
+                                          <div>
+                                            <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1 truncate" title="Monthly Billing Day">Billing Day (1-28)</label>
+                                            <select 
+                                              value={quote.billing_trigger_date} 
+                                              onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'billing_trigger_date', e.target.value)} 
+                                              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all"
+                                            >
+                                              {[...Array(28)].map((_, i) => (
+                                                <option key={i + 1} value={i + 1}>
+                                                  {i + 1}{i + 1 === 1 ? 'st' : i + 1 === 2 ? 'nd' : i + 1 === 3 ? 'rd' : 'th'}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div>
+                                          <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
+                                          <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                        </div>
+                                      )}
+
                                       <div>
                                         <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
-                                        <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner">
+                                        <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner h-[34px] sm:h-[38px]">
                                           <span className="text-sm font-black tracking-tight">
                                             ₹{(quote.net_amount_payable || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                           </span>
@@ -837,7 +883,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                         </div>
                                       </div>
                                     </div>
-                                    {/* Remarks Row */}
+
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                       <div>
                                         <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">Contract / Service Custom Clauses</label>
@@ -915,7 +961,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           </div>
         </div>
       )}
-
       {/* ============================================================== */}
       {/* VIEW B: PURCHASE HISTORY LEDGER (DOCUMENT VIEWER)              */}
       {/* ============================================================== */}
@@ -1011,7 +1056,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       <span className="text-[10px] sm:text-xs uppercase font-bold tracking-tight text-amber-50">Live Editable Canvas • Locked Data</span>
                     </div>
                     <div className="flex gap-2 w-full sm:w-auto">
-                      {/* 🎯 NEW: SAVE EDITS BUTTON */}
                       <button 
                         onClick={handleSaveEdits} 
                         disabled={saveLoading}
@@ -1037,7 +1081,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                   <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 flex justify-center print:p-0 print:border-none print:bg-white">
                     <div id="printable-po" className="p-6 sm:p-8 pb-16 space-y-6 font-sans bg-white select-text relative w-full h-auto overflow-visible text-justify max-w-[800px] shadow-sm print:shadow-none print:min-w-0 print:p-0">
                       
-                      {/* 🎯 RENDER SAVED TEMPLATE IF IT EXISTS, OTHERWISE DEFAULT HTML */}
                       {savedHtml ? (
                         <div dangerouslySetInnerHTML={{ __html: savedHtml }} />
                       ) : (
