@@ -809,6 +809,7 @@ def get_coordinator_completed_history(coordinator_id: int, db: Session = Depends
             "project_code": t.project_code,
             "project_name": t.project_name,
             "status": t.status,
+            "category": t.category, # 🎯 ADDED CATEGORY HERE
             "action_date": str(log.timestamp.strftime('%d-%m-%Y %H:%M')) if log else "Date Unavailable"
         })
     return response

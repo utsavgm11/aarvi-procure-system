@@ -152,7 +152,6 @@ export default function SiteCoordinatorDashboard() {
   // New Request Handlers
   const addRow = () => setItems([...items, { product_description: '', make_brand: '', quantity: 1, purpose: '', item_type: 'Consumable' }]);
   const removeRow = (index) => items.length > 1 && setItems(items.filter((_, i) => i !== index));
-
   const handleItemChange = (index, field, value) => {
     const newItems = [...items];
     newItems[index][field] = value;
@@ -216,7 +215,6 @@ export default function SiteCoordinatorDashboard() {
     formData.append('extra_km', extraKm || 0);
     formData.append('extra_km_rate', extraKmRate || 0);
     formData.append('extra_fuel_charges', extraFuelCharges || 0);
-
     if (grnFile) formData.append('file', grnFile);
     
     try {
@@ -468,152 +466,160 @@ export default function SiteCoordinatorDashboard() {
               <p>No active downstream material requisitions found in history logs.</p>
             </Card>
           ) : (
-            history.map((ticket) => (
-              <Card key={ticket.ticket_number} className="p-3 md:p-4 bg-white border border-slate-200 flex flex-col space-y-4 md:space-y-5">
-                
-                {/* Master Info Strip */}
-                <div className="flex flex-col sm:flex-row justify-between sm:items-start md:items-center bg-slate-50 p-3 rounded-xl border border-slate-100 gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-[#2c2a57] font-black text-xs md:text-sm">{ticket.ticket_number}</span>
-                      <span className="text-[9px] md:text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 uppercase tracking-tight">Cost Center: {ticket.project_code}</span>
-                    </div>
-                    <h3 className="text-[#2c2a57] text-xs md:text-sm font-bold mt-1 line-clamp-1">{ticket.project_name}</h3>
-                  </div>
-                  <div className="flex sm:justify-end shrink-0">
-                    <StatusBadge status={ticket.status} />
-                  </div>
-                </div>
+            history.map((ticket) => {
+              
+              // 🎯 12-MONTH CONTINUOUS LOOP LOGIC: 
+              // Shows the GRN button for Dispatched, Partially Delivered, Partially Disbursed, AND Delivered (if it's a recurring lease waiting for next month's log!)
+              const canLogGrn = 
+                ['Dispatched', 'Partially Delivered', 'Partially Disbursed'].includes(ticket.status) || 
+                (ticket.status === 'Delivered - GRN Logged' && ['VEHICLE', 'ACCOMMODATION', 'SUBSCRIPTION'].includes(ticket.category));
 
-                {/* 🎯 EXPANDED 5-STEP VISUAL TRACK MATRIX */}
-                <div className="overflow-x-auto custom-scrollbar pb-2">
-                  <div className="grid grid-cols-5 min-w-[550px] md:min-w-full gap-2 relative pt-2">
-                    
-                    {/* Step 1: Site Alignment */}
-                    <div className="text-center flex flex-col items-center relative group">
-                      <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
-                        getStepStatus(ticket.status, 1) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
-                        getStepStatus(ticket.status, 1) === 'active' ? 'bg-indigo-50 border-indigo-400 text-indigo-600' :
-                        'bg-slate-50 border-slate-200 text-slate-400'
-                      }`}>
-                        {getStepStatus(ticket.status, 1) === 'active' && (
-                          <span className="absolute -top-1 -right-1 flex h-2 w-2 md:h-3 md:w-3">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 md:h-3 md:w-3 bg-indigo-500"></span>
-                          </span>
-                        )}
-                        {getStepStatus(ticket.status, 1) === 'completed' ? <CheckCircle size={14} /> : "1"}
-                      </div>
-                      <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 1) === 'active' ? 'text-indigo-600' : 'text-slate-600'}`}>Site Handshake</span>
-                    </div>
-
-                    {/* Step 2: Sourcing Desk */}
-                    <div className="text-center flex flex-col items-center relative group">
-                      <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
-                        getStepStatus(ticket.status, 2) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
-                        getStepStatus(ticket.status, 2) === 'active' ? 'bg-cyan-50 border-cyan-400 text-cyan-600' :
-                        'bg-slate-50 border-slate-200 text-slate-400'
-                      }`}>
-                        {getStepStatus(ticket.status, 2) === 'active' && (
-                          <span className="absolute -top-1 -right-1 flex h-2 w-2 md:h-3 md:w-3">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 md:h-3 md:w-3 bg-cyan-500"></span>
-                          </span>
-                        )}
-                        {getStepStatus(ticket.status, 2) === 'completed' ? <CheckCircle size={14} /> : "2"}
-                      </div>
-                      <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 2) === 'active' ? 'text-cyan-600' : 'text-slate-400'}`}>Sourcing Hub</span>
-                    </div>
-
-                    {/* Step 3: Management Clearance */}
-                    <div className="text-center flex flex-col items-center relative group">
-                      <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
-                        getStepStatus(ticket.status, 3) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
-                        getStepStatus(ticket.status, 3) === 'active' ? 'bg-amber-50 border-amber-400 text-amber-600' :
-                        'bg-slate-50 border-slate-200 text-slate-400'
-                      }`}>
-                        {getStepStatus(ticket.status, 3) === 'active' && (
-                          <span className="absolute -top-1 -right-1 flex h-2 w-2 md:h-3 md:w-3">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 md:h-3 md:w-3 bg-amber-500"></span>
-                          </span>
-                        )}
-                        {getStepStatus(ticket.status, 3) === 'completed' ? <CheckCircle size={14} /> : "3"}
-                      </div>
-                      <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 3) === 'active' ? 'text-amber-600' : 'text-slate-400'}`}>Mgmt Approval</span>
-                    </div>
-
-                    {/* Step 4: PO Compilation & Payment */}
-                    <div className="text-center flex flex-col items-center relative group">
-                      <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
-                        getStepStatus(ticket.status, 4) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
-                        getStepStatus(ticket.status, 4) === 'active' ? 'bg-purple-50 border-purple-400 text-purple-600' :
-                        'bg-slate-50 border-slate-200 text-slate-400'
-                      }`}>
-                        {getStepStatus(ticket.status, 4) === 'active' && (
-                          <span className="absolute -top-1 -right-1 flex h-2 w-2 md:h-3 md:w-3">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 md:h-3 md:w-3 bg-purple-500"></span>
-                          </span>
-                        )}
-                        {getStepStatus(ticket.status, 4) === 'completed' ? <CheckCircle size={14} /> : <FileText size={12} />}
-                      </div>
-                      <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 4) === 'active' ? 'text-purple-600' : 'text-slate-400'}`}>Finance & PO</span>
-                    </div>
-
-                    {/* Step 5: Material Delivery & GRN Upload */}
-                    <div className="text-center flex flex-col items-center relative group">
-                      <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
-                        getStepStatus(ticket.status, 5) === 'completed' ? 'bg-[#0b9c54] border-[#0b9c54] text-white' :
-                        getStepStatus(ticket.status, 5) === 'active' ? (ticket.status === 'Material Discrepancy Raised' ? 'bg-rose-50 border-rose-500 text-rose-600' : 'bg-emerald-50 border-[#0b9c54] text-[#0b9c54]') :
-                        'bg-slate-50 border-slate-200 text-slate-400'
-                      }`}>
-                        {getStepStatus(ticket.status, 5) === 'active' && (
-                          <span className="absolute -top-1 -right-1 flex h-2 w-2 md:h-3 md:w-3">
-                            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${ticket.status === 'Material Discrepancy Raised' ? 'bg-rose-400' : 'bg-emerald-400'}`}></span>
-                            <span className={`relative inline-flex rounded-full h-2 w-2 md:h-3 md:w-3 ${ticket.status === 'Material Discrepancy Raised' ? 'bg-rose-600' : 'bg-[#0b9c54]'}`}></span>
-                          </span>
-                        )}
-                        {getStepStatus(ticket.status, 5) === 'completed' ? <CheckCircle size={14} /> : ticket.status === 'Material Discrepancy Raised' ? <AlertOctagon size={12} /> : <Truck size={12} />}
-                      </div>
-                      <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 5) === 'completed' ? 'text-[#0b9c54]' : ticket.status === 'Material Discrepancy Raised' ? 'text-rose-600 font-black' : getStepStatus(ticket.status, 5) === 'active' ? 'text-[#0b9c54]' : 'text-slate-400'}`}>
-                        {ticket.status === 'Material Discrepancy Raised' ? 'Discrepancy' : 'GRN Logging'}
-                      </span>
-                    </div>
-
-                  </div>
-                </div>
-
-                {/* 🎯 ACTION ZONE: Show Inspection & GRN Button */}
-                {['Dispatched', 'Partially Delivered', 'Partially Disbursed'].includes(ticket.status) && (
-                  <div className="bg-slate-50 p-3 md:p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              return (
+                <Card key={ticket.ticket_number} className="p-3 md:p-4 bg-white border border-slate-200 flex flex-col space-y-4 md:space-y-5">
+                  
+                  {/* Master Info Strip */}
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-start md:items-center bg-slate-50 p-3 rounded-xl border border-slate-100 gap-3">
                     <div>
-                      <h4 className="text-slate-800 font-extrabold text-xs md:text-sm flex items-center gap-1.5"><Truck size={14} className="text-indigo-600"/> Site Receipt / Logbook Update</h4>
-                      <p className="text-[10px] md:text-xs text-slate-500 mt-0.5">Log physical material delivery or submit monthly vehicle/service logs.</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-[#2c2a57] font-black text-xs md:text-sm">{ticket.ticket_number}</span>
+                        <span className="text-[9px] md:text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 uppercase tracking-tight">Cost Center: {ticket.project_code}</span>
+                      </div>
+                      <h3 className="text-[#2c2a57] text-xs md:text-sm font-bold mt-1 line-clamp-1">{ticket.project_name}</h3>
                     </div>
-                    <Button 
-                      variant="primary" 
-                      onClick={() => setGrnModalTicket(ticket)}
-                      className="w-full sm:w-auto bg-[#0b9c54] hover:bg-emerald-600 shadow-sm text-[11px] md:text-xs py-2 md:py-2.5"
-                    >
-                      <UploadCloud size={14} className="mr-1.5" /> Process Log / GRN
-                    </Button>
+                    <div className="flex sm:justify-end shrink-0">
+                      <StatusBadge status={ticket.status} />
+                    </div>
                   </div>
-                )}
 
-                {/* 🎯 WARNING ZONE: Shown if an issue was raised */}
-                {ticket.status === 'Material Discrepancy Raised' && (
-                  <div className="bg-rose-50 p-3 md:p-3.5 border border-rose-200 rounded-xl flex items-start gap-3">
-                    <ShieldAlert size={18} className="text-rose-600 shrink-0 mt-0.5" />
-                    <div>
-                      <h5 className="font-bold text-[11px] md:text-xs text-rose-900">Material Defect / Shortage Flagged</h5>
-                      <p className="text-[9px] md:text-[10px] text-rose-700 mt-0.5 leading-tight">An alert has been dispatched to the Purchase Executive & PM to initiate vendor replacement or credit note.</p>
+                  {/* 🎯 EXPANDED 5-STEP VISUAL TRACK MATRIX */}
+                  <div className="overflow-x-auto custom-scrollbar pb-2">
+                    <div className="grid grid-cols-5 min-w-[550px] md:min-w-full gap-2 relative pt-2">
+                      
+                      {/* Step 1: Site Alignment */}
+                      <div className="text-center flex flex-col items-center relative group">
+                        <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
+                          getStepStatus(ticket.status, 1) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
+                          getStepStatus(ticket.status, 1) === 'active' ? 'bg-indigo-50 border-indigo-400 text-indigo-600' :
+                          'bg-slate-50 border-slate-200 text-slate-400'
+                        }`}>
+                          {getStepStatus(ticket.status, 1) === 'active' && (
+                            <span className="absolute -top-1 -right-1 flex h-2 w-2 md:h-3 md:w-3">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 md:h-3 md:w-3 bg-indigo-500"></span>
+                            </span>
+                          )}
+                          {getStepStatus(ticket.status, 1) === 'completed' ? <CheckCircle size={14} /> : "1"}
+                        </div>
+                        <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 1) === 'active' ? 'text-indigo-600' : 'text-slate-600'}`}>Site Handshake</span>
+                      </div>
+
+                      {/* Step 2: Sourcing Desk */}
+                      <div className="text-center flex flex-col items-center relative group">
+                        <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
+                          getStepStatus(ticket.status, 2) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
+                          getStepStatus(ticket.status, 2) === 'active' ? 'bg-cyan-50 border-cyan-400 text-cyan-600' :
+                          'bg-slate-50 border-slate-200 text-slate-400'
+                        }`}>
+                          {getStepStatus(ticket.status, 2) === 'active' && (
+                            <span className="absolute -top-1 -right-1 flex h-2 w-2 md:h-3 md:w-3">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 md:h-3 md:w-3 bg-cyan-500"></span>
+                            </span>
+                          )}
+                          {getStepStatus(ticket.status, 2) === 'completed' ? <CheckCircle size={14} /> : "2"}
+                        </div>
+                        <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 2) === 'active' ? 'text-cyan-600' : 'text-slate-400'}`}>Sourcing Hub</span>
+                      </div>
+
+                      {/* Step 3: Management Clearance */}
+                      <div className="text-center flex flex-col items-center relative group">
+                        <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
+                          getStepStatus(ticket.status, 3) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
+                          getStepStatus(ticket.status, 3) === 'active' ? 'bg-amber-50 border-amber-400 text-amber-600' :
+                          'bg-slate-50 border-slate-200 text-slate-400'
+                        }`}>
+                          {getStepStatus(ticket.status, 3) === 'active' && (
+                            <span className="absolute -top-1 -right-1 flex h-2 w-2 md:h-3 md:w-3">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 md:h-3 md:w-3 bg-amber-500"></span>
+                            </span>
+                          )}
+                          {getStepStatus(ticket.status, 3) === 'completed' ? <CheckCircle size={14} /> : "3"}
+                        </div>
+                        <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 3) === 'active' ? 'text-amber-600' : 'text-slate-400'}`}>Mgmt Approval</span>
+                      </div>
+
+                      {/* Step 4: PO Compilation & Payment */}
+                      <div className="text-center flex flex-col items-center relative group">
+                        <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
+                          getStepStatus(ticket.status, 4) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
+                          getStepStatus(ticket.status, 4) === 'active' ? 'bg-purple-50 border-purple-400 text-purple-600' :
+                          'bg-slate-50 border-slate-200 text-slate-400'
+                        }`}>
+                          {getStepStatus(ticket.status, 4) === 'active' && (
+                            <span className="absolute -top-1 -right-1 flex h-2 w-2 md:h-3 md:w-3">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 md:h-3 md:w-3 bg-purple-500"></span>
+                            </span>
+                          )}
+                          {getStepStatus(ticket.status, 4) === 'completed' ? <CheckCircle size={14} /> : <FileText size={12} />}
+                        </div>
+                        <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 4) === 'active' ? 'text-purple-600' : 'text-slate-400'}`}>Finance & PO</span>
+                      </div>
+
+                      {/* Step 5: Material Delivery & GRN Upload */}
+                      <div className="text-center flex flex-col items-center relative group">
+                        <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
+                          getStepStatus(ticket.status, 5) === 'completed' ? 'bg-[#0b9c54] border-[#0b9c54] text-white' :
+                          getStepStatus(ticket.status, 5) === 'active' ? (ticket.status === 'Material Discrepancy Raised' ? 'bg-rose-50 border-rose-500 text-rose-600' : 'bg-emerald-50 border-[#0b9c54] text-[#0b9c54]') :
+                          'bg-slate-50 border-slate-200 text-slate-400'
+                        }`}>
+                          {getStepStatus(ticket.status, 5) === 'active' && (
+                            <span className="absolute -top-1 -right-1 flex h-2 w-2 md:h-3 md:w-3">
+                              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${ticket.status === 'Material Discrepancy Raised' ? 'bg-rose-400' : 'bg-emerald-400'}`}></span>
+                              <span className={`relative inline-flex rounded-full h-2 w-2 md:h-3 md:w-3 ${ticket.status === 'Material Discrepancy Raised' ? 'bg-rose-600' : 'bg-[#0b9c54]'}`}></span>
+                            </span>
+                          )}
+                          {getStepStatus(ticket.status, 5) === 'completed' ? <CheckCircle size={14} /> : ticket.status === 'Material Discrepancy Raised' ? <AlertOctagon size={12} /> : <Truck size={12} />}
+                        </div>
+                        <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 5) === 'completed' ? 'text-[#0b9c54]' : ticket.status === 'Material Discrepancy Raised' ? 'text-rose-600 font-black' : getStepStatus(ticket.status, 5) === 'active' ? 'text-[#0b9c54]' : 'text-slate-400'}`}>
+                          {ticket.status === 'Material Discrepancy Raised' ? 'Discrepancy' : 'GRN Logging'}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                )}
-                
-              </Card>
-            ))
+
+                  {/* 🎯 ACTION ZONE: Show Inspection & GRN Button (NOW SUPPORTS RECURRING MONTHLY LOOPS!) */}
+                  {canLogGrn && (
+                    <div className="bg-slate-50 p-3 md:p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-slate-800 font-extrabold text-xs md:text-sm flex items-center gap-1.5"><Truck size={14} className="text-indigo-600"/> Site Receipt / Logbook Update</h4>
+                        <p className="text-[10px] md:text-xs text-slate-500 mt-0.5">Log physical material delivery or submit monthly vehicle/service logs.</p>
+                      </div>
+                      <Button 
+                        variant="primary" 
+                        onClick={() => setGrnModalTicket(ticket)}
+                        className="w-full sm:w-auto bg-[#0b9c54] hover:bg-emerald-600 shadow-sm text-[11px] md:text-xs py-2 md:py-2.5"
+                      >
+                        <UploadCloud size={14} className="mr-1.5" /> Process Log / GRN
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* 🎯 WARNING ZONE: Shown if an issue was raised */}
+                  {ticket.status === 'Material Discrepancy Raised' && (
+                    <div className="bg-rose-50 p-3 md:p-3.5 border border-rose-200 rounded-xl flex items-start gap-3">
+                      <ShieldAlert size={18} className="text-rose-600 shrink-0 mt-0.5" />
+                      <div>
+                        <h5 className="font-bold text-[11px] md:text-xs text-rose-900">Material Defect / Shortage Flagged</h5>
+                        <p className="text-[9px] md:text-[10px] text-rose-700 mt-0.5 leading-tight">An alert has been dispatched to the Purchase Executive & PM to initiate vendor replacement or credit note.</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                </Card>
+              );
+            })
           )}
         </div>
       )}
@@ -748,7 +754,6 @@ export default function SiteCoordinatorDashboard() {
                   {grnFile && <p className="text-[9px] font-bold text-emerald-600 pt-1 flex items-center gap-1"><CheckCircle2 size={12} /> {grnFile.name} attached.</p>}
                 </div>
               </div>
-
             </div>
             
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col-reverse sm:flex-row justify-end gap-2 shrink-0">
