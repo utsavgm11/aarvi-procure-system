@@ -20,9 +20,10 @@ export default function ProjectManagerDashboard({ currentUser }) {
   
   // 🎯 PO / Proforma Invoice Details State
   const [poDetails, setPoDetails] = useState(null);
-
-  // 🎯 NEW: Inline Document Preview Modal State
   const [previewDoc, setPreviewDoc] = useState(null);
+
+  // 🎯 NEW: Self-Learning Material Types State
+  const [dynamicMaterialTypes, setDynamicMaterialTypes] = useState(['Consumable', 'Asset']);
 
   // Interactive States
   const [selectedBids, setSelectedBids] = useState({});
@@ -39,6 +40,12 @@ export default function ProjectManagerDashboard({ currentUser }) {
       // Filter out 'Pending PM Vetting' because that is handled in the /vetting tab now
       const commercialTickets = res.data.filter(t => t.status !== 'Pending PM Vetting');
       setTickets(commercialTickets);
+
+      // Fetch dynamic dropdown options
+      const typeRes = await axios.get(`${API_BASE_URL}/system/material-types`);
+      if (typeRes.data && typeRes.data.length > 0) {
+        setDynamicMaterialTypes(typeRes.data);
+      }
     } catch (err) { console.error("Error loading PM queue", err); } 
     finally { setLoading(false); }
   }, [currentUserId]);
@@ -83,7 +90,6 @@ export default function ProjectManagerDashboard({ currentUser }) {
       const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
       setHistoryLogs(histRes.data);
 
-      // 🎯 Fetch PO / Proforma Invoice details if ticket is in PI approval stage
       if (ticket.status === 'PI Pending PM Approval') {
         const poRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/po`);
         setPoDetails(poRes.data);
@@ -91,7 +97,6 @@ export default function ProjectManagerDashboard({ currentUser }) {
     } catch (err) { console.error("Error loading ticket specifications", err); }
   };
 
-  // 🎯 HELPER: Handles Opening Cloudinary Documents in Modal
   const handlePreviewFile = (url, title) => {
     if (!url) return;
     let fullUrl = url;
@@ -122,10 +127,12 @@ export default function ProjectManagerDashboard({ currentUser }) {
       setAlert({ type: 'error', message: "Operational remarks are mandatory before raising technical deviations." });
       return;
     }
+
     if (actionType === "Approve" && Object.keys(selectedBids).length !== items.length) {
       setAlert({ type: 'error', message: "You must explicitly select exactly 1 winning vendor option for every line item." });
       return;
     }
+
     setLoading(true);
     try {
       await axios.post(`${API_BASE_URL}/requisitions/${selectedTicket.ticket_number}/action`, {
@@ -151,7 +158,6 @@ export default function ProjectManagerDashboard({ currentUser }) {
     }
   };
 
-  // 🎯 Handler for PM Proforma Invoice Approval
   const handleApprovePI = async () => {
     setLoading(true);
     try {
@@ -176,15 +182,19 @@ export default function ProjectManagerDashboard({ currentUser }) {
   return (
     <div className="space-y-6 relative">
       
+      <datalist id="dynamic-material-types">
+        {dynamicMaterialTypes.map((type, idx) => <option key={idx} value={type} />)}
+      </datalist>
+
       {/* 🎯 SMOOTH INLINE DOCUMENT PREVIEW MODAL */}
       {previewDoc && (
         <div 
           className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
-          onClick={() => setPreviewDoc(null)} // Click outside to close
+          onClick={() => setPreviewDoc(null)}
         >
           <div 
             className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden relative"
-            onClick={(e) => e.stopPropagation()} // Prevent clicks inside from closing
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="bg-[#2c2a57] p-4 text-white flex justify-between items-center shrink-0 z-10">
               <div className="flex items-center gap-2">
@@ -289,8 +299,7 @@ export default function ProjectManagerDashboard({ currentUser }) {
                         Review the vendor's submitted invoice parameters and attached PDF before dispatching to the Accounts team for payment release.
                       </p>
                     </div>
-
-                    {/* Invoice Metadata Grid */}
+                    
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
                       <div>
                         <span className="text-[10px] font-bold text-slate-400 uppercase block">Invoice No:</span>
@@ -310,7 +319,6 @@ export default function ProjectManagerDashboard({ currentUser }) {
                       </div>
                     </div>
 
-                    {/* PDF Attachment Card */}
                     <div className="p-4 bg-indigo-50/40 border border-indigo-200 rounded-xl flex items-center justify-between">
                       <div className="flex items-center space-x-3">
                         <FileText size={24} className="text-indigo-600" />
@@ -321,8 +329,6 @@ export default function ProjectManagerDashboard({ currentUser }) {
                           </p>
                         </div>
                       </div>
-
-                      {/* 🎯 CHANGED TO BUTTON FOR INLINE VIEWER */}
                       {poDetails?.proforma_invoice_url ? (
                         <button 
                           onClick={() => handlePreviewFile(poDetails.proforma_invoice_url, `Proforma Invoice #${poDetails.invoice_no}`)}
@@ -338,7 +344,6 @@ export default function ProjectManagerDashboard({ currentUser }) {
                       )}
                     </div>
 
-                    {/* PM Action Input & Buttons */}
                     <div className="pt-4 border-t border-slate-200 space-y-4">
                       <Input 
                         label="PM Approval Notes / Account Disbursement Instructions" 
@@ -367,6 +372,7 @@ export default function ProjectManagerDashboard({ currentUser }) {
                       <span>Line Material Quantities & Quotation Framework</span>
                       <span className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-bold animate-pulse">Click card option below to choose winner</span>
                     </div>
+                    
                     <div className="p-4 space-y-6 divide-y divide-slate-100">
                       {items.map(item => {
                         const itemBids = vendorQuotes.filter(q => q.item_index === item.item_index);
@@ -381,14 +387,13 @@ export default function ProjectManagerDashboard({ currentUser }) {
                               <div className="flex flex-wrap items-center bg-slate-50 border border-slate-200 p-1.5 rounded-lg gap-2">
                                 <div className="flex items-center border-r border-slate-200 pr-2">
                                   <span className="text-[10px] font-bold text-slate-500 uppercase mr-2 ml-1">Type:</span>
-                                  <select
-                                    value={item.item_type || 'Consumable'}
+                                  <input 
+                                    list="dynamic-material-types"
+                                    value={item.item_type || ''}
                                     onChange={(e) => handleItemTypeChange(item.item_index, e.target.value)}
-                                    className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border outline-none cursor-pointer bg-white text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors"
-                                  >
-                                    <option value="Consumable">📦 Consumable</option>
-                                    <option value="Asset">🖥️ Asset</option>
-                                  </select>
+                                    placeholder="Type/Select"
+                                    className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border outline-none bg-white text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors w-24"
+                                  />
                                 </div>
                                 <div className="flex items-center">
                                   <span className="text-[10px] font-bold text-slate-500 uppercase mr-3 ml-1">Client Billed Expense?</span>
@@ -431,6 +436,7 @@ export default function ProjectManagerDashboard({ currentUser }) {
                                       </span>
                                       <span className="text-xs font-bold text-slate-800 truncate block">{bid.vendor_name}</span>
                                       {bid.special_terms && <span className="text-[9px] font-medium text-slate-500 italic block mt-1 line-clamp-2">Clauses: {bid.special_terms}</span>}
+                                      
                                       {bid.quality_remarks && (
                                         <div className="mt-2 bg-amber-50/50 border border-amber-100 p-1.5 rounded-md">
                                           <span className="text-[9px] font-bold text-amber-700 block uppercase mb-0.5">Tech Specs / QA:</span>
@@ -450,6 +456,7 @@ export default function ProjectManagerDashboard({ currentUser }) {
                         );
                       })}
                     </div>
+                    
                     <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-4">
                       <Input label="PM Directives & Comments" value={remarks} onChange={e => setRemarks(e.target.value)} placeholder="Add any site instructions for purchase department..." />
                       <div className="flex flex-col sm:flex-row justify-end gap-2 pt-1">

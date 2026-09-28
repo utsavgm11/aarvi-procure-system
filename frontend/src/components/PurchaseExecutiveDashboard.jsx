@@ -48,14 +48,23 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
 
   // Vendor Master State
   const [vendors, setVendors] = useState([]);
-  const fetchVendors = useCallback(async () => {
+
+  // 🎯 NEW: Self-Learning Material Types State
+  const [dynamicMaterialTypes, setDynamicMaterialTypes] = useState(['Consumable', 'Asset']);
+
+  // --- DATA FETCHING ---
+  const fetchVendorsAndTypes = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/vendors`);
       setVendors(res.data);
-    } catch (err) { console.error("Failed to load vendor directory", err); }
+
+      const typeRes = await axios.get(`${API_BASE_URL}/system/material-types`);
+      if (typeRes.data && typeRes.data.length > 0) {
+        setDynamicMaterialTypes(typeRes.data);
+      }
+    } catch (err) { console.error("Failed to load vendor directory or types", err); }
   }, []);
 
-  // --- DATA FETCHING ---
   const fetchPendingSourcing = useCallback(async () => {
     setLoading(true);
     try {
@@ -86,11 +95,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   useEffect(() => {
     let isMounted = true;
     if (activeTab === 'sourcing') setTimeout(() => { 
-      if (isMounted) { fetchPendingSourcing(); fetchVendors(); } 
+      if (isMounted) { fetchPendingSourcing(); fetchVendorsAndTypes(); } 
     }, 0);
     if (activeTab === 'history') setTimeout(() => { if (isMounted) fetchHistory(); }, 0);
     return () => { isMounted = false; };
-  }, [activeTab, fetchPendingSourcing, fetchHistory, fetchVendors]);
+  }, [activeTab, fetchPendingSourcing, fetchHistory, fetchVendorsAndTypes]);
 
   // --- TAB NAVIGATION HANDLERS ---
   const switchTab = (tab) => {
@@ -106,11 +115,9 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     setQuotes({});
     setAlert(null);
     setUsageEscalateRemarks('');
-
     try {
       const itemRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
       setItems(itemRes.data);
-
       // Fetch history logs so we can see the extra usage remarks
       const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
       setHistoryLogs(histRes.data);
@@ -130,6 +137,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           // 🎯 INITIALIZE FINANCIAL TRACKING FIELDS
           security_deposit_amount: '',
           billing_trigger_date: '5',
+          contract_tenure_months: '12', // 🎯 NEW: Default to 12 months for recurring
           time_of_delivery: ticket.category === 'GOODS' ? '7 Days' : ticket.category === 'VEHICLE' ? '12 Months' : '30 Days Notice',
           delivery_address: '',
           site_contact_person: '',
@@ -160,6 +168,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       
       const calcTotal = winningLines.reduce((acc, curr) => acc + (curr.net_amount_payable || curr.base_total_value || 0), 0);
       setSelectedHistoryTicket(prev => ({ ...prev, grand_total: calcTotal }));
+
       const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
       setHistoryLogs(histRes.data);
 
@@ -174,6 +183,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       } catch (err) {
         // Ignore errors; just means no template has been saved yet
       }
+
       setTimeout(() => {
         document.getElementById('history-detail-view')?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
@@ -248,6 +258,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     setItems(prevItems => prevItems.map(item =>
       item.item_index === indexToUpdate ? { ...item, quantity: qty } : item
     ));
+
     setQuotes(prev => {
       const updatedItemQuotes = [...(prev[indexToUpdate] || [])];
       const recalculatedQuotes = updatedItemQuotes.map(quote => {
@@ -287,6 +298,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         net_amount_payable: 0,
         security_deposit_amount: '', 
         billing_trigger_date: '5', 
+        contract_tenure_months: '12',
         time_of_delivery: selectedTicket?.category === 'GOODS' ? '7 Days' : selectedTicket?.category === 'VEHICLE' ? '12 Months' : '30 Days Notice',
         delivery_address: '',
         site_contact_person: '',
@@ -335,9 +347,9 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             // 🎯 NEW: RECURRING BINDINGS
             security_deposit_amount: parseFloat(q.security_deposit_amount) || 0.0,
             billing_trigger_date: parseInt(q.billing_trigger_date) || 5,
+            contract_tenure_months: parseInt(q.contract_tenure_months) || 12,
             is_recurring: isRecurring,
             monthly_rate: isRecurring ? (parseFloat(q.unit_price) || 0) : 0,
-
             product_description: matchingLineItem.product_description || "",
             make_brand: matchingLineItem.make_brand || "",
             quantity: parseInt(matchingLineItem.quantity) || 1
@@ -502,6 +514,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   return (
     <div className="space-y-6 pb-12 sm:px-2 md:px-4 lg:px-0">
       
+      {/* 🎯 DATALIST FOR SELF LEARNING DROPDOWNS */}
+      <datalist id="dynamic-material-types">
+        {dynamicMaterialTypes.map((type, idx) => <option key={idx} value={type} />)}
+      </datalist>
+
       {/* 🎯 UNIVERSAL IN-APP DOCUMENT PREVIEW MODAL */}
       {previewDoc && (
         <div 
@@ -598,6 +615,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           <h1 className="text-xl md:text-2xl font-extrabold text-[#2c2a57] tracking-tight">Procurement Sourcing Hub</h1>
           <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">Attach competitive vendor bids and compile commercial comparison sheets</p>
         </div>
+        
         <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full lg:w-auto">
           <Button variant={activeTab === 'sourcing' ? 'primary' : 'ghost'} onClick={() => switchTab('sourcing')} className="text-[11px] md:text-xs py-2 px-3 flex-1 lg:flex-none whitespace-nowrap">
             <ShoppingCart size={14} className="mr-1.5 inline" /> <span>Sourcing Inbox ({sourcingTickets.length})</span>
@@ -706,6 +724,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       </div>
                     </div>
                   </Card>
+
                 ) : (
                   <>
                     <Card className="p-4 bg-slate-50 border-slate-200 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
@@ -720,6 +739,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                         <Send size={14} className="mr-1.5 inline" /> <span>Submit Matrix</span>
                       </Button>
                     </Card>
+                    
                     <div className="space-y-5">
                       {items.map((item) => (
                         <Card key={item.item_index} className="overflow-hidden border-slate-200 shadow-xs">
@@ -741,14 +761,15 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                     className="w-12 sm:w-16 bg-white border border-[#0b9c54]/30 rounded text-[10px] sm:text-xs font-black text-emerald-900 text-center outline-none focus:ring-1 focus:ring-[#0b9c54] transition-all"
                                   />
                                 </div>
-                                <select
-                                  value={item.item_type || 'Consumable'}
+                                
+                                {/* 🎯 SMART SELF-LEARNING MATERIAL TYPE DROPDOWN */}
+                                <input 
+                                  list="dynamic-material-types"
+                                  value={item.item_type || ''} 
                                   onChange={(e) => handleItemClassificationChange(item.item_index, e.target.value)}
-                                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border outline-none cursor-pointer bg-slate-100 text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors"
-                                >
-                                  <option value="Consumable">📦 Consumable</option>
-                                  <option value="Asset">🖥️ Asset</option>
-                                </select>
+                                  placeholder="Type or select..."
+                                  className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border outline-none bg-slate-100 text-slate-700 border-slate-300 focus:border-[#2c2a57] transition-colors w-24 sm:w-32"
+                                />
                               </div>
                               <h3 className="text-xs md:text-sm font-bold text-[#2c2a57] leading-tight mt-1">{item.product_description}</h3>
                             </div>
@@ -762,6 +783,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   <h4 className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Option {qIdx + 1}</h4>
                                   
                                   <div className="space-y-4">
+                                    
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                       <div>
                                         <label className="block text-[9px] md:text-[10px] font-bold text-[#2c2a57] uppercase mb-1">Vendor Company Name</label>
@@ -772,6 +794,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                           onChange={(e) => {
                                             const selectedName = e.target.value;
                                             handleQuoteChange(item.item_index, qIdx, 'vendor_name', selectedName);
+                                            
                                             const matchedVendor = vendors.find(v => v.name === selectedName);
                                             if (matchedVendor) {
                                               handleQuoteChange(item.item_index, qIdx, 'vendor_address', matchedVendor.address || '');
@@ -840,17 +863,21 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                                       {/* 🎯 NEW: EXPLICIT SECURITY DEPOSIT AND TRIGGER DATE FIELDS */}
                                       {ui.showDeposit ? (
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                           <div>
-                                            <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1">{ui.timeLabel}</label>
+                                            <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1 truncate" title="Duration in Months">Duration (Mos)</label>
+                                            <input type="number" value={quote.contract_tenure_months} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'contract_tenure_months', e.target.value)} placeholder="12" className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
+                                          </div>
+                                          <div>
+                                            <label className="block text-[9px] md:text-[10px] font-bold text-slate-500 uppercase mb-1 truncate">{ui.timeLabel}</label>
                                             <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                           </div>
                                           <div>
-                                            <label className="block text-[9px] md:text-[10px] font-bold text-purple-700 uppercase mb-1 truncate" title="Security Deposit (Refundable)">Security Deposit (Ref)</label>
+                                            <label className="block text-[9px] md:text-[10px] font-bold text-purple-700 uppercase mb-1 truncate" title="Security Deposit (Refundable)">Security Deposit</label>
                                             <input type="number" value={quote.security_deposit_amount} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'security_deposit_amount', e.target.value)} placeholder="0.00" className="w-full bg-purple-50 border border-purple-300 rounded-lg px-3 py-2 text-[11px] md:text-xs font-bold text-purple-900 outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all" />
                                           </div>
                                           <div>
-                                            <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1 truncate" title="Monthly Billing Day">Billing Day (1-28)</label>
+                                            <label className="block text-[9px] md:text-[10px] font-bold text-indigo-700 uppercase mb-1 truncate" title="Monthly Billing Day">Billing Day</label>
                                             <select 
                                               value={quote.billing_trigger_date} 
                                               onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'billing_trigger_date', e.target.value)} 
@@ -870,7 +897,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                           <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                         </div>
                                       )}
-
                                       <div>
                                         <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
                                         <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner h-[34px] sm:h-[38px]">
@@ -894,6 +920,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                         <input type="text" value={quote.quality_remarks || ''} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'quality_remarks', e.target.value)} placeholder="e.g. OEM 1-yr warranty active..." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-amber-500 focus:ring-1 transition-all" />
                                       </div>
                                     </div>
+
                                     {/* ATTACHMENT CONTROLLER LAYER */}
                                     <div className="grid grid-cols-1 gap-3 pt-3 border-t border-dashed border-slate-200 mt-2">
                                       <div>
@@ -908,8 +935,10 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                             onChange={async (e) => {
                                               const selectedFile = e.target.files[0];
                                               if (!selectedFile) return;
+
                                               const formData = new FormData();
                                               formData.append("file", selectedFile);
+                                              
                                               try {
                                                 setAlert({ type: 'success', message: `Uploading document...` });
                                                 const res = await axios.post(
@@ -936,6 +965,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                         </div>
                                       </div>
                                     </div>
+                                    
                                   </div>
                                 </div>
                               ))}
@@ -961,6 +991,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           </div>
         </div>
       )}
+
       {/* ============================================================== */}
       {/* VIEW B: PURCHASE HISTORY LEDGER (DOCUMENT VIEWER)              */}
       {/* ============================================================== */}
@@ -989,6 +1020,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
               ))
             )}
           </div>
+
           <div id="isolated-print-wrapper" className="xl:col-span-8 print:col-span-12">
             <div id="history-detail-view" className="scroll-mt-24 space-y-6">
               
@@ -1015,6 +1047,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       )}
                     </Card>
                   )}
+
                   {selectedHistoryTicket.status === 'Partially Delivered' && (
                     <Card className="p-4 bg-amber-50 border-amber-200 text-amber-900 space-y-2 shadow-xs">
                       <div className="flex items-center justify-between">
@@ -1034,6 +1067,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       )}
                     </Card>
                   )}
+
                   {selectedHistoryTicket.status === 'Delivered - GRN Logged' && (
                     <Card className="p-4 bg-emerald-50 border-emerald-200 text-emerald-900 flex items-center justify-between shadow-xs">
                       <div className="flex items-center space-x-2.5">
@@ -1047,6 +1081,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                   )}
                 </>
               )}
+
               {selectedHistoryTicket && historyPoItems.length > 0 ? (
                 <Card className="bg-white border-slate-200 shadow-sm overflow-hidden relative animate-in fade-in duration-200 print:border-none print:shadow-none">
                   
@@ -1078,6 +1113,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       </button>
                     </div>
                   </div>
+
                   <div className="overflow-x-auto custom-scrollbar bg-slate-200/50 p-2 sm:p-4 rounded-b-xl border-t border-slate-200 flex justify-center print:p-0 print:border-none print:bg-white">
                     <div id="printable-po" className="p-6 sm:p-8 pb-16 space-y-6 font-sans bg-white select-text relative w-full h-auto overflow-visible text-justify max-w-[800px] shadow-sm print:shadow-none print:min-w-0 print:p-0">
                       
@@ -1098,11 +1134,13 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 <p className="text-slate-600 font-mono mt-1">Cell No.: {primaryLine.vendor_contact || "N/A"}</p>
                                 <p className="text-slate-600 font-mono">EMAIL:- {primaryLine.vendor_email || "N/A"}</p>
                               </div>
+
                               <div contentEditable="true" className="space-y-1 avoid-break w-full">
                                 <p className="font-bold text-sm text-slate-900 mt-4">Subject: Purchase Order for {primaryLine.product_description?.split(' ')[0] || 'Materials'}.</p>
                                 <p className="text-xs text-slate-700 mt-2">Dear Sir,</p>
                                 <p className="text-xs text-slate-700">With reference to Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'recent submission'}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of {primaryLine.product_description || 'goods'} with your company.</p>
                               </div>
+
                               <div className="avoid-break mt-4 w-full">
                                 <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
                                   <thead>
@@ -1144,6 +1182,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   </tbody>
                                 </table>
                               </div>
+
                               <div className="grid grid-cols-12 gap-2 text-[11px] leading-tight text-slate-800 mt-6 avoid-break w-full" contentEditable="true">
                                 <div className="col-span-1 font-bold">a)</div>
                                 <div className="col-span-3 font-bold uppercase">TERMS OF PAYMENTS</div>
@@ -1157,9 +1196,12 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 <div className="col-span-3 font-bold uppercase">PROJECT</div>
                                 <div className="col-span-8 font-bold">{selectedHistoryTicket.project_name}</div>
                               </div>
+
                               <p className="font-bold text-[11px] mt-4 avoid-break w-full">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
+
                               <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3 w-full">
                                 <p className="font-bold avoid-break">The placement of order is subject to the following Terms & Conditions:-</p>
+                                
                                 <p className="avoid-break"><strong>1. PRICE:</strong><br/>The cost of Purchase with GST as shown above is Rs. {(selectedHistoryTicket.grand_total || 0).toLocaleString('en-IN')}/- (Rupees {convertNumberToWords(Math.round(selectedHistoryTicket.grand_total || 0))}). This is a fixed-price order and no escalation is applicable.</p>
                                 <p className="avoid-break"><strong>2. QUALITY:</strong><br/>If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.</p>
                                 <p className="avoid-break"><strong>3. LIQUIDITY DAMAGE: (NOT APPLICABLE)</strong><br/>If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.</p>
@@ -1169,10 +1211,12 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 <p className="avoid-break"><strong>7. BILLING:</strong><br/>Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
                                 <p className="avoid-break"><strong>8. DELIVERY ADDRESS:</strong><br/>Contract Person: {primaryLine.site_contact_person || "Site Coordinator"}, Contact No.: {primaryLine.site_contact_phone || "N/A"}.<br/><span className="font-bold uppercase">{selectedHistoryTicket.project_name}</span><br/>{primaryLine.delivery_address || "Address Pending"}</p>
                                 <p className="avoid-break"><strong>9. LEGAL COMPLIANCE:</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
+                                
                                 <p className="avoid-break pt-2">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.<br/><br/>Thanking you,<br/>Yours faithfully</p>
                               </div>
                             </div>
                           )}
+
                           {/* ========================================================= */}
                           {/* 🚜 2. VEHICLE RENTAL PO */}
                           {/* ========================================================= */}
@@ -1188,6 +1232,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 <p className="text-xs mt-2">With reference to your quotation the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place order for Hiring Vehicle with you as per the terms & conditions mentioned in this contract.</p>
                                 <p className="text-xs mt-2">Mr. {primaryLine.vendor_name} hereinafter referred to as the "Contractor" of Vehicle, and M/s. Aarvi Encon Ltd hereinafter referred to as the "Client".</p>
                               </div>
+
                               <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break w-full">Article 1</p>
                               <p className="text-xs -mt-2 avoid-break w-full">The subject of the present Contract is the vehicle owned by the Contractor having the following characteristics & providing services for the following sites as & when required:-</p>
                               
@@ -1216,6 +1261,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 </table>
                                 <p className="text-[11px] font-bold text-slate-900 mt-2">GST Extra as applicable</p>
                               </div>
+
                               <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded w-full">
                                 <p className="font-bold text-[12px] avoid-break">NOTE: -</p>
                                 <p className="avoid-break">1. Duty hrs shall be as per site schedule.</p>
@@ -1244,6 +1290,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   <p className="font-bold text-[12px] underline">Article 3</p>
                                   <p className="mt-1">The monthly rental rate shall be as above.</p>
                                 </div>
+
                                 <div className="pt-2 avoid-break">
                                   <p className="font-bold text-[12px] underline">Article 4</p>
                                   <p className="mt-1">The Contractor shall be responsible for any and all tax liabilities, either related to ownership of the vehicle or deriving from the rental contract, in accordance with the legislation of Government of India from time to time and location to location.</p>
@@ -1253,6 +1300,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                   <p className="font-bold text-[12px] underline">Article 5</p>
                                   <p className="mt-1">The Client shall not be responsible for any damages caused by third parties, viz., violent public demonstration, or natural disaster and any breakdown of the vehicle.<br/>The Contractor shall repair immediately, if any and all damages caused during the said contract period and the cost / replacement / stand by vehicle cost will be paid you & the services should not affect the Client business, anyway.</p>
                                 </div>
+
                                 <div className="pt-2 avoid-break">
                                   <p className="font-bold text-[12px] underline">Article 6</p>
                                   <p className="mt-1">The vehicle is to be delivered in good condition; driver and all documents related to the vehicle shall be in order.</p>
@@ -1297,6 +1345,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               </div>
                             </div>
                           )}
+
                           {/* ========================================================= */}
                           {/* 🏢 3. GUEST HOUSE ACCOMMODATION */}
                           {/* ========================================================= */}
@@ -1312,6 +1361,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 <p className="text-xs mt-2">With reference to your quotation of the quoted price, we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order to rent a Guest House with you as per the terms & conditions mentioned in this contract.</p>
                                 <p className="text-xs mt-2">Mr. {primaryLine.vendor_name}, hereinafter referred to as the "Contractor" of the Guest House and M/s. Aarvi Encon Ltd, hereinafter referred to as the "Client".</p>
                               </div>
+
                               <p className="font-bold text-slate-900 tracking-wider text-[12px] mt-6 avoid-break w-full">Article 1</p>
                               <p className="text-xs -mt-2 avoid-break w-full">The subject of the present Contract is the Guest House owned by the Contractor, having the following characteristics & providing service for the following sites as & when required:-</p>
                               
@@ -1344,10 +1394,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 </table>
                                 <p className="text-[11px] text-slate-900 mt-2 font-bold">NOTE: -<br/>1. All rooms and washrooms should be properly available and in a hygienic condition at the time of shifting candidates.</p>
                               </div>
+
                               <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded w-full">
                                 <div className="avoid-break">
                                   <p className="font-bold text-[12px] underline">Article 2</p>
-                                  <p className="mt-1">Duration of contract: The contract is valid from {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-05-${currentYear}`} to {primaryLine.contract_end_date ? new Date(primaryLine.contract_end_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-5-${nextYear}`} (12 Months). (Extendable or reducible).<br/>This contract is valid as per the client/site requirement of the Guest House. At the end of the requirement period both parties should agree on the discontinuation of the service & the rental contract automatically gets canceled & void. Client & Contractor can give a day's Notice to cancel the services.</p>
+                                  <p className="mt-1">Duration of contract: The contract is valid from {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-05-${currentYear}`} to {primaryLine.contract_end_date ? new Date(primaryLine.contract_end_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-5-${nextYear}`} ({primaryLine.contract_tenure_months || 12} Months). (Extendable or reducible).<br/>This contract is valid as per the client/site requirement of the Guest House. At the end of the requirement period both parties should agree on the discontinuation of the service & the rental contract automatically gets canceled & void. Client & Contractor can give a day's Notice to cancel the services.</p>
                                 </div>
                                 
                                 <div className="pt-2 avoid-break">
@@ -1394,6 +1445,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               </div>
                             </div>
                           )}
+
                           {/* ========================================================= */}
                           {/* 🍱 4. FOOD SUPPLY PO */}
                           {/* ========================================================= */}
@@ -1408,6 +1460,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 <p className="text-slate-900 font-bold mt-2">Subject: Purchase Order for Food.</p>
                                 <p className="text-[12px] mt-4 leading-relaxed">With reference to your Quotation, dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '.') : `26.05.${currentYear}`}, and the subsequent discussion with our Mr Kishor Nikam (BUSINESS DEVELOPMENT), we are pleased to inform you that M/s. Aarvi Encon Ltd has decided to place an order for the supply of Food as mentioned below:-</p>
                               </div>
+
                               <div className="pl-6 py-6 font-bold text-[13px] text-slate-900 space-y-4 border-l-4 border-slate-300 ml-4 my-6 avoid-break w-full" contentEditable="true">
                                 {historyPoItems.map((item, idx) => (
                                   <p key={idx} className="break-words">{item.product_description} Rate Rs. {item.unit_price || item.base_total_value}/- {item.special_terms || 'per meal'}.</p>
@@ -1416,11 +1469,13 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                    <p>Sunday Rate Rs. {historyPoItems[0].unit_price ? historyPoItems[0].unit_price + 40 : 300}/- per meal Special Dinner.</p>
                                 )}
                               </div>
+
                               <div className="text-[12px] space-y-2 mt-4 avoid-break w-full" contentEditable="true">
                                 <p><strong>Terms of payment:-</strong> {primaryLine.payment_terms || "100% payment to be made against submission of Invoices"}</p>
                                 <p><strong>Project Name:</strong> {selectedHistoryTicket.project_name}</p>
                                 <p><strong>Our GST Registration no.:</strong> 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
                               </div>
+
                               <div className="pt-6 text-[12px] leading-relaxed text-slate-800 space-y-4 w-full" contentEditable="true">
                                 <p className="font-bold underline mb-4 avoid-break">The placement of work Order is subject to the following Terms & Conditions:-</p>
                                 
@@ -1448,6 +1503,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               </div>
                             </div>
                           )}
+
                           {/* 🎯 UNIVERSAL 2-COLUMN SIGNATURE STRIP */}
                           <div className="pt-16 mt-16 flex justify-between items-end text-xs font-sans relative z-10 avoid-break w-full" contentEditable="false">
                             <div className="w-64 text-left space-y-1">
@@ -1460,6 +1516,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                 AEL-04-IMSF-PURCH-004
                               </div>
                             )}
+
                             <div className="w-64 text-right space-y-1">
                               <p className="text-[11px] text-slate-800 mb-10 text-center">{selectedHistoryTicket.category === 'GOODS' ? 'Signature & Seal of the Supplier' : 'Signature & seal of the contractor'}<br/>{selectedHistoryTicket.category === 'GOODS' ? 'Accepted & Agreed of the above Said Terms and Conditions' : 'accepted & agreed of the above said terms & conditions'}</p>
                               <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2 text-center">Accepted by {selectedHistoryTicket.category === 'GOODS' ? 'Supplier' : 'Contractor'}</span>
@@ -1477,6 +1534,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                   <p className="text-xs text-slate-500 max-w-sm">Select a processed procurement run from the ledger to view its finalized printable document.</p>
                 </div>
               )}
+
               {/* AUDIT LOGS TRAIL SECTION */}
               {selectedHistoryTicket && historyLogs.length > 0 && (
                 <Card className="p-4 space-y-4 bg-white border-slate-200 print:hidden">

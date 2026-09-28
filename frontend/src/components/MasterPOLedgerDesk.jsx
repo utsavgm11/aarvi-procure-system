@@ -14,10 +14,12 @@ const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 export default function MasterPOLedgerDesk({ currentUser }) {
   // 🎯 3-TAB ARCHITECTURE STATE
   const [activeMasterTab, setActiveMasterTab] = useState('ledger'); // 'ledger' | 'renewals'
+  
   const [ledgerList, setLedgerList] = useState([]);
   const [expiringContracts, setExpiringContracts] = useState([]); 
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  
   const [expandedRows, setExpandedRows] = useState({});
   const [selectedPoForView, setSelectedPoForView] = useState(null);
   const [poItems, setPoItems] = useState([]);
@@ -42,7 +44,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [editingTaxInvoices, setEditingTaxInvoices] = useState({});
   const [editingPOs, setEditingPOs] = useState({});
 
-  // 🎯 NEW: Form states for Billing Date Editor
+  // 🎯 Form states for Billing Date Editor
   const [editingBillingDate, setEditingBillingDate] = useState({});
   const [billingDateForms, setBillingDateForms] = useState({});
   
@@ -82,6 +84,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
           tax_invoice_date: po.tax_invoice_date || '',
           file: null
         };
+
         initialPoFileForms[po.po_number] = {
           file: null
         };
@@ -90,6 +93,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       setInvoiceForms(initialForms);
       setTaxInvoiceForms(initialTaxForms);
       setPoFileForms(initialPoFileForms);
+
     } catch (err) {
       console.error("Error fetching Master PO Ledger", err);
     } finally {
@@ -137,14 +141,17 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     setPreviewDoc({ url: fullUrl, title });
   };
 
-  // 🎯 NEW HELPER: Mathematical Offset Engine & Billing Logic for Display
+  // 🎯 Mathematical Offset Engine & Billing Logic for Display
   const getLeaseMetrics = (po) => {
     if (!po.is_recurring || !po.contract_end_date) return null;
     const end = new Date(po.contract_end_date);
     const today = new Date();
+    
     const monthsLeft = Math.max(0, (end.getFullYear() - today.getFullYear()) * 12 + (end.getMonth() - today.getMonth()));
+    
     const deposit = parseFloat(po.security_deposit_amount) || 0;
     const rate = parseFloat(po.monthly_rate) || 0;
+    
     return { monthsLeft, deposit, rate };
   };
 
@@ -176,6 +183,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
 
   // 🎯 RENEWAL SUBMISSION
   const [renewalForm, setRenewalForm] = useState({});
+
   const handleRenewSubmit = async (poNumber) => {
     const formState = renewalForm[poNumber];
     if (!formState || !formState.months || !formState.endDate || !formState.remarks) {
@@ -204,7 +212,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }
   };
 
-  // 🎯 NEW: UPDATE BILLING DATE SUBMISSION
+  // 🎯 UPDATE BILLING DATE SUBMISSION
   const handleBillingDateSubmit = async (poNumber) => {
     try {
       const newDate = parseInt(billingDateForms[poNumber]);
@@ -212,10 +220,12 @@ export default function MasterPOLedgerDesk({ currentUser }) {
         alert("Valid billing date (1-28) required.");
         return;
       }
+
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/billing-date`, {
         user_name: currentUser?.name || "System User",
         billing_trigger_date: newDate
       });
+
       alert("Billing cycle successfully updated.");
       setEditingBillingDate(prev => ({...prev, [poNumber]: false}));
       fetchLedgerPOs();
@@ -242,8 +252,10 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       alert("Please select a signed PO file first.");
       return;
     }
+
     const formData = new FormData();
     formData.append('file', formState.file);
+
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/signed-po`, formData, { 
         headers: { 'Content-Type': 'multipart/form-data'} 
@@ -292,7 +304,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     formData.append('invoice_date', formState.invoice_date);
     formData.append('invoice_duration', formState.payment_terms); 
     formData.append('invoice_remark', ""); 
+    
     if (formState.file) formData.append('file', formState.file);
+
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice`, formData, { headers: { 'Content-Type': 'multipart/form-data'} });
       setEditingInvoices(prev => ({ ...prev, [poNumber]: false }));
@@ -305,7 +319,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     const formData = new FormData();
     formData.append('tax_invoice_no', formState.tax_invoice_no);
     formData.append('tax_invoice_date', formState.tax_invoice_date);
+    
     if (formState.file) formData.append('file', formState.file);
+
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/tax-invoice`, formData, { headers: { 'Content-Type': 'multipart/form-data'} });
       setEditingTaxInvoices(prev => ({ ...prev, [poNumber]: false }));
@@ -335,6 +351,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       const cleanStr = dateStr.split(' ')[0];
       const parts = cleanStr.split('-');
       const day = parseInt(parts[0], 10);
+      
       const monthsMap = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
       const month = monthsMap[parts[1].toLowerCase()];
       const year = parseInt(parts[2], 10);
@@ -348,14 +365,18 @@ export default function MasterPOLedgerDesk({ currentUser }) {
 
   const filteredLedger = useMemo(() => {
     return ledgerList.filter(po => {
+      // 1. Role Based Filtering
       if (!canViewAll) {
         if (po.pm_id !== currentUser?.id && po.project_manager !== currentUser?.name) return false;
       } else {
         if (selectedPMFilter !== 'ALL' && po.project_manager !== selectedPMFilter) return false;
       }
+
+      // 2. Dropdown Filters
       if (selectedProjectFilter !== 'ALL' && po.project_code !== selectedProjectFilter) return false;
       if (selectedTimeFilter === '6_MONTHS' && !isWithinLast6Months(po.generated_at)) return false;
       
+      // 3. Search Bar
       if (searchQuery) {
         const search = searchQuery.toLowerCase();
         const matchesSearch = po.po_number.toLowerCase().includes(search) ||
@@ -392,6 +413,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
 
     const reimbursablePercentage = totalSpend > 0 ? (reimbursableTotal / totalSpend) * 100 : 0;
     const nonReimbursablePercentage = totalSpend > 0 ? (nonReimbursableTotal / totalSpend) * 100 : 0;
+
     return { totalSpend, reimbursableTotal, nonReimbursableTotal, reimbursablePercentage, nonReimbursablePercentage, uniqueSitesCount: projectCodes.size };
   }, [filteredLedger]);
 
@@ -403,6 +425,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       alert("No records to export based on current filters.");
       return;
     }
+
     const headers = [
       "PO Number", "PO Date", "Project Manager", "Project Code", "Project Name", "Vendor Name", 
       "Product Descriptions", "Quantities", "Duration of Contract", "Payment Terms", 
@@ -410,10 +433,12 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       "Tax Invoice No", "Tax Invoice Date", 
       "Disbursed Payment", "Remaining Balance", "Payment UTR", "Payment Date", "Current Status"
     ];
+
     const csvRows = filteredLedger.map(po => {
       const products = po.items ? po.items.map(i => i.desc).join(" | ").replace(/"/g, '""') : "N/A";
       const quantities = po.items ? po.items.map(i => i.qty).join(" | ") : "0";
       const balance = Math.max(0, po.grand_total - po.disbursed_amount);
+
       return [
         `"${po.po_number}"`, `"${po.generated_at}"`, `"${po.project_manager}"`, `"${po.project_code}"`, `"${po.project_name}"`, `"${po.vendor_name}"`,
         `"${products}"`, `"${quantities}"`, `"${po.contract_duration}"`, `"${po.payment_terms}"`,
@@ -422,6 +447,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
         `"${po.disbursed_amount}"`, `"${balance}"`, `"${po.utr_no}"`, `"${po.payment_date}"`, `"${po.status}"`
       ].join(',');
     });
+
     const csvString = [headers.join(','), ...csvRows].join('\n');
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
@@ -474,6 +500,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
           <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Master PO & Spend Ledger</h1>
           <p className="text-sm text-slate-500 font-medium mt-1">Track all authorized purchases, monitor deliveries, and renew expiring contracts.</p>
         </div>
+        
         <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
           <Button 
             variant={activeMasterTab === 'ledger' ? 'primary' : 'ghost'} 
@@ -502,6 +529,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             <h2 className="font-black text-indigo-900 flex items-center gap-2"><RefreshCw size={18}/> Contract Expiry Monitor</h2>
             <p className="text-sm text-indigo-700 mt-1">Displays recurring leases (Vehicles, Accommodation, Subscriptions) expiring in the next 45 days.</p>
           </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {expiringContracts.length === 0 ? (
               <Card className="p-12 text-center text-slate-400 border-dashed border-2 col-span-full">
@@ -510,6 +538,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             ) : (
               expiringContracts.map((contract) => {
                 const isCritical = contract.days_remaining <= 15;
+                
                 return (
                   <Card key={contract.po_number} className={`p-0 overflow-hidden border-2 ${isCritical ? 'border-rose-300' : 'border-amber-200'}`}>
                     <div className={`p-3 text-white flex justify-between items-center ${isCritical ? 'bg-rose-600' : 'bg-amber-500'}`}>
@@ -518,6 +547,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                       </span>
                       <span className="font-bold text-sm">{contract.days_remaining} Days Left</span>
                     </div>
+
                     <div className="p-5 space-y-4">
                       <div>
                         <div className="flex justify-between items-start mb-1">
@@ -527,6 +557,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                         <p className="text-sm font-bold text-slate-800">{contract.project_name}</p>
                         <p className="text-xs text-slate-500 truncate mt-0.5">Vendor: {contract.vendor_name}</p>
                       </div>
+
                       <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 grid grid-cols-2 gap-3 text-xs">
                         <div>
                           <span className="text-[9px] font-bold uppercase text-slate-400 block">Current Expiry Date</span>
@@ -577,6 +608,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             )}
           </div>
         </div>
+
       ) : selectedPoForView ? (
         
         /* 🎯 TAB 3: DOCUMENT PREVIEW (Sub-view of Ledger) */
@@ -589,6 +621,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
               <Printer size={16} className="mr-2 hidden sm:inline" /> <span>Print Document</span>
             </Button>
           </div>
+
           <div className="bg-white p-6 sm:p-12 mx-auto border border-slate-200 shadow-lg max-w-4xl text-sm text-slate-800 font-sans overflow-x-auto">
             <div className="min-w-[600px]">
               <div className="flex justify-between items-start border-b-[3px] border-[#2c2a57] pb-6 mb-8">
@@ -601,6 +634,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   <p className="text-xs text-slate-500 mt-1 font-mono">Date: {selectedPoForView.generated_at}</p>
                 </div>
               </div>
+              
               <div className="grid grid-cols-2 gap-12 mb-10">
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
                   <h3 className="text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-2">To Vendor</h3>
@@ -613,6 +647,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   <p className="text-slate-600 text-xs mt-1 font-mono">Project Code: {selectedPoForView.project_code}</p>
                 </div>
               </div>
+
               <table className="w-full text-left mb-8 border-collapse">
                 <thead>
                   <tr className="bg-slate-800 text-white text-[10px] uppercase tracking-wider">
@@ -633,6 +668,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   ))}
                 </tbody>
               </table>
+
               <div className="flex justify-end mb-10">
                 <div className="w-72 space-y-2 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
                   <div className="flex justify-between text-sm font-black text-[#2c2a57]">
@@ -644,6 +680,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             </div>
           </div>
         </div>
+
       ) : (
         /* 🎯 TAB 1: MASTER SPEND LEDGER */
         <div className="animate-in fade-in duration-300">
@@ -657,6 +694,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                 <h3 className="text-xl font-black text-slate-900 mt-0.5">₹{analyticsMetrics.totalSpend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</h3>
               </div>
             </Card>
+
             <Card className="p-4 flex items-center justify-between bg-white shadow-2xs border border-slate-200">
               <div className="space-y-1.5 flex-1 pr-2">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Reimbursable Breakdown</p>
@@ -676,6 +714,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                 <div className="w-8 h-8 bg-white rounded-full absolute"></div>
               </div>
             </Card>
+
             <Card className="p-4 grid grid-cols-2 gap-2 bg-white shadow-2xs border border-slate-200">
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><FileCheck size={12} /> Active Orders</p>
@@ -712,6 +751,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   </select>
                 </div>
               )}
+
               <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
                 <Filter size={12} className="text-slate-400" />
                 <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Site:</span>
@@ -728,12 +768,14 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   <option value="6_MONTHS">Last 6 Months</option>
                 </select>
               </div>
+
               <button 
                 onClick={handleExportToExcel}
                 className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-1.5 px-3 py-1.5 text-[11px] font-bold shadow-3xs w-full sm:w-auto"
               >
                 <Download size={13} /> <span>Export CSV</span>
               </button>
+
             </div>
           </div>
 
@@ -821,6 +863,13 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                 <span className="font-bold text-purple-600 uppercase">Time Remaining</span>
                                 <span className="font-black text-purple-900">{metrics?.monthsLeft || 0} Mos</span>
                               </div>
+                              
+                              {/* 🎯 NEW: Display Duration (Months) */}
+                              <div className="flex justify-between items-center text-xs border-t border-purple-100 pt-2">
+                                <span className="font-bold text-indigo-600 uppercase">Total Contract Tenure</span>
+                                <span className="font-black text-indigo-900">{po.contract_duration || 'N/A'} Mos</span>
+                              </div>
+
                               <div className="flex justify-between items-center text-xs border-t border-purple-100 pt-2">
                                 <span className="font-bold text-emerald-600 uppercase">Paid Till Now</span>
                                 <span className="font-mono font-black text-emerald-700">₹{paid.toLocaleString('en-IN')}</span>
@@ -875,11 +924,13 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   <span>📄 View System PO</span><ExternalLink size={12}/>
                                 </button>
                               )}
+
                               {po.proforma_invoice_url && (
                                 <button type="button" onClick={() => handlePreviewFile(po.proforma_invoice_url, `Proforma Invoice: ${po.invoice_no || po.po_number}`)} className="text-[10px] font-bold text-amber-700 bg-white border border-amber-200 px-3 py-2 rounded-lg hover:bg-amber-50 flex justify-between items-center">
                                   <span>📄 PI {po.invoice_no ? `(${po.invoice_no})` : ''}</span><ExternalLink size={12}/>
                                 </button>
                               )}
+
                               {po.tax_invoice_url && (
                                 <button type="button" onClick={() => handlePreviewFile(po.tax_invoice_url, `Tax Invoice: ${po.tax_invoice_no || po.po_number}`)} className="text-[10px] font-bold text-emerald-700 bg-white border border-emerald-200 px-3 py-2 rounded-lg hover:bg-emerald-50 flex justify-between items-center">
                                   <span>🧾 Tax Inv {po.tax_invoice_no ? `(${po.tax_invoice_no})` : ''}</span><ExternalLink size={12}/>
@@ -961,6 +1012,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   ) : (
                     filteredLedger.map((po) => {
                       const isExpanded = !!expandedRows[po.po_number];
+                      
                       const isEditingPI = !!editingInvoices[po.po_number];
                       const isEditingTax = !!editingTaxInvoices[po.po_number];
                       const isEditingPO = !!editingPOs[po.po_number];
@@ -1013,6 +1065,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                               <div><strong className="text-slate-900">{po.project_code}</strong></div>
                               <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
                               <div className="text-[9px] font-bold text-indigo-500 uppercase mt-1">PM: {po.project_manager}</div>
+                              
                               <div className={`mt-2 text-[9px] font-bold px-2 py-0.5 rounded w-max uppercase tracking-wider ${
                                 isDiscrepancy ? 'bg-rose-100 text-rose-800 border border-rose-200 animate-pulse' : 
                                 isShortage ? 'bg-amber-100 text-amber-800 border border-amber-200' : 
@@ -1173,6 +1226,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                       <p className="text-xs text-slate-700 mt-1 font-medium">{grnLogEntry.remarks.split(' | Proof')[0]}</p>
                                       <div className="flex items-center gap-4 mt-3">
                                         <span className="text-[10px] text-slate-500 font-mono bg-white px-2 py-1 rounded border border-slate-200">Inspector: {grnLogEntry.user_name} ({grnLogEntry.timestamp.split(' ')[0]})</span>
+                                        
                                         {grnLogEntry.remarks.includes('Proof File:') && (
                                           <button type="button" onClick={() => handlePreviewFile(grnLogEntry.remarks.split('Proof File: ')[1], `GRN Proof: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1 transition-colors">
                                             <Paperclip size={12} /> View Inspector's Photo Proof
@@ -1188,15 +1242,24 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   const metrics = getLeaseMetrics(po);
                                   return (
                                     <div className="mb-6 bg-purple-50/30 border border-purple-200 rounded-xl p-4 shadow-3xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                      
                                       <div className="flex gap-6 items-center flex-wrap">
                                         <div className="flex flex-col">
                                           <span className="text-[10px] font-bold uppercase text-purple-600 tracking-wider">Deposit Held</span>
                                           <span className="font-mono font-black text-purple-900 text-lg">₹{(metrics?.deposit || 0).toLocaleString('en-IN')}</span>
                                         </div>
+                                        
                                         <div className="flex flex-col border-l border-purple-200 pl-6">
                                           <span className="text-[10px] font-bold uppercase text-purple-600 tracking-wider">Time Remaining</span>
                                           <span className="font-black text-purple-900 text-lg">{metrics?.monthsLeft || 0} Mos</span>
                                         </div>
+
+                                        {/* 🎯 NEW: Display Duration (Months) */}
+                                        <div className="flex flex-col border-l border-purple-200 pl-6">
+                                          <span className="text-[10px] font-bold uppercase text-indigo-600 tracking-wider">Contract Tenure</span>
+                                          <span className="font-black text-indigo-900 text-lg">{po.contract_duration || 'N/A'} Mos</span>
+                                        </div>
+
                                         <div className="flex flex-col border-l border-purple-200 pl-6">
                                           <span className="text-[10px] font-bold uppercase text-emerald-600 tracking-wider">Total Paid Till Now</span>
                                           <span className="font-mono font-black text-emerald-700 text-lg">₹{paid.toLocaleString('en-IN')}</span>
@@ -1242,6 +1305,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                            )
                                          )}
                                       </div>
+
                                     </div>
                                   );
                                 })()}
@@ -1304,6 +1368,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                                   </div>
                                                 </div>
                                               </div>
+                                              
                                               {log.remarks.includes('Proof File:') && (
                                                 <div className="flex justify-end pt-2 border-t border-slate-50">
                                                   <button type="button" onClick={() => handlePreviewFile(log.remarks.split('Proof File: ')[1], `Bank Receipt: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1.5 transition-colors">
@@ -1321,8 +1386,8 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                       )}
                                     </div>
                                   </div>
-
                                 </div>
+                                
                               </td>
                             </tr>
                           )}

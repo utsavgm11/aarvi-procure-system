@@ -219,6 +219,7 @@ export default function AccountsDesk({ currentUser }) {
       const matchesTab = activeTab === 'pending' 
         ? (po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed')
         : (po.status === 'Dispatched' || po.status === 'Partially Delivered' || po.status === 'Material Discrepancy Raised' || po.status === 'Delivered - GRN Logged');
+
       return matchesSearch && matchesTab;
     });
   }, [orders, searchQuery, activeTab]);
@@ -289,8 +290,10 @@ export default function AccountsDesk({ currentUser }) {
                 </button>
               </div>
             </div>
+
             <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
               <div className="bg-white p-8 md:p-12 mx-auto border border-slate-200 shadow-sm max-w-4xl text-sm text-slate-800 font-sans print:shadow-none print:border-none print:p-0">
+                
                 <div className="w-full text-xs text-slate-700 font-sans relative avoid-break">
                   <div className="w-full bg-white relative z-10 mb-1">
                     <img src={Letterhead} alt="Aarvi Letterhead" className="w-full h-auto object-contain select-none" onError={(e) => e.target.style.display='none'} />
@@ -303,6 +306,7 @@ export default function AccountsDesk({ currentUser }) {
                     Purchase Order
                   </h1>
                 </div>
+
                 <div className="grid grid-cols-2 gap-12 my-8">
                   <div>
                     <h3 className="text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-1">To Vendor</h3>
@@ -316,6 +320,7 @@ export default function AccountsDesk({ currentUser }) {
                     <p className="text-slate-600 text-xs mt-1 font-mono">Project Code: {selectedSystemPo.project_code}</p>
                   </div>
                 </div>
+
                 <table className="w-full text-left mb-6 border-collapse border border-slate-400">
                   <thead>
                     <tr className="bg-slate-50 text-slate-700 text-[10px] uppercase tracking-wider border-b border-slate-400">
@@ -340,6 +345,7 @@ export default function AccountsDesk({ currentUser }) {
                     </tr>
                   </tbody>
                 </table>
+
                 <div className="text-xs space-y-2 mt-8 text-slate-700">
                   <p><strong className="text-slate-900 uppercase">Payment Terms:</strong> {selectedSystemPo.payment_terms || "100% Payable on Delivery"}</p>
                   <p><strong className="text-slate-900 uppercase">Billing Status:</strong> Proforma Invoice Generated</p>
@@ -356,6 +362,7 @@ export default function AccountsDesk({ currentUser }) {
           <h1 className="text-xl md:text-2xl font-extrabold text-[#2c2a57] tracking-tight">Accounts & Disbursement Desk</h1>
           <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">Verify Proforma Invoices, execute bank transfers, and manage recurring rent offsets.</p>
         </div>
+        
         <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
           <Button 
             variant={activeTab === 'pending' ? 'primary' : 'ghost'} 
@@ -383,6 +390,7 @@ export default function AccountsDesk({ currentUser }) {
             <h3 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">{pendingCount} Orders</h3>
           </div>
         </Card>
+        
         <Card className="p-4 flex items-center space-x-4 border-l-4 border-emerald-500 bg-white shadow-2xs">
           <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600"><CheckCircle2 size={20} /></div>
           <div>
@@ -390,6 +398,7 @@ export default function AccountsDesk({ currentUser }) {
             <h3 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">{completedCount} Orders</h3>
           </div>
         </Card>
+
         <Card className="p-4 flex items-center space-x-4 border-l-4 border-amber-500 bg-white shadow-2xs sm:col-span-2 md:col-span-1">
           <div className="p-3 rounded-xl bg-amber-50 text-amber-600"><Building2 size={20} /></div>
           <div>
@@ -476,13 +485,14 @@ export default function AccountsDesk({ currentUser }) {
                       <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
                         <div className="flex justify-between text-[10px] text-purple-700 font-bold">
                           <span>Billing Trigger: {metrics.triggerDay}{metrics.triggerDay === 1 ? 'st' : metrics.triggerDay === 2 ? 'nd' : metrics.triggerDay === 3 ? 'rd' : 'th'}</span>
-                          <span>Left: {metrics.monthsLeft} Months</span>
+                          <span title="Months Left / Total Tenure">Left: {metrics.monthsLeft} / {po.contract_duration || 'N/A'} Mos</span>
                         </div>
                         {metrics.deposit > 0 && (
                           <div className="text-[9px] text-purple-500 font-bold mt-1 uppercase tracking-tight">Deposit Held: ₹{metrics.deposit.toLocaleString()}</div>
                         )}
                       </div>
                     )}
+
                   </div>
                 </div>
 
@@ -510,6 +520,7 @@ export default function AccountsDesk({ currentUser }) {
                 <div className="border-t border-slate-100 pt-3 space-y-2">
                   <span className="text-[10px] font-bold text-slate-500 uppercase block">Audit Vault:</span>
                   <div className="flex flex-col gap-1.5">
+                    
                     {/* 1. Signed PO / System PO */}
                     {po.signed_po_url ? (
                       <button 
@@ -528,6 +539,7 @@ export default function AccountsDesk({ currentUser }) {
                         <ExternalLink size={10} />
                       </button>
                     )}
+
                     {/* 2. PI */}
                     {po.proforma_invoice_url ? (
                       <button 
@@ -540,6 +552,7 @@ export default function AccountsDesk({ currentUser }) {
                     ) : (
                       <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded w-full block">No PI Attached</span>
                     )}
+
                     {/* 3. Tax Invoice */}
                     {po.tax_invoice_url ? (
                       <button 
@@ -650,12 +663,14 @@ export default function AccountsDesk({ currentUser }) {
                             <span className="text-[9px] font-bold text-slate-400 uppercase block">Total Value:</span>
                             <span className="font-extrabold text-slate-800">₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                           </div>
+                          
                           {po.disbursed_amount > 0 && (
                             <div className="pt-0.5 text-emerald-600">
                               <span className="text-[9px] font-bold uppercase block">Already Paid:</span>
                               <span className="font-bold">₹{po.disbursed_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                             </div>
                           )}
+
                           {(po.remaining_balance > 0 || !po.disbursed_amount) && (
                             <div className="pt-1 border-t border-slate-200/60">
                               <span className="text-[9px] font-bold text-rose-500 uppercase block">Pending Balance:</span>
@@ -668,7 +683,7 @@ export default function AccountsDesk({ currentUser }) {
                             <div className={`mt-2 p-1.5 rounded text-[9px] border text-left ${metrics.isOffsetPhase ? 'bg-rose-50 border-rose-200' : 'bg-purple-50 border-purple-100'}`}>
                               <div className={`flex justify-between font-bold mb-0.5 ${metrics.isOffsetPhase ? 'text-rose-800' : 'text-purple-800'}`}>
                                 <span>Cycle: {metrics.triggerDay}{metrics.triggerDay === 1 ? 'st' : metrics.triggerDay === 2 ? 'nd' : metrics.triggerDay === 3 ? 'rd' : 'th'} / mo</span>
-                                <span>Left: {metrics.monthsLeft} Mos</span>
+                                <span title="Months Left / Total Tenure">Left: {metrics.monthsLeft} / {po.contract_duration || 'N/A'} Mos</span>
                               </div>
                               {metrics.deposit > 0 && (
                                 <div className={`font-bold border-t pt-0.5 mt-0.5 uppercase tracking-tight ${metrics.isOffsetPhase ? 'text-rose-600 border-rose-200' : 'text-purple-600 border-purple-100'}`}>
@@ -677,6 +692,7 @@ export default function AccountsDesk({ currentUser }) {
                               )}
                             </div>
                           )}
+
                         </td>
                         
                         {/* DOCUMENT VAULT */}
@@ -685,6 +701,7 @@ export default function AccountsDesk({ currentUser }) {
                             Terms: {po.payment_terms || '100% Payable'}
                           </div>
                           <div className="flex flex-col gap-1.5">
+                            {/* 1. Signed PO / System PO */}
                             {po.signed_po_url ? (
                               <button onClick={() => handlePreview(po.signed_po_url, `Signed PO - ${po.po_number}`)} className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left">
                                 <span className="font-bold text-slate-700 flex items-center gap-1">✍️ Signed PO</span><ExternalLink size={10} className="text-indigo-400 flex-shrink-0" />
@@ -694,11 +711,15 @@ export default function AccountsDesk({ currentUser }) {
                                 <span className="font-bold text-slate-700 flex items-center gap-1">📄 System PO</span><span className="text-[9px] font-black text-indigo-600 uppercase">View</span>
                               </button>
                             )}
+
+                            {/* 2. PI */}
                             {po.proforma_invoice_url ? (
                               <button onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)} className="flex items-center justify-between bg-amber-50/60 border border-amber-200 px-2 py-1 rounded text-[10px] hover:border-amber-400 transition-colors shadow-3xs w-full text-left">
                                 <span className="font-bold text-amber-800 flex items-center gap-1 truncate max-w-[130px]">📄 PI #{po.invoice_no}</span><ExternalLink size={10} className="text-amber-500 flex-shrink-0" />
                               </button>
                             ) : <span className="text-[9px] italic text-slate-400 pl-1 block">No PI Attached</span>}
+
+                            {/* 3. Tax Invoice */}
                             {po.tax_invoice_url ? (
                               <button onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)} className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 px-2 py-1 rounded text-[10px] hover:border-emerald-400 transition-colors shadow-3xs w-full text-left">
                                 <span className="font-bold text-emerald-800 flex items-center gap-1 truncate max-w-[130px]">🧾 Tax Inv #{po.tax_invoice_no}</span><ExternalLink size={10} className="text-emerald-500 flex-shrink-0" />
@@ -715,6 +736,7 @@ export default function AccountsDesk({ currentUser }) {
                         <td className="p-4 text-center align-top border-l border-slate-100">
                           {po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed' ? (
                             <div className="space-y-2">
+                              
                               {/* Warning Alerts */}
                               {metrics?.isDueSoon && !metrics?.isOffsetPhase && (
                                 <div className="text-[9px] uppercase tracking-wider bg-amber-100 text-amber-800 font-bold px-2 py-1 rounded animate-pulse shadow-3xs">
@@ -968,6 +990,7 @@ export default function AccountsDesk({ currentUser }) {
                   {submitting ? "Processing..." : (metrics?.isOffsetPhase ? "Log Formal Offset" : "Confirm & Send Funds")}
                 </Button>
               </div>
+
             </div>
           </div>
         );

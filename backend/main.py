@@ -54,6 +54,10 @@ app.add_middleware(
     allow_headers=["*"], 
 )
 
+# 🎯 GLOBAL IST TIME ENGINE
+def get_ist_time():
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
+
 # -------------------------------------------------------------------
 # PYDANTIC INCOMING DATA VALIDATORS
 # -------------------------------------------------------------------
@@ -177,7 +181,7 @@ class SaveTemplatePayload(BaseModel):
     html_content: str
 
 # -------------------------------------------------------------------
-# STAGE 0: LIVE PERSONNEL ROUTING
+# STAGE 0: LIVE PERSONNEL & SYSTEM DATA ROUTING
 # -------------------------------------------------------------------
 @app.get("/api/users/by-role", response_model=List[dict])
 def get_active_users_by_role(role: str, db: Session = Depends(get_db)):
@@ -186,6 +190,13 @@ def get_active_users_by_role(role: str, db: Session = Depends(get_db)):
         models.User.is_active == True
     ).order_by(models.User.name.asc()).all()
     return [{"id": u.id, "name": u.name, "email": u.email, "empcode": u.empcode} for u in users]
+
+@app.get("/api/system/material-types", response_model=List[str])
+def get_dynamic_material_types(db: Session = Depends(get_db)):
+    types = db.query(models.TicketItem.item_type).distinct().all()
+    unique_types = {t[0] for t in types if t[0]}
+    unique_types.update(["Consumable", "Asset"])
+    return sorted(list(unique_types))
 
 # -------------------------------------------------------------------
 # STAGE 1: SITE COORDINATOR ENTRY GATEWAY
@@ -353,7 +364,7 @@ def raise_direct_manager_purchase_order(
     return {"ticket_number": ticket_number, "po_number": po_number, "status": "Awaiting Digital Signature"}    
 
 # -------------------------------------------------------------------
-# STAGE 2: DUAL-SIGNATURE NEGOTIATION LOOP 
+# STAGE 2: DUAL-SIGNATURE NEGOTIATION LOOP & VETTING ROUTING
 # -------------------------------------------------------------------
 @app.put("/api/requisitions/{ticket_number}/propose-edits")
 def propose_ticket_edits(
@@ -431,13 +442,32 @@ def dual_sign_approve(
             
     remarks_text = f"List Approved & Locked by {payload.user_role}."
     
-    if payload.user_role in ["Site Manager", "Project Manager"]:
+    # 🎯 Sequential Routing Logic: Enforce Site Manager -> Project Manager sequence
+    if payload.user_role == "Site Manager":
+        ticket.status = "Pending PM Vetting"
+        remarks_text += " Site Manager approved. Routed to Project Manager for final technical vetting."
+        
+    elif payload.user_role == "Project Manager":
         ticket.status = "Pending Sourcing"
         remarks_text += " Technical Vetting complete. Dispatched directly to Purchasing Desk."
             
     elif payload.user_role == "Site Coordinator":
-        ticket.status = "Pending Sourcing"
-        remarks_text += " Coordinator accepted Manager's counter-edits. Dispatched directly to Purchasing Desk."
+        last_edit = db.query(models.TicketHistory).filter(
+            models.TicketHistory.ticket_number == ticket_number,
+            models.TicketHistory.action_taken == "Proposed Counter-Edits"
+        ).order_by(models.TicketHistory.id.desc()).first()
+        
+        if last_edit:
+            last_editor = db.query(models.User).filter(models.User.name == last_edit.user_name).first()
+            if last_editor and getattr(last_editor, 'role', '') == "Site Manager":
+                ticket.status = "Pending PM Vetting"
+                remarks_text += " Coordinator accepted Site Manager's counter-edits. Routed to Project Manager for final vetting."
+            else:
+                ticket.status = "Pending Sourcing"
+                remarks_text += " Coordinator accepted Manager's counter-edits. Dispatched directly to Purchasing Desk."
+        else:
+            ticket.status = "Pending Sourcing"
+            remarks_text += " Coordinator accepted Manager's counter-edits. Dispatched directly to Purchasing Desk."
             
     db.add(models.TicketHistory(
         ticket_number=ticket_number,
@@ -447,6 +477,20 @@ def dual_sign_approve(
     ))
     db.commit()
     
+    # 🎯 Dispatch Emails based on the sequential status
+    if ticket.status == "Pending PM Vetting":
+        pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
+        if pm and pm.email:
+            background_tasks.add_task(
+                send_workflow_email,
+                recipient_email=pm.email,
+                recipient_name=pm.name,
+                subject=f"Action Required: Site Manager Approved - Pending PM Vetting for {ticket_number}",
+                ticket_number=ticket_number,
+                project_name=ticket.project_name,
+                status="Pending PM Vetting"
+            )
+
     if ticket.status == "Pending Sourcing":
         purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
         for pe in purchase_execs:
@@ -477,7 +521,7 @@ async def upload_quotation_document(
     if ext not in [".pdf", ".doc", ".docx"]:
         raise HTTPException(status_code=400, detail="Unsupported format. Only PDF, DOC, and DOCX are allowed.")
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = get_ist_time().strftime("%Y%m%d_%H%M%S")
     systematic_name = f"QUOTE_{ticket_number}_ROW{item_index}_OPT{option_index}_{timestamp}{ext}"
     target_destination = os.path.join(UPLOAD_DIR, systematic_name)
     
@@ -545,7 +589,6 @@ def attach_vendor_quotations(
             contract_tenure_months=quote.contract_tenure_months,
             monthly_rate=quote.monthly_rate,
             approved_spending_cap=quote.approved_spending_cap,
-            # 🎯 NEW: Financial Offset & Trigger Bindings
             security_deposit_amount=getattr(quote, 'security_deposit_amount', 0.0),
             billing_trigger_date=getattr(quote, 'billing_trigger_date', 5)
         )
@@ -661,7 +704,7 @@ def process_financial_signoff(
             po_number=po_number,
             ticket_number=ticket_number,
             pdf_url=f"/storage/aarvi_pos/{po_number}.pdf",
-            gst_status="Pending" # 🎯 Initialize GST Hold
+            gst_status="Pending" 
         )
         db.add(new_po)
         remarks_text = f"Budget cleared by {payload.user_name}. Winning vendor bids locked. Draft PO template {po_number} generated and sent to Purchasing Department."
@@ -775,7 +818,7 @@ def get_coordinator_handshake_queue(coordinator_id: int, db: Session = Depends(g
 @app.get("/api/requisitions/{ticket_number}/items", response_model=List[dict])
 def get_ticket_line_items(ticket_number: str, db: Session = Depends(get_db)):
     items = db.query(models.TicketItem).filter(models.TicketItem.ticket_number == ticket_number).order_by(models.TicketItem.item_index.asc()).all()
-    return [{"item_index": i.item_index, "product_description": i.product_description, "make_brand": i.make_brand, "quantity": i.quantity, "purpose": i.purpose, "is_reimbursable": i.is_reimbursable,"item_type": getattr(i, 'item_type', 'Consumable')} for i in items]
+    return [{"item_index": i.item_index, "product_description": i.product_description, "make_brand": i.make_brand, "quantity": i.quantity, "purpose": i.purpose, "is_reimbursable": i.is_reimbursable, "item_type": getattr(i, 'item_type', 'Consumable')} for i in items]
 
 @app.get("/api/requisitions/{ticket_number}/history", response_model=List[dict])
 def get_ticket_history_logs(ticket_number: str, db: Session = Depends(get_db)):
@@ -809,7 +852,7 @@ def get_coordinator_completed_history(coordinator_id: int, db: Session = Depends
             "project_code": t.project_code,
             "project_name": t.project_name,
             "status": t.status,
-            "category": t.category, # 🎯 ADDED CATEGORY HERE
+            "category": t.category, 
             "action_date": str(log.timestamp.strftime('%d-%m-%Y %H:%M')) if log else "Date Unavailable"
         })
     return response
@@ -1114,7 +1157,7 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
         <table style="width: 100%; border-bottom: 2px solid #2c2a57; padding-bottom: 10px;">
             <tr>
                 <td style="font-size: 16pt; font-weight: bold; color: #2c2a57;">AARVI ENCON LIMITED</td>
-                <td style="text-align: right; font-size: 9pt;"><b>Ref:</b> AEL/{vendor_name[:6].upper()}-PO/2026-27/{po_number.split('-')[-1]}<br/><b>Date:</b> {date.today().strftime('%d/%m/%Y')}</td>
+                <td style="text-align: right; font-size: 9pt;"><b>Ref:</b> AEL/{vendor_name[:6].upper()}-PO/2026-27/{po_number.split('-')[-1]}<br/><b>Date:</b> {get_ist_time().date().strftime('%d/%m/%Y')}</td>
             </tr>
         </table>
         
@@ -1274,7 +1317,7 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
         
     p_ref = doc.add_paragraph()
     p_ref.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    run_ref = p_ref.add_run(f"Ref: AEL/{vendor_name[:6].upper()}-PO/2026-27/{po_number.split('-')[-1]}\nDate: {date.today().strftime('%d/%m/%Y')}")
+    run_ref = p_ref.add_run(f"Ref: AEL/{vendor_name[:6].upper()}-PO/2026-27/{po_number.split('-')[-1]}\nDate: {get_ist_time().date().strftime('%d/%m/%Y')}")
     run_ref.font.size = Pt(9)
     p_title = doc.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -1449,7 +1492,6 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             "gst_clearance_date": getattr(po_obj, 'gst_clearance_date', 'N/A') or 'N/A',
             "gst_verified_by": getattr(po_obj, 'gst_verified_by', 'N/A') or 'N/A',
             
-            # 🎯 NEW: Financial Offset & Tracking Deliverables
             "is_recurring": getattr(primary_quote, 'is_recurring', False) if primary_quote else False,
             "security_deposit_amount": float(getattr(primary_quote, 'security_deposit_amount', 0) or 0),
             "monthly_rate": float(getattr(primary_quote, 'monthly_rate', getattr(primary_quote, 'unit_price', 0)) or 0),
@@ -1512,7 +1554,7 @@ async def update_po_invoice_details(
         if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
             raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
             
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = get_ist_time().strftime("%Y%m%d_%H%M%S")
         filename = f"PI_{po_number}_{timestamp}"
         
         try:
@@ -1603,7 +1645,7 @@ async def upload_signed_po_document(
     if ext not in [".pdf", ".png", ".jpg", ".jpeg", ".doc", ".docx"]:
         raise HTTPException(status_code=400, detail="Invalid file type.")
         
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = get_ist_time().strftime("%Y%m%d_%H%M%S")
     filename = f"SIGNED_PO_{po_number}_{timestamp}"
     
     try:
@@ -1641,7 +1683,7 @@ async def update_po_tax_invoice_details(
         if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
             raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
             
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = get_ist_time().strftime("%Y%m%d_%H%M%S")
         filename = f"TAX_INV_{po_number}_{timestamp}"
         
         try:
@@ -1686,7 +1728,7 @@ def mark_po_gst_as_paid(
         raise HTTPException(status_code=404, detail="Purchase Order not found.")
         
     po.gst_status = "Paid"
-    po.gst_clearance_date = datetime.now().strftime('%d-%b-%Y %I:%M %p')
+    po.gst_clearance_date = get_ist_time().strftime('%d-%b-%Y %I:%M %p')
     po.gst_verified_by = payload.user_name
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
     
@@ -1819,7 +1861,7 @@ async def upload_vendor_documents(
         if ext not in [".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg"]:
             raise HTTPException(status_code=400, detail=f"Invalid format for {doc_name}. Use PDF, Word, or Image.")
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = get_ist_time().strftime("%Y%m%d_%H%M%S")
         filename = f"VENDOR_{vendor_id}_{doc_name}_{timestamp}"
         try:
             res = cloudinary.uploader.upload(
@@ -2161,7 +2203,6 @@ def get_pending_disbursement_pos(db: Session = Depends(get_db)):
             "payment_date": getattr(po_obj, 'payment_date', '') or '' if po_obj else '',
             "payment_remark": getattr(po_obj, 'payment_remark', '') or '' if po_obj else '',
             "gst_status": getattr(po_obj, 'gst_status', 'Pending') or 'Pending',
-            # 🎯 NEW: Financial Offset & Tracking Deliverables
             "is_recurring": getattr(primary_quote, 'is_recurring', False) if primary_quote else False,
             "security_deposit_amount": float(getattr(primary_quote, 'security_deposit_amount', 0) or 0),
             "monthly_rate": float(getattr(primary_quote, 'monthly_rate', getattr(primary_quote, 'unit_price', 0)) or 0),
@@ -2209,7 +2250,7 @@ async def process_po_disbursement(
         if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
             raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed.")
             
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = get_ist_time().strftime("%Y%m%d_%H%M%S")
         filename = f"BANK_RECEIPT_{po_number}_{timestamp}"
         
         try:
@@ -2290,9 +2331,9 @@ async def process_goods_receipt_note(
     receipt_type: str = Form("CLEAN"),
     discrepancy_category: str = Form(""),
     remarks: str = Form(""),
-    extra_km: float = Form(0.0),            # 🎯 NEW: Capture Extra KM
-    extra_km_rate: float = Form(0.0),       # 🎯 NEW: Capture KM Rate
-    extra_fuel_charges: float = Form(0.0),  # 🎯 NEW: Capture Extra Fuel
+    extra_km: float = Form(0.0),            
+    extra_km_rate: float = Form(0.0),       
+    extra_fuel_charges: float = Form(0.0),  
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
 ):
@@ -2306,7 +2347,7 @@ async def process_goods_receipt_note(
         if ext not in [".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg"]:
             raise HTTPException(status_code=400, detail="Allowed file types: PDF, Word Doc, PNG, JPG.")
             
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = get_ist_time().strftime("%Y%m%d_%H%M%S")
         filename = f"GRN_{receipt_type}_{ticket_number}_{timestamp}"
         
         try:
@@ -2321,11 +2362,9 @@ async def process_goods_receipt_note(
             logger.error(f"Cloudinary Upload Failed for GRN: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to upload GRN/Proof document to cloud storage.")
             
-    # 🎯 Check if extra charges were added
     has_extra_charges = float(extra_km or 0) > 0 or float(extra_fuel_charges or 0) > 0
     
     if receipt_type == "CLEAN":
-        # 🎯 Intercept if it has extra charges
         if has_extra_charges:
             ticket.status = "Extra Usage - Pending Purchase"
             action = "Variable Usage Logged - Pending Verification"
@@ -2456,7 +2495,6 @@ def truncate_recurring_contract(
     if not ticket:
         raise HTTPException(status_code=404, detail="Material Ticket not found.")
         
-    # 1. Fetch Winning Bid
     winning_quotes = db.query(models.Quotation).filter(
         models.Quotation.ticket_number == po.ticket_number,
         models.Quotation.is_selected == True
@@ -2467,28 +2505,21 @@ def truncate_recurring_contract(
         
     primary_quote = winning_quotes[0]
     
-    # 2. Prevent Truncation on Non-Recurring Orders
     if not getattr(primary_quote, 'is_recurring', False):
         raise HTTPException(status_code=400, detail="Cannot truncate a standard Goods PO. Use cancellation instead.")
         
-    # 3. Recalculate Contract Value (New Cap)
     monthly_rate = float(primary_quote.monthly_rate or 0)
     old_cap = float(primary_quote.approved_spending_cap or primary_quote.total_amount or 0)
     
-    # New Budget Ceiling = (Months Used * Monthly Rate) - Any Deposit being adjusted by Accounts
     new_cap = (monthly_rate * payload.actual_months_used) - payload.deposit_adjusted_amount
-    
     unspent_funds_released = old_cap - new_cap
     
-    # 4. Apply Changes to the database
     primary_quote.approved_spending_cap = new_cap
     primary_quote.total_amount = new_cap
     primary_quote.contract_tenure_months = payload.actual_months_used
     
-    # Mark Ticket as Closed
     ticket.status = "Contract Terminated & Closed"
     
-    # 5. Log the Audit Trail
     log_msg = (
         f"Early Contract Termination: Contract reduced to {payload.actual_months_used} months. "
         f"Deposit Adjusted: ₹{payload.deposit_adjusted_amount:,.2f}. "
@@ -2504,7 +2535,6 @@ def truncate_recurring_contract(
         remarks=log_msg
     ))
     
-    # 6. Email Alerts to Finance and Accounts
     accounts_users = db.query(models.User).filter(models.User.role.in_(["Accounts Executive", "Accounts", "Finance Manager"]), models.User.is_active == True).all()
     for acc in accounts_users:
         if acc.email:
@@ -2533,7 +2563,7 @@ def truncate_recurring_contract(
 # -------------------------------------------------------------------
 @app.get("/api/purchase-orders/expiring", response_model=List[dict])
 def get_expiring_contracts(db: Session = Depends(get_db)):
-    today = date.today()
+    today = get_ist_time().date()
     
     orders = db.query(models.PurchaseOrder, models.MaterialTicket, models.Quotation)\
         .join(models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number)\
@@ -2629,26 +2659,23 @@ def renew_recurring_contract(
 def get_director_analytics_summary(db: Session = Depends(get_db)):
     closed_statuses = ["Delivered - GRN Logged", "Contract Terminated & Closed", "Rejected"]
     
-    # 1. Active Procurement Tickets Count
     active_count = db.query(models.MaterialTicket).filter(
         models.MaterialTicket.status.notin_(closed_statuses)
     ).count()
 
-    # 2. Urgent Director Approvals Pending
     pending_director_count = db.query(models.MaterialTicket).filter(
         models.MaterialTicket.status == "Pending Director"
     ).count()
 
-    # 3. Winning Bids & Reimbursement Aggregation
     winning_data = db.query(models.Quotation, models.TicketItem, models.MaterialTicket)\
         .join(models.MaterialTicket, models.Quotation.ticket_number == models.MaterialTicket.ticket_number)\
         .join(models.TicketItem, (models.Quotation.ticket_number == models.TicketItem.ticket_number) & (models.Quotation.item_index == models.TicketItem.item_index))\
         .filter(models.Quotation.is_selected == True).all()
 
     total_spend = 0.0
+    active_monthly_spend = 0.0
     reimbursable_spend = 0.0
     non_reimbursable_spend = 0.0
-    active_monthly_spend = 0.0
 
     category_spend = {"GOODS": 0.0, "VEHICLE": 0.0, "ACCOMMODATION": 0.0, "FOOD": 0.0, "SUBSCRIPTION": 0.0}
     pm_spend_map = {}
@@ -2658,13 +2685,11 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
         amount = float(quote.net_amount_payable or quote.total_amount or quote.base_total_value or 0)
         total_spend += amount
 
-        # Reimbursable vs Corporate
         if getattr(item, 'is_reimbursable', False):
             reimbursable_spend += amount
         else:
             non_reimbursable_spend += amount
 
-        # 🎯 FIX: Active Monthly Lease Run-Rate Logic
         is_recurring_ticket = getattr(quote, 'is_recurring', False) or (ticket.category in ["VEHICLE", "ACCOMMODATION", "SUBSCRIPTION"])
         inactive_lease_statuses = [
             "Pending Sourcing", "Pending PM Vetting", "Vetting Active", "Awaiting Coordinator Sign-Off",
@@ -2675,12 +2700,10 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
             m_rate = float(quote.monthly_rate or quote.unit_price or 0)
             active_monthly_spend += m_rate
 
-        # Category Distribution
         cat_key = (ticket.category or "GOODS").upper()
         if cat_key in category_spend:
             category_spend[cat_key] += amount
 
-        # PM Leaderboard Grouping
         pm_user = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
         pm_name = pm_user.name if pm_user else "Unassigned / Direct"
         if pm_name not in pm_spend_map:
@@ -2688,7 +2711,6 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
         pm_spend_map[pm_name]["total_spend"] += amount
         pm_spend_map[pm_name]["po_count"].add(ticket.ticket_number)
 
-        # Projects & Sub-Projects Grouping
         p_code = ticket.project_code or "UNKNOWN"
         p_name = ticket.project_name or "Unclassified Site"
         if p_code not in project_spend_map:
@@ -2703,14 +2725,12 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
         project_spend_map[p_code]["total_spend"] += amount
         project_spend_map[p_code]["ticket_count"].add(ticket.ticket_number)
 
-    # Format PM Breakdown
     pm_spend = [
         {"pm_name": pm, "total_spend": data["total_spend"], "orders_count": len(data["po_count"])}
         for pm, data in pm_spend_map.items()
     ]
     pm_spend.sort(key=lambda x: x["total_spend"], reverse=True)
 
-    # Format Projects Matrix
     all_projects = [
         {
             "project_code": data["project_code"],

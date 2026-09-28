@@ -1,7 +1,11 @@
 # backend/models.py
-from datetime import datetime
-from sqlalchemy import Column,Float, Integer, String, Numeric, Boolean, DateTime, ForeignKey, Text, Date 
+from datetime import datetime, timedelta
+from sqlalchemy import Column, Float, Integer, String, Numeric, Boolean, DateTime, ForeignKey, Text, Date 
 from database import Base
+
+# 🎯 Global IST Time Function
+def get_ist_time():
+    return datetime.utcnow() + timedelta(hours=5, minutes=30)
 
 class User(Base):
     __tablename__ = "users"
@@ -14,7 +18,7 @@ class User(Base):
     role = Column(String, nullable=False)
     
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_ist_time)
 
 class MaterialTicket(Base):
     __tablename__ = "material_tickets"
@@ -29,7 +33,7 @@ class MaterialTicket(Base):
     
     category = Column(String, default="GOODS")
     status = Column(String, default="Pending Site Manager")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_ist_time)
 
 class TicketItem(Base):
     __tablename__ = "ticket_items"
@@ -44,8 +48,9 @@ class TicketItem(Base):
     is_reimbursable = Column(Boolean, default=False)
     reimbursement_notes = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_ist_time)
     item_type = Column(String, default="Consumable")
+    expense_category = Column(String(50), default="Non-Reimbursable")
 
 class Quotation(Base):
     __tablename__ = "quotations"
@@ -67,7 +72,7 @@ class Quotation(Base):
     file_url = Column(String, nullable=True)
     special_terms = Column(Text, nullable=True)
     is_selected = Column(Boolean, default=False)
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, default=get_ist_time)
     
     quality_remarks = Column(Text, nullable=True)
     
@@ -79,7 +84,6 @@ class Quotation(Base):
     site_contact_phone = Column(String, nullable=True)
     base_total_value = Column(Numeric(12, 2), default=0.00)
     net_amount_payable = Column(Numeric(12, 2), default=0.00)
-
     # 🎯 NEW: Unified Recurring / Subscription Fields
     is_recurring = Column(Boolean, default=False)
     recurring_type = Column(String, default="FIXED_LEASE")
@@ -87,7 +91,6 @@ class Quotation(Base):
     contract_tenure_months = Column(Integer, default=1)
     monthly_rate = Column(Numeric(12, 2), default=0.00)
     approved_spending_cap = Column(Numeric(12, 2), default=0.00)
-
     # 🎯 NEW: Financial Offset & Trigger Constraints
     security_deposit_amount = Column(Float, default=0.0)
     billing_trigger_date = Column(Integer, default=5)
@@ -99,14 +102,14 @@ class TicketHistory(Base):
     user_name = Column(String, nullable=False)
     action_taken = Column(String, nullable=False)
     remarks = Column(Text, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=get_ist_time)
 
 class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
     id = Column(Integer, primary_key=True, index=True)
     po_number = Column(String, unique=True, nullable=False)
     ticket_number = Column(String, ForeignKey("material_tickets.ticket_number", ondelete="CASCADE"))
-    generated_at = Column(DateTime, default=datetime.utcnow)
+    generated_at = Column(DateTime, default=get_ist_time)
     pdf_url = Column(String, nullable=False)
     
     signed_po_url = Column(String, nullable=True)
@@ -138,7 +141,6 @@ class PurchaseOrder(Base):
 
 class Vendor(Base):
     __tablename__ = "vendors"
-
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
     address = Column(String)

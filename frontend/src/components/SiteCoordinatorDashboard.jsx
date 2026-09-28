@@ -26,6 +26,9 @@ export default function SiteCoordinatorDashboard() {
   // Dynamic API States
   const [siteManagers, setSiteManagers] = useState([]);
   const [projectManagers, setProjectManagers] = useState([]);
+  
+  // 🎯 NEW: Self-Learning Material Types State
+  const [dynamicMaterialTypes, setDynamicMaterialTypes] = useState(['Consumable', 'Asset']);
 
   // Routing States
   const [siteManagerId, setSiteManagerId] = useState('');
@@ -55,17 +58,23 @@ export default function SiteCoordinatorDashboard() {
   const [extraKmRate, setExtraKmRate] = useState('');
   const [extraFuelCharges, setExtraFuelCharges] = useState('');
 
-  // Initial Fetches
+  // Initial Fetches (Managers + Dynamic Material Types)
   useEffect(() => {
-    const fetchManagers = async () => {
+    const fetchInitialData = async () => {
       try {
         const smRes = await axios.get(`${API_BASE_URL}/users/by-role?role=Site Manager`);
         setSiteManagers(smRes.data);
         const pmRes = await axios.get(`${API_BASE_URL}/users/by-role?role=Project Manager`);
         setProjectManagers(pmRes.data);
-      } catch (err) { console.error("Failed to load managers", err); }
+        
+        // 🎯 Fetch self-learning categories from DB
+        const matRes = await axios.get(`${API_BASE_URL}/system/material-types`);
+        if (matRes.data && matRes.data.length > 0) {
+            setDynamicMaterialTypes(matRes.data);
+        }
+      } catch (err) { console.error("Failed to load initial data", err); }
     };
-    fetchManagers();
+    fetchInitialData();
   }, []);
 
   const fetchProposals = useCallback(async () => {
@@ -202,7 +211,7 @@ export default function SiteCoordinatorDashboard() {
     formData.append('receipt_type', receiptType);
     formData.append('discrepancy_category', discrepancyCategory);
     
-    // 🎯 Formatting the final remarks to include variable usage natively
+    // Formatting the final remarks to include variable usage natively
     let combinedRemarks = grnRemarks;
     if (extraKm || extraFuelCharges) {
       combinedRemarks += ` | [Extra Usage Logged] KM Driven: ${extraKm || 0} @ ₹${extraKmRate || 0}/km, Extra Fuel/Utility: ₹${extraFuelCharges || 0}`;
@@ -211,7 +220,7 @@ export default function SiteCoordinatorDashboard() {
     formData.append('remarks', combinedRemarks);
     formData.append('user_name', currentUserName);
     
-    // 🎯 Pass explicit form data fields so the backend can capture them for Accounts review later
+    // Pass explicit form data fields so the backend can capture them for Accounts review later
     formData.append('extra_km', extraKm || 0);
     formData.append('extra_km_rate', extraKmRate || 0);
     formData.append('extra_fuel_charges', extraFuelCharges || 0);
@@ -251,6 +260,11 @@ export default function SiteCoordinatorDashboard() {
   return (
     <div className="space-y-6 relative pb-10 sm:px-2 md:px-4">
       
+      {/* 🎯 DATALIST FOR SELF LEARNING DROPDOWNS */}
+      <datalist id="dynamic-material-types">
+        {dynamicMaterialTypes.map((type, idx) => <option key={idx} value={type} />)}
+      </datalist>
+
       {/* HEADER ACTIONS BAR (Responsive) */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
@@ -334,12 +348,18 @@ export default function SiteCoordinatorDashboard() {
                       <td className="py-2 px-2"><input required value={item.product_description} onChange={e => handleItemChange(index, 'product_description', e.target.value)} placeholder="Description..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                       <td className="py-2 px-2"><input value={item.make_brand} onChange={e => handleItemChange(index, 'make_brand', e.target.value)} placeholder="Tata, Finolex..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                       <td className="py-2 px-2"><input type="number" min="1" required value={item.quantity} onChange={e => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm font-bold text-center text-slate-800 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
+                      
+                      {/* 🎯 SELF LEARNING INPUT INSTEAD OF STRICT SELECT */}
                       <td className="py-2 px-2">
-                        <select value={item.item_type || 'Consumable'} onChange={e => handleItemChange(index, 'item_type', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs md:text-sm font-semibold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none cursor-pointer">
-                          <option value="Consumable">📦 Consumable</option>
-                          <option value="Asset">🖥️ Asset</option>
-                        </select>
+                        <input 
+                          list="dynamic-material-types"
+                          value={item.item_type || ''} 
+                          onChange={e => handleItemChange(index, 'item_type', e.target.value)} 
+                          placeholder="Select or type..."
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs md:text-sm font-semibold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none" 
+                        />
                       </td>
+
                       <td className="py-2 px-2"><input value={item.purpose} onChange={e => handleItemChange(index, 'purpose', e.target.value)} placeholder="Site use case..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                       <td className="py-2 text-center">
                         <button type="button" onClick={() => removeRow(index)} disabled={items.length === 1} className="text-slate-400 hover:text-rose-600 disabled:opacity-20 p-2"><Trash2 size={16} /></button>
@@ -410,12 +430,18 @@ export default function SiteCoordinatorDashboard() {
                             <td className="py-1 px-1"><input type="text" value={item.product_description} onChange={(e) => handleProposalCellChange(idx, 'product_description', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-[11px] md:text-xs text-slate-800 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             <td className="py-1 px-1"><input type="text" value={item.make_brand || ''} onChange={(e) => handleProposalCellChange(idx, 'make_brand', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-[11px] md:text-xs text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             <td className="py-1 px-1"><input type="number" value={item.quantity} onChange={(e) => handleProposalCellChange(idx, 'quantity', parseInt(e.target.value) || 1)} className="w-full bg-slate-50 border border-slate-200 rounded text-center text-[11px] md:text-xs font-bold text-amber-700 focus:bg-white focus:border-[#2c2a57] outline-none py-1.5" /></td>
+                            
+                            {/* 🎯 SELF LEARNING INPUT INSTEAD OF STRICT SELECT */}
                             <td className="py-1 px-1">
-                              <select value={item.item_type || 'Consumable'} onChange={(e) => handleProposalCellChange(idx, 'item_type', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-1 py-1.5 text-[10px] md:text-[11px] font-semibold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none cursor-pointer">
-                                <option value="Consumable">📦 Consumable</option>
-                                <option value="Asset">🖥️ Asset</option>
-                              </select>
+                              <input 
+                                list="dynamic-material-types"
+                                value={item.item_type || ''} 
+                                onChange={(e) => handleProposalCellChange(idx, 'item_type', e.target.value)} 
+                                placeholder="Select or type..."
+                                className="w-full bg-slate-50 border border-slate-200 rounded px-1 py-1.5 text-[10px] md:text-[11px] font-semibold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none" 
+                              />
                             </td>
+
                             <td className="py-1 px-1"><input type="text" value={item.purpose || ''} onChange={(e) => handleProposalCellChange(idx, 'purpose', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-[11px] md:text-xs text-slate-600 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             <td className="py-1 text-center"><button type="button" onClick={() => removeProposalRow(idx)} className="text-slate-400 hover:text-rose-600 p-1"><Trash2 size={14} /></button></td>
                           </tr>
@@ -468,11 +494,14 @@ export default function SiteCoordinatorDashboard() {
           ) : (
             history.map((ticket) => {
               
-              // 🎯 12-MONTH CONTINUOUS LOOP LOGIC: 
-              // Shows the GRN button for Dispatched, Partially Delivered, Partially Disbursed, AND Delivered (if it's a recurring lease waiting for next month's log!)
+              // 🎯 12-MONTH CONTINUOUS LOOP LOGIC
               const canLogGrn = 
                 ['Dispatched', 'Partially Delivered', 'Partially Disbursed'].includes(ticket.status) || 
                 (ticket.status === 'Delivered - GRN Logged' && ['VEHICLE', 'ACCOMMODATION', 'SUBSCRIPTION'].includes(ticket.category));
+
+              // 🎯 DYNAMIC GRN TEXT LOGIC
+              const isFirstTime = ['Dispatched', 'Partially Disbursed'].includes(ticket.status);
+              const buttonText = isFirstTime ? "Log Initial Receipt/GRN" : "Upload Next Monthly Log";
 
               return (
                 <Card key={ticket.ticket_number} className="p-3 md:p-4 bg-white border border-slate-200 flex flex-col space-y-4 md:space-y-5">
@@ -589,7 +618,7 @@ export default function SiteCoordinatorDashboard() {
                     </div>
                   </div>
 
-                  {/* 🎯 ACTION ZONE: Show Inspection & GRN Button (NOW SUPPORTS RECURRING MONTHLY LOOPS!) */}
+                  {/* 🎯 ACTION ZONE: Show Inspection & GRN Button */}
                   {canLogGrn && (
                     <div className="bg-slate-50 p-3 md:p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div>
@@ -601,7 +630,7 @@ export default function SiteCoordinatorDashboard() {
                         onClick={() => setGrnModalTicket(ticket)}
                         className="w-full sm:w-auto bg-[#0b9c54] hover:bg-emerald-600 shadow-sm text-[11px] md:text-xs py-2 md:py-2.5"
                       >
-                        <UploadCloud size={14} className="mr-1.5" /> Process Log / GRN
+                        <UploadCloud size={14} className="mr-1.5" /> {buttonText}
                       </Button>
                     </div>
                   )}
