@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Download, FileText, Edit3, Stamp, ArrowRight, CheckCircle2, AlertCircle, X, Save } from 'lucide-react';
 import { Card, Button } from './ui/SharedUI';
+
 import aarviLogo from '../assets/logo.png';
 import Letterhead from '../assets/letter_head.jpg';
 
@@ -42,6 +43,7 @@ export default function PODistributionDashboard({ currentUser }) {
     setAlert(null);
     setLoading(true);
     setSavedHtml(null); // Reset the saved HTML
+    
     try {
       // 🎯 CHECK IF A SAVED TEMPLATE EXISTS FOR THIS PO
       try {
@@ -94,7 +96,6 @@ export default function PODistributionDashboard({ currentUser }) {
     if (!selectedPo) return;
     const element = document.getElementById('printable-po');
     if (!element) return;
-
     setSaveLoading(true);
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${selectedPo.po_number}/template`, {
@@ -379,7 +380,7 @@ export default function PODistributionDashboard({ currentUser }) {
                               </tbody>
                             </table>
                           </div>
-
+                          
                           <div className="grid grid-cols-12 gap-2 text-[11px] leading-tight text-slate-800 mt-6 avoid-break w-full" contentEditable="true">
                             <div className="col-span-1 font-bold">a)</div>
                             <div className="col-span-3 font-bold uppercase">TERMS OF PAYMENTS</div>
@@ -395,9 +396,10 @@ export default function PODistributionDashboard({ currentUser }) {
                           </div>
 
                           <p className="font-bold text-[11px] mt-4 avoid-break w-full">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
-
+                          
                           <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3 w-full">
                             <p className="font-bold avoid-break">The placement of order is subject to the following Terms & Conditions:-</p>
+                            
                             <p className="avoid-break"><strong>1. PRICE:</strong><br/>The cost of Purchase with GST as shown above is Rs. {selectedPo.grand_total.toLocaleString('en-IN')}/- (Rupees {convertNumberToWords(Math.round(selectedPo.grand_total))}). This is a fixed-price order and no escalation is applicable.</p>
                             <p className="avoid-break"><strong>2. QUALITY:</strong><br/>If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.</p>
                             <p className="avoid-break"><strong>3. LIQUIDITY DAMAGE: (NOT APPLICABLE)</strong><br/>If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.</p>
@@ -407,12 +409,15 @@ export default function PODistributionDashboard({ currentUser }) {
                             <p className="avoid-break"><strong>7. BILLING:</strong><br/>Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
                             <p className="avoid-break"><strong>8. DELIVERY ADDRESS:</strong><br/>Contract Person: {primaryLine.site_contact_person || "Site Coordinator"}, Contact No.: {primaryLine.site_contact_phone || "N/A"}.<br/><span className="font-bold uppercase">{selectedPo.project_name}</span><br/>{primaryLine.delivery_address || "Address Pending"}</p>
                             <p className="avoid-break"><strong>9. LEGAL COMPLIANCE:</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
+                            
                             <p className="avoid-break pt-2">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.<br/><br/>Thanking you,<br/>Yours faithfully</p>
                           </div>
                         </div>
                       )}
 
+                      {/* ========================================================= */}
                       {/* 🚜 2. VEHICLE RENTAL PO */}
+                      {/* ========================================================= */}
                       {selectedPo.category === 'VEHICLE' && (
                         <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                           {renderBrandedHeader("VEHICLE RENTAL CONTRACT", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-PO`)}
@@ -435,8 +440,8 @@ export default function PODistributionDashboard({ currentUser }) {
                                 <tr className="text-[10px] font-bold bg-slate-50 border-b border-slate-400 text-slate-900">
                                   <th className="py-2 px-2 border-r border-slate-400 w-[20%]">Project Site Name</th>
                                   <th className="py-2 px-2 border-r border-slate-400 w-[25%]">Vehicle Type</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Qty</th>
-                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-[15%]">Rate/Month</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Qty (Nos)</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-[15%]">Rate/Per Month</th>
                                   <th className="py-2 px-2 text-slate-900 w-[30%]">Remarks</th>
                                 </tr>
                               </thead>
@@ -539,7 +544,9 @@ export default function PODistributionDashboard({ currentUser }) {
                         </div>
                       )}
 
+                      {/* ========================================================= */}
                       {/* 🏢 3. GUEST HOUSE ACCOMMODATION */}
+                      {/* ========================================================= */}
                       {selectedPo.category === 'ACCOMMODATION' && (
                         <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                           {renderBrandedHeader("GUEST HOUSE RENTAL CONTRACT", `AEL/${primaryLine.vendor_name?.split(' ')[0]?.toUpperCase() || 'GH'}-PO`)}
@@ -589,7 +596,7 @@ export default function PODistributionDashboard({ currentUser }) {
                           <div contentEditable="true" className="text-[11px] space-y-3 pt-4 leading-relaxed text-slate-800 outline-none rounded w-full">
                             <div className="avoid-break">
                               <p className="font-bold text-[12px] underline">Article 2</p>
-                              <p className="mt-1">Duration of contract: The contract is valid from {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-05-${currentYear}`} to {primaryLine.contract_end_date ? new Date(primaryLine.contract_end_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-5-${nextYear}`} (12 Months). (Extendable or reducible).<br/>This contract is valid as per the client/site requirement of the Guest House. At the end of the requirement period both parties should agree on the discontinuation of the service & the rental contract automatically gets canceled & void. Client & Contractor can give a day's Notice to cancel the services.</p>
+                              <p className="mt-1">Duration of contract: The contract is valid from {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-05-${currentYear}`} to {primaryLine.contract_end_date ? new Date(primaryLine.contract_end_date).toLocaleDateString('en-GB').replace(/\//g, '-') : `06-5-${nextYear}`} ({primaryLine.contract_tenure_months || 12} Months). (Extendable or reducible).<br/>This contract is valid as per the client/site requirement of the Guest House. At the end of the requirement period both parties should agree on the discontinuation of the service & the rental contract automatically gets canceled & void. Client & Contractor can give a day's Notice to cancel the services.</p>
                             </div>
                             
                             <div className="pt-2 avoid-break">
@@ -637,7 +644,9 @@ export default function PODistributionDashboard({ currentUser }) {
                         </div>
                       )}
 
+                      {/* ========================================================= */}
                       {/* 🍱 4. FOOD SUPPLY PO */}
+                      {/* ========================================================= */}
                       {selectedPo.category === 'FOOD' && (
                         <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
                           {renderBrandedHeader("Purchase Order", `AEL/${primaryLine.vendor_name?.split(' ')[0]?.toUpperCase() || 'FOOD'}-PO`)}
@@ -693,22 +702,126 @@ export default function PODistributionDashboard({ currentUser }) {
                         </div>
                       )}
 
+                      {/* ========================================================= */}
+                      {/* 💻 5. SUBSCRIPTION & IT WORK PO */}
+                      {/* ========================================================= */}
+                      {selectedPo.category === 'SUBSCRIPTION' && (
+                        <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
+                          {renderBrandedHeader("IT & SOFTWARE SUBSCRIPTION AGREEMENT", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-SUB`)}
+                          
+                          <div className="text-sm transition-all avoid-break w-full" contentEditable="true">
+                            <p className="font-bold text-slate-900 uppercase">M/s. {primaryLine.vendor_name}</p>
+                            <p className="text-slate-600 leading-tight w-3/4">{primaryLine.vendor_address || "Address Not Provided"}</p>
+                            <p className="text-slate-600 font-mono mt-1">Cell No.: {primaryLine.vendor_contact || "N/A"}</p>
+                            <p className="text-slate-600 font-mono">EMAIL:- {primaryLine.vendor_email || "N/A"}</p>
+                          </div>
+
+                          <div className="space-y-1 avoid-break w-full" contentEditable="true">
+                            <p className="font-bold text-sm text-slate-900 mt-4">Subject: Subscription Agreement for {primaryLine.product_description?.split(' ')[0] || 'Software/IT Services'}.</p>
+                            <p className="text-xs text-slate-700 mt-2">Dear Sir,</p>
+                            <p className="text-xs text-slate-700">With reference to Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'recent submission'}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of {primaryLine.product_description || 'IT Services'} with your company.</p>
+                          </div>
+
+                          <div className="avoid-break mt-4 w-full">
+                            <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
+                              <thead>
+                                <tr className="text-[10px] uppercase font-black bg-slate-50 border-b border-slate-400 text-slate-700">
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Sr.No.</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 w-[45%]">Description & Scope</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-center w-[15%]">QUANTITY</th>
+                                  <th className="py-2 px-2 border-r border-slate-400 text-right w-[15%]">RATE UNIT</th>
+                                  <th className="py-2 px-2 text-right w-[15%]">Total (Rs.)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {poItems.map((item, index) => (
+                                  <tr key={index} className="border-b border-slate-300">
+                                    <td className="py-2 px-2 border-r border-slate-400 text-center font-mono">0{index + 1}</td>
+                                    <td className="py-2 px-2 border-r border-slate-400 font-bold text-slate-900 break-words" contentEditable="true">{item.product_description} {item.make_brand && `(${item.make_brand})`}</td>
+                                    <td className="py-2 px-2 border-r border-slate-400 text-center font-mono font-bold" contentEditable="true">{item.quantity} Nos</td>
+                                    <td className="py-2 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{((item.base_total_value) / (item.quantity || 1)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                    <td className="py-2 px-2 text-right font-mono font-bold text-slate-900" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                  </tr>
+                                ))}
+                                <tr className="border-t-2 border-slate-400 font-bold">
+                                  <td colSpan="4" className="py-1.5 px-2 border-r border-slate-400 text-right">Basic Total Value</td>
+                                  <td className="py-1.5 px-2 text-right font-mono text-sm" contentEditable="true">{poItems.reduce((acc, curr) => acc + curr.base_total_value, 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                </tr>
+                                <tr className="font-bold">
+                                  <td colSpan="4" className="py-1.5 px-2 border-r border-slate-400 text-right">GST Adjustment</td>
+                                  <td className="py-1.5 px-2 text-right font-mono text-slate-700" contentEditable="true">{(poItems.reduce((acc, curr) => acc + curr.net_amount_payable, 0) - poItems.reduce((acc, curr) => acc + curr.base_total_value, 0)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                </tr>
+                                <tr className="font-black bg-slate-100 border-t border-slate-400 text-black">
+                                  <td colSpan="4" className="py-2 px-2 border-r border-slate-400 text-right uppercase text-[10px]">Net Amount Payable</td>
+                                  <td className="py-2 px-2 text-right font-mono text-base" contentEditable="true">{selectedPo.grand_total.toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                </tr>
+                                <tr>
+                                  <td colSpan="5" className="py-2 px-3 italic font-semibold text-slate-700 border-t border-slate-400 text-center" contentEditable="true">
+                                    (Rupees {convertNumberToWords(Math.round(selectedPo.grand_total))})
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                          
+                          <div className="grid grid-cols-12 gap-2 text-[11px] leading-tight text-slate-800 mt-6 avoid-break w-full" contentEditable="true">
+                            <div className="col-span-1 font-bold">a)</div>
+                            <div className="col-span-3 font-bold uppercase">TERMS OF PAYMENTS</div>
+                            <div className="col-span-8">{primaryLine.payment_terms || "100% Payment shall be paid after receipt of material at site."}</div>
+                            
+                            <div className="col-span-1 font-bold">b)</div>
+                            <div className="col-span-3 font-bold uppercase">DELIVERY / DEPLOYMENT</div>
+                            <div className="col-span-8">Time is an essence of this Agreement. The services has to be activated within {primaryLine.time_of_delivery || "2-3 days"} from the date of issue of PO.</div>
+                            
+                            <div className="col-span-1 font-bold">c)</div>
+                            <div className="col-span-3 font-bold uppercase">PROJECT</div>
+                            <div className="col-span-8 font-bold">{selectedPo.project_name}</div>
+                          </div>
+
+                          <p className="font-bold text-[11px] mt-4 avoid-break w-full">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
+                          
+                          <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3 w-full">
+                            <p className="font-bold avoid-break">The placement of order is subject to the following Terms & Conditions:-</p>
+                            
+                            <p className="avoid-break"><strong>1. PRICE:</strong><br/>The cost of Subscription with GST as shown above is Rs. {selectedPo.grand_total.toLocaleString('en-IN')}/- (Rupees {convertNumberToWords(Math.round(selectedPo.grand_total))}).</p>
+                            
+                            <p className="avoid-break"><strong>2. VALIDITY / TENURE:</strong><br/>The subscription/license is valid for {primaryLine.contract_tenure_months || 12} Months from the date of activation.</p>
+                            
+                            <p className="avoid-break"><strong>3. UPTIME & SUPPORT:</strong><br/>Vendor guarantees standard SLA uptime and provides technical support during the tenure without any financial implications.</p>
+                            
+                            <p className="avoid-break"><strong>4. TAXES & DUTIES:</strong><br/>Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
+                            
+                            <p className="avoid-break"><strong>5. CORRESPONDENCE:</strong><br/>All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013.<br/>Tel: 022-40499999</p>
+                            
+                            <p className="avoid-break"><strong>6. REFERENCE:</strong><br/>Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'Recently Submitted'}.</p>
+                            
+                            <p className="avoid-break"><strong>7. BILLING:</strong><br/>Tax invoice to be submitted along with activation proof/license keys. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification.</p>
+                            
+                            <p className="avoid-break"><strong>8. DELIVERY / ACTIVATION DETAILS:</strong><br/>Contract Person: {primaryLine.site_contact_person || "Site Coordinator"}, Contact No.: {primaryLine.site_contact_phone || "N/A"}.<br/><span className="font-bold uppercase">{selectedPo.project_name}</span><br/>{primaryLine.delivery_address || "Address Pending"}</p>
+                            
+                            <p className="avoid-break"><strong>9. LEGAL COMPLIANCE:</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Agreement and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
+                            
+                            <p className="avoid-break pt-2">Please acknowledge of the duplicate of this Document as an acceptance of this Agreement.<br/><br/>Thanking you,<br/>Yours faithfully</p>
+                          </div>
+                        </div>
+                      )}
+
                       {/* 🎯 UNIVERSAL 2-COLUMN SIGNATURE STRIP */}
-                      <div className="pt-12 mt-12 flex justify-between items-end text-xs font-sans relative z-10 avoid-break w-full" contentEditable="false">
-                        <div className="w-56 text-left space-y-1">
-                          <p className="text-[11px] text-slate-800 mb-8">Yours faithfully<br/><strong>For {selectedPo.category === 'GOODS' || selectedPo.category === 'FOOD' ? 'M/s. AARVI ENCON LTD.' : 'AARVI ENCON LIMITED'}</strong></p>
-                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-1.5">Authorized Signatory</span>
+                      <div className="pt-16 mt-16 flex justify-between items-end text-xs font-sans relative z-10 avoid-break w-full" contentEditable="false">
+                        <div className="w-64 text-left space-y-1">
+                          <p className="text-[11px] text-slate-800 mb-10">Yours faithfully<br/><strong>For {selectedPo.category === 'GOODS' || selectedPo.category === 'FOOD' ? 'M/s. AARVI ENCON LTD.' : 'AARVI ENCON LIMITED'}</strong></p>
+                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2">Authorized Signatory</span>
                         </div>
                         
                         {selectedPo.category === 'FOOD' && (
-                          <div className="text-[10px] font-mono font-black text-slate-400 select-none tracking-widest self-end pb-1 hidden md:block">
+                          <div className="text-[10px] font-mono font-black text-slate-400 select-none tracking-widest self-end pb-1 hidden sm:block">
                             AEL-04-IMSF-PURCH-004
                           </div>
                         )}
 
-                        <div className="w-56 text-right space-y-1">
-                          <p className="text-[11px] text-slate-800 mb-8 text-center">{selectedPo.category === 'GOODS' ? 'Signature & Seal of the Supplier' : 'Signature & seal of the contractor'}<br/>{selectedPo.category === 'GOODS' ? 'Accepted & Agreed of the above Said Terms and Conditions' : 'accepted & agreed of the above said terms & conditions'}</p>
-                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-1.5 text-center">Accepted by {selectedPo.category === 'GOODS' ? 'Supplier' : 'Contractor'}</span>
+                        <div className="w-64 text-right space-y-1">
+                          <p className="text-[11px] text-slate-800 mb-10 text-center">{selectedPo.category === 'GOODS' ? 'Signature & Seal of the Supplier' : 'Signature & seal of the contractor'}<br/>{selectedPo.category === 'GOODS' ? 'Accepted & Agreed of the above Said Terms and Conditions' : 'accepted & agreed of the above said terms & conditions'}</p>
+                          <span className="text-[11px] font-black text-slate-900 uppercase tracking-wide block border-t border-slate-400 pt-2 text-center">Accepted by {selectedPo.category === 'GOODS' ? 'Supplier' : 'Contractor'}</span>
                         </div>
                       </div>
                     </>
@@ -731,7 +844,6 @@ export default function PODistributionDashboard({ currentUser }) {
                   {!actionLoading && <ArrowRight size={16} />}
                 </Button>
               </div>
-
             </Card>
           ) : (
             <div className="h-64 border border-dashed border-slate-300 rounded-xl bg-white flex flex-col items-center justify-center text-slate-400 text-sm p-6 text-center">
@@ -740,7 +852,6 @@ export default function PODistributionDashboard({ currentUser }) {
             </div>
           )}
         </div>
-
       </div>
     </div>
   );

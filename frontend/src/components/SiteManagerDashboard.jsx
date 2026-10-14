@@ -20,10 +20,12 @@ export default function SiteManagerDashboard({ currentUser }) {
   const [managerRemarks, setManagerRemarks] = useState('');
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
-
   const [showSignOffModal, setShowSignOffModal] = useState(false);
   const [expandedTickets, setExpandedTickets] = useState({});
   const [archiveItemsCache, setArchiveItemsCache] = useState({});
+  
+  // 🎯 NEW: Self-Learning Material Types State
+  const [dynamicMaterialTypes, setDynamicMaterialTypes] = useState(['Consumable', 'Asset']);
 
   const currentUserId = currentUser?.id || 2;
 
@@ -32,6 +34,12 @@ export default function SiteManagerDashboard({ currentUser }) {
     try {
       const response = await axios.get(`${API_BASE_URL}/requisitions/pending-vetting/${currentUserId}`);
       setTickets(response.data);
+
+      // Fetch dynamic dropdown options
+      const typeRes = await axios.get(`${API_BASE_URL}/system/material-types`);
+      if (typeRes.data && typeRes.data.length > 0) {
+        setDynamicMaterialTypes(typeRes.data);
+      }
     } catch (err) { 
       console.error("Error fetching manager inbox", err); 
     } finally { 
@@ -74,7 +82,6 @@ export default function SiteManagerDashboard({ currentUser }) {
     setAlert(null);
     try {
       const itemRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
-      // 🎯 FIXED: Mapped item_type so it remembers previously selected values
       setGridItems(itemRes.data.map(item => ({ 
         ...item, 
         is_reimbursable: item.is_reimbursable || false,
@@ -91,7 +98,6 @@ export default function SiteManagerDashboard({ currentUser }) {
       setExpandedTickets(prev => ({ ...prev, [ticketNumber]: false }));
       return;
     }
-
     if (!archiveItemsCache[ticketNumber]) {
       try {
         const itemRes = await axios.get(`${API_BASE_URL}/requisitions/${ticketNumber}/items`);
@@ -113,7 +119,6 @@ export default function SiteManagerDashboard({ currentUser }) {
   const addNewRow = () => {
     setGridItems([
       ...gridItems, 
-      // 🎯 FIXED: New rows appended by manager now default to Consumable
       { item_index: gridItems.length + 1, product_description: '', make_brand: '', quantity: 1, purpose: '', is_reimbursable: false, item_type: 'Consumable' }
     ]);
   };
@@ -159,7 +164,6 @@ export default function SiteManagerDashboard({ currentUser }) {
     finally { setLoading(false); }
   };
 
-  // 🎯 4-STEP STATUS MAP
   const getStepStatus = (currentStatus, stepIndex) => {
     const statusMap = {
       'Vetting Active': 1, 
@@ -172,8 +176,8 @@ export default function SiteManagerDashboard({ currentUser }) {
       'Pending Project Manager': 3, 
       'Pending Director': 3, 
       'Query Raised': 3,
-      'Awaiting Digital Signature': 4, // 🟡 Step 4 Active (Draft generated, waiting for seal)
-      'Approved': 5                    // 🟢 Step 4 Completed (End of digital tracking)
+      'Awaiting Digital Signature': 4, 
+      'Approved': 5 
     };
     const currentStep = statusMap[currentStatus] || 1;
     if (currentStep > stepIndex) return 'completed';
@@ -184,6 +188,10 @@ export default function SiteManagerDashboard({ currentUser }) {
   return (
     <div className="space-y-6 relative pb-12">
       
+      <datalist id="dynamic-material-types">
+        {dynamicMaterialTypes.map((type, idx) => <option key={idx} value={type} />)}
+      </datalist>
+
       {showSignOffModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -196,7 +204,6 @@ export default function SiteManagerDashboard({ currentUser }) {
                 <Info size={16} className="mt-0.5 flex-shrink-0" />
                 <p>By signing off, you verify that these materials are required for site operations, the quantities are correct, and optional billing flags have been reviewed.</p>
               </div>
-
               <div className="flex gap-3 pt-2">
                 <Button variant="ghost" className="flex-1" onClick={() => setShowSignOffModal(false)}>Cancel</Button>
                 <Button variant="success" className="flex-1" onClick={executeFinalSignOff} disabled={loading}>
@@ -266,7 +273,6 @@ export default function SiteManagerDashboard({ currentUser }) {
                     </div>
                   </div>
                   
-                  {/* 🎯 FIXED: Increased min-w-[1050px] to keep the new column responsive */}
                   <div className="overflow-x-auto p-2">
                     <table className="w-full text-left min-w-[1050px]">
                       <thead>
@@ -276,7 +282,6 @@ export default function SiteManagerDashboard({ currentUser }) {
                           <th className="py-2.5 px-2 w-28">Brand / Make</th>
                           <th className="py-2.5 px-2 w-16 text-center">Qty</th>
                           <th className="py-2.5 px-2 w-48">Purpose Justification</th>
-                          {/* 🎯 NEW COLUMN: Material Type */}
                           <th className="py-2.5 px-2 w-32 text-center text-indigo-500">Material Type</th>
                           <th className="py-2.5 px-2 w-28 text-center text-indigo-500">reimbursed bill? <br/><span className="text-[9px] font-normal text-slate-400">(Optional)</span></th>
                           <th className="py-2.5 w-10 text-center"></th>
@@ -291,18 +296,16 @@ export default function SiteManagerDashboard({ currentUser }) {
                             <td className="py-1 px-1"><input type="number" min="1" value={item.quantity} onChange={(e) => handleCellChange(idx, 'quantity', parseInt(e.target.value) || 1)} className="w-full bg-slate-50 border border-slate-200 rounded text-center text-sm font-bold text-indigo-700 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             <td className="py-1 px-1"><input type="text" value={item.purpose || ''} onChange={(e) => handleCellChange(idx, 'purpose', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-600 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             
-                            {/* 🎯 NEW DROPDOWN CONTROL: Asset vs Consumable */}
+                            {/* 🎯 SMART SELF-LEARNING MATERIAL TYPE DROPDOWN */}
                             <td className="py-1 px-1">
-                              <select 
-                                value={item.item_type || 'Consumable'} 
+                              <input 
+                                list="dynamic-material-types"
+                                value={item.item_type || ''}
                                 onChange={e => handleCellChange(idx, 'item_type', e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-sm font-semibold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none cursor-pointer"
-                              >
-                                <option value="Consumable">📦 Consumable</option>
-                                <option value="Asset">🖥️ Asset</option>
-                              </select>
+                                placeholder="Type/Select"
+                                className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-[11px] uppercase tracking-wider font-bold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none"
+                              />
                             </td>
-
                             <td className="py-1 px-1 text-center">
                               <label className="flex items-center justify-center cursor-pointer">
                                 <div className={`w-9 h-5 rounded-full p-0.5 transition-colors ${item.is_reimbursable ? 'bg-emerald-500' : 'bg-slate-300'}`}>
@@ -394,7 +397,6 @@ export default function SiteManagerDashboard({ currentUser }) {
                 {expandedTickets[ticket.ticket_number] && (
                   <div className="border border-slate-100 rounded-xl overflow-hidden bg-slate-50/50 p-2 animate-in fade-in slide-in-from-top-3 duration-200">
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1 mb-1">Authorized Resource Array</div>
-                    {/* 🎯 FIXED: min-w added here to prevent cramped columns on mobile devices */}
                     <div className="overflow-x-auto w-full">
                       <table className="w-full min-w-[800px] text-left border-collapse bg-white rounded-lg overflow-hidden shadow-xs">
                         <thead>
@@ -404,7 +406,6 @@ export default function SiteManagerDashboard({ currentUser }) {
                             <th className="p-2 w-32">Brand / Make</th>
                             <th className="p-2 w-16 text-center">Qty</th>
                             <th className="p-2">Technical Justification</th>
-                            {/* 🎯 NEW ARCHIVE COLUMN: Item Type */}
                             <th className="p-2 w-28 text-center">Type</th>
                             <th className="p-2 w-28 text-center text-indigo-500">Reimbursable?</th>
                           </tr>
@@ -417,14 +418,11 @@ export default function SiteManagerDashboard({ currentUser }) {
                               <td className="p-2 text-slate-600 font-semibold">{item.make_brand || '—'}</td>
                               <td className="p-2 text-center font-bold text-indigo-900 bg-indigo-50/10">{item.quantity}</td>
                               <td className="p-2 text-slate-500 italic">{item.purpose}</td>
-                              
-                              {/* 🎯 NEW ARCHIVE BADGE: Visual indicator for Assest vs Consumable */}
                               <td className="p-2 text-center font-bold">
-                                <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-wide border ${item.item_type === 'Asset' ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                                <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-wide border bg-slate-100 text-slate-600 border-slate-200`}>
                                   {item.item_type || 'Consumable'}
                                 </span>
                               </td>
-
                               <td className="p-2 text-center font-bold">
                                 {item.is_reimbursable ? (
                                   <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px]">YES</span>
@@ -522,7 +520,6 @@ export default function SiteManagerDashboard({ currentUser }) {
 
                   </div>
                 </div>
-
               </Card>
             ))
           )}

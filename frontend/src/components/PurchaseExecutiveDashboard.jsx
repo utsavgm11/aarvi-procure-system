@@ -15,7 +15,6 @@ import Letterhead from '../assets/letter_head.jpg';
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
 export default function PurchaseExecutiveDashboard({ currentUser }) {
-  // 🎯 Extract active user details for auditing
   const storedSession = localStorage.getItem('aarvi_session') || sessionStorage.getItem('aarvi_session');
   const activeUser = storedSession ? JSON.parse(storedSession) : {};
   const currentUserName = activeUser.name || "Purchase Executive";
@@ -43,21 +42,16 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const [saveLoading, setSaveLoading] = useState(false);
   const [alert, setAlert] = useState(null);
 
-  // 🎯 Variable Usage Escalate Remark State
   const [usageEscalateRemarks, setUsageEscalateRemarks] = useState('');
-
-  // Vendor Master State
   const [vendors, setVendors] = useState([]);
-
+  
   // 🎯 NEW: Self-Learning Material Types State
   const [dynamicMaterialTypes, setDynamicMaterialTypes] = useState(['Consumable', 'Asset']);
 
-  // --- DATA FETCHING ---
   const fetchVendorsAndTypes = useCallback(async () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/vendors`);
       setVendors(res.data);
-
       const typeRes = await axios.get(`${API_BASE_URL}/system/material-types`);
       if (typeRes.data && typeRes.data.length > 0) {
         setDynamicMaterialTypes(typeRes.data);
@@ -68,7 +62,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const fetchPendingSourcing = useCallback(async () => {
     setLoading(true);
     try {
-      // 🎯 Fetch both generic pending sourcing AND the Extra Usage interceptions
       const [sourcingRes, extraUsageRes] = await Promise.all([
         axios.get(`${API_BASE_URL}/requisitions/pending-sourcing`),
         axios.get(`${API_BASE_URL}/requisitions/purchase-history`) 
@@ -77,7 +70,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       const standardSourcing = sourcingRes.data;
       const extraUsageIntercepts = extraUsageRes.data.filter(t => t.status === "Extra Usage - Pending Purchase");
       
-      // Combine both into the inbox view
       setSourcingTickets([...standardSourcing, ...extraUsageIntercepts]);
     } catch (err) { console.error(err); } 
     finally { setLoading(false); }
@@ -101,7 +93,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     return () => { isMounted = false; };
   }, [activeTab, fetchPendingSourcing, fetchHistory, fetchVendorsAndTypes]);
 
-  // --- TAB NAVIGATION HANDLERS ---
   const switchTab = (tab) => {
     setActiveTab(tab);
     setSelectedTicket(null);
@@ -109,7 +100,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     setAlert(null);
   };
 
-  // --- TICKET OPENING LOGIC (ACTIVE SOURCING) ---
   const openSourcingTicket = async (ticket) => {
     setSelectedTicket(ticket);
     setQuotes({});
@@ -118,7 +108,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     try {
       const itemRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/items`);
       setItems(itemRes.data);
-      // Fetch history logs so we can see the extra usage remarks
+      
       const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
       setHistoryLogs(histRes.data);
 
@@ -134,10 +124,9 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           gst_percentage: 18,
           total_amount: 0,
           net_amount_payable: 0,
-          // 🎯 INITIALIZE FINANCIAL TRACKING FIELDS
           security_deposit_amount: '',
           billing_trigger_date: '5',
-          contract_tenure_months: '12', // 🎯 NEW: Default to 12 months for recurring
+          contract_tenure_months: '12', 
           time_of_delivery: ticket.category === 'GOODS' ? '7 Days' : ticket.category === 'VEHICLE' ? '12 Months' : '30 Days Notice',
           delivery_address: '',
           site_contact_person: '',
@@ -154,12 +143,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     } catch (err) { console.error(err); }
   };
 
-  // 🎯 TICKET OPENING LOGIC (HISTORY LEDGER)
   const openHistoryTicket = async (ticket) => {
     setSelectedHistoryTicket(ticket);
     setHistoryPoItems([]);
     setHistoryLogs([]);
-    setSavedHtml(null); // Reset the saved HTML
+    setSavedHtml(null); 
     setLoading(true);
     try {
       const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/quotations`);
@@ -168,10 +156,10 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       
       const calcTotal = winningLines.reduce((acc, curr) => acc + (curr.net_amount_payable || curr.base_total_value || 0), 0);
       setSelectedHistoryTicket(prev => ({ ...prev, grand_total: calcTotal }));
-
+      
       const histRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/history`);
       setHistoryLogs(histRes.data);
-
+      
       try {
         const poRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/po`);
         if (poRes.data && poRes.data.po_number) {
@@ -183,7 +171,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
       } catch (err) {
         // Ignore errors; just means no template has been saved yet
       }
-
       setTimeout(() => {
         document.getElementById('history-detail-view')?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
@@ -200,7 +187,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     setPreviewDoc({ url: fullUrl, title });
   };
 
-  // 🎯 SAVE EDITED CONTENT TO DATABASE
   const handleSaveEdits = async () => {
     if (!selectedHistoryTicket) return;
     const element = document.getElementById('printable-po');
@@ -223,7 +209,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     }
   };
 
-  // --- SOURCING LOGIC ---
   const handleQuoteChange = (itemIndex, quoteIndex, field, value) => {
     setQuotes(prev => {
       const updatedItemQuotes = [...prev[itemIndex]];
@@ -258,7 +243,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     setItems(prevItems => prevItems.map(item =>
       item.item_index === indexToUpdate ? { ...item, quantity: qty } : item
     ));
-
     setQuotes(prev => {
       const updatedItemQuotes = [...(prev[indexToUpdate] || [])];
       const recalculatedQuotes = updatedItemQuotes.map(quote => {
@@ -319,7 +303,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
   const handlePushToManagement = async () => {
     const flatQuotations = [];
     const isRecurring = ['VEHICLE', 'ACCOMMODATION', 'SUBSCRIPTION'].includes(selectedTicket?.category);
-
+    
     for (const [itemIndex, itemQuotes] of Object.entries(quotes)) {
       const matchingLineItem = items.find(i => i.item_index === parseInt(itemIndex)) || {};
       
@@ -344,7 +328,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
             quality_remarks: q.quality_remarks || "",
             file_url: q.file_url || "", 
             
-            // 🎯 NEW: RECURRING BINDINGS
             security_deposit_amount: parseFloat(q.security_deposit_amount) || 0.0,
             billing_trigger_date: parseInt(q.billing_trigger_date) || 5,
             contract_tenure_months: parseInt(q.contract_tenure_months) || 12,
@@ -357,12 +340,11 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         }
       });
     }
-
+    
     if (flatQuotations.length === 0) {
       setAlert({ type: 'error', message: "Enter at least one valid vendor quote (Name & Unit Price) before submitting." });
       return;
     }
-
     setLoading(true);
     try {
       const res = await axios.post(`${API_BASE_URL}/requisitions/${selectedTicket.ticket_number}/quotations`, { 
@@ -379,7 +361,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     }
   };
 
-  // 🎯 HANDLE EXTRA USAGE / VARIABLE CHARGES INTERCEPTS
   const handleVariableUsageDecision = async (actionDecision) => {
     if (actionDecision === 'ESCALATE' && !usageEscalateRemarks.trim()) {
       setAlert({ type: 'error', message: 'You must provide remarks to the Project Manager when escalating.' });
@@ -403,8 +384,10 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
     }
   };
 
+  // 🎯 FIX #2: Updated UI Context Settings to include SUBSCRIPTION
   const getContextualUiSettings = () => {
     const category = selectedTicket?.category || selectedHistoryTicket?.category || 'GOODS';
+    
     switch (category) {
       case 'VEHICLE':
         return {
@@ -428,6 +411,17 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
           remarksPlaceholder: "e.g. Water bills in owner scope, Maintenance under owner...",
           showDeposit: true
         };
+      case 'SUBSCRIPTION':
+        return {
+          amountLabel: "Monthly / Recurring Fee",
+          addressLabel: "Deployment / Access Details",
+          addressPlaceholder: "e.g. Head Office / Cloud Users...",
+          contactLabel: "IT Contact / Administrator",
+          timeLabel: "SLA / Go-Live Time",
+          timePlaceholder: "e.g. Immediate / 24 Hours",
+          remarksPlaceholder: "e.g. Uptime guarantees, auto-renewal clauses...",
+          showDeposit: true
+        };
       default:
         return {
           amountLabel: "Unit Price (Per Item)", 
@@ -441,7 +435,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
         };
     }
   };
-
   const ui = getContextualUiSettings();
 
   const handlePrintToPDF = () => {
@@ -724,7 +717,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       </div>
                     </div>
                   </Card>
-
                 ) : (
                   <>
                     <Card className="p-4 bg-slate-50 border-slate-200 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
@@ -897,6 +889,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                           <input type="text" value={quote.time_of_delivery} onChange={(e) => handleQuoteChange(item.item_index, qIdx, 'time_of_delivery', e.target.value)} placeholder={ui.timePlaceholder} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-[11px] md:text-xs outline-none focus:border-indigo-500 focus:ring-1 transition-all" />
                                         </div>
                                       )}
+                                      
                                       <div>
                                         <label className="block text-[9px] md:text-[10px] font-bold text-[#0b9c54] uppercase mb-1">Calculated Net Value (Incl. GST)</label>
                                         <div className="w-full bg-[#0b9c54]/10 text-emerald-900 rounded-lg px-3 py-1.5 border border-[#0b9c54]/30 flex justify-between items-center shadow-inner h-[34px] sm:h-[38px]">
@@ -935,7 +928,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                                             onChange={async (e) => {
                                               const selectedFile = e.target.files[0];
                                               if (!selectedFile) return;
-
                                               const formData = new FormData();
                                               formData.append("file", selectedFile);
                                               
@@ -1047,7 +1039,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       )}
                     </Card>
                   )}
-
                   {selectedHistoryTicket.status === 'Partially Delivered' && (
                     <Card className="p-4 bg-amber-50 border-amber-200 text-amber-900 space-y-2 shadow-xs">
                       <div className="flex items-center justify-between">
@@ -1067,7 +1058,6 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                       )}
                     </Card>
                   )}
-
                   {selectedHistoryTicket.status === 'Delivered - GRN Logged' && (
                     <Card className="p-4 bg-emerald-50 border-emerald-200 text-emerald-900 flex items-center justify-between shadow-xs">
                       <div className="flex items-center space-x-2.5">
@@ -1198,18 +1188,26 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                               </div>
 
                               <p className="font-bold text-[11px] mt-4 avoid-break w-full">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
-
+                              
                               <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3 w-full">
                                 <p className="font-bold avoid-break">The placement of order is subject to the following Terms & Conditions:-</p>
                                 
                                 <p className="avoid-break"><strong>1. PRICE:</strong><br/>The cost of Purchase with GST as shown above is Rs. {(selectedHistoryTicket.grand_total || 0).toLocaleString('en-IN')}/- (Rupees {convertNumberToWords(Math.round(selectedHistoryTicket.grand_total || 0))}). This is a fixed-price order and no escalation is applicable.</p>
+                                
                                 <p className="avoid-break"><strong>2. QUALITY:</strong><br/>If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.</p>
+                                
                                 <p className="avoid-break"><strong>3. LIQUIDITY DAMAGE: (NOT APPLICABLE)</strong><br/>If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.</p>
+                                
                                 <p className="avoid-break"><strong>4. TAXES & DUTIES:</strong><br/>Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
+                                
                                 <p className="avoid-break"><strong>5. CORRESPONDENCE:</strong><br/>All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013.<br/>Tel: 022-40499999</p>
+                                
                                 <p className="avoid-break"><strong>6. REFERENCE:</strong><br/>Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'Recently Submitted'}.</p>
+                                
                                 <p className="avoid-break"><strong>7. BILLING:</strong><br/>Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents:<br/>a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
+                                
                                 <p className="avoid-break"><strong>8. DELIVERY ADDRESS:</strong><br/>Contract Person: {primaryLine.site_contact_person || "Site Coordinator"}, Contact No.: {primaryLine.site_contact_phone || "N/A"}.<br/><span className="font-bold uppercase">{selectedHistoryTicket.project_name}</span><br/>{primaryLine.delivery_address || "Address Pending"}</p>
+                                
                                 <p className="avoid-break"><strong>9. LEGAL COMPLIANCE:</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
                                 
                                 <p className="avoid-break pt-2">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.<br/><br/>Thanking you,<br/>Yours faithfully</p>
@@ -1504,6 +1502,110 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                             </div>
                           )}
 
+                          {/* ========================================================= */}
+                          {/* 💻 5. SUBSCRIPTION & IT WORK PO */}
+                          {/* ========================================================= */}
+                          {selectedHistoryTicket.category === 'SUBSCRIPTION' && (
+                            <div className="space-y-4 text-xs text-slate-800 leading-relaxed relative z-10 w-full">
+                              {renderBrandedHeader("IT & SOFTWARE SUBSCRIPTION AGREEMENT", `AEL/${primaryLine.vendor_name?.substring(0,6).toUpperCase()}-SUB`)}
+                              
+                              <div className="text-sm transition-all avoid-break w-full" contentEditable="true">
+                                <p className="font-bold text-slate-900 uppercase">M/s. {primaryLine.vendor_name}</p>
+                                <p className="text-slate-600 leading-tight w-3/4">{primaryLine.vendor_address || "Address Not Provided"}</p>
+                                <p className="text-slate-600 font-mono mt-1">Cell No.: {primaryLine.vendor_contact || "N/A"}</p>
+                                <p className="text-slate-600 font-mono">EMAIL:- {primaryLine.vendor_email || "N/A"}</p>
+                              </div>
+
+                              <div contentEditable="true" className="space-y-1 avoid-break w-full">
+                                <p className="font-bold text-sm text-slate-900 mt-4">Subject: Subscription Agreement for {primaryLine.product_description?.split(' ')[0] || 'Software/IT Services'}.</p>
+                                <p className="text-xs text-slate-700 mt-2">Dear Sir,</p>
+                                <p className="text-xs text-slate-700">With reference to Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'recent submission'}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of {primaryLine.product_description || 'IT Services'} with your company.</p>
+                              </div>
+
+                              <div className="avoid-break mt-4 w-full">
+                                <table className="w-full text-left border-collapse border border-slate-400 table-fixed">
+                                  <thead>
+                                    <tr className="text-[10px] uppercase font-black bg-slate-50 border-b border-slate-400 text-slate-700">
+                                      <th className="py-2 px-2 border-r border-slate-400 text-center w-[10%]">Sr.No.</th>
+                                      <th className="py-2 px-2 border-r border-slate-400 w-[45%]">Description & Scope</th>
+                                      <th className="py-2 px-2 border-r border-slate-400 text-center w-[15%]">QUANTITY</th>
+                                      <th className="py-2 px-2 border-r border-slate-400 text-right w-[15%]">RATE UNIT</th>
+                                      <th className="py-2 px-2 text-right w-[15%]">Total (Rs.)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {historyPoItems.map((item, index) => (
+                                      <tr key={index} className="border-b border-slate-300">
+                                        <td className="py-2 px-2 border-r border-slate-400 text-center font-mono">0{index + 1}</td>
+                                        <td className="py-2 px-2 border-r border-slate-400 font-bold text-slate-900 break-words" contentEditable="true">{item.product_description} {item.make_brand && `(${item.make_brand})`}</td>
+                                        <td className="py-2 px-2 border-r border-slate-400 text-center font-mono font-bold" contentEditable="true">{item.quantity} Nos</td>
+                                        <td className="py-2 px-2 border-r border-slate-400 text-right font-mono" contentEditable="true">{((item.base_total_value) / (item.quantity || 1)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                        <td className="py-2 px-2 text-right font-mono font-bold text-slate-900" contentEditable="true">{(item.base_total_value).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                      </tr>
+                                    ))}
+                                    <tr className="border-t-2 border-slate-400 font-bold">
+                                      <td colSpan="4" className="py-1.5 px-2 border-r border-slate-400 text-right">Basic Total Value</td>
+                                      <td className="py-1.5 px-2 text-right font-mono text-sm" contentEditable="true">{historyPoItems.reduce((acc, curr) => acc + curr.base_total_value, 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                    </tr>
+                                    <tr className="font-bold">
+                                      <td colSpan="4" className="py-1.5 px-2 border-r border-slate-400 text-right">GST Adjustment</td>
+                                      <td className="py-1.5 px-2 text-right font-mono text-slate-700" contentEditable="true">{(historyPoItems.reduce((acc, curr) => acc + curr.net_amount_payable, 0) - historyPoItems.reduce((acc, curr) => acc + curr.base_total_value, 0)).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                    </tr>
+                                    <tr className="font-black bg-slate-100 border-t border-slate-400 text-black">
+                                      <td colSpan="4" className="py-2 px-2 border-r border-slate-400 text-right uppercase text-[10px]">Net Amount Payable</td>
+                                      <td className="py-2 px-2 text-right font-mono text-base" contentEditable="true">{(selectedHistoryTicket.grand_total || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</td>
+                                    </tr>
+                                    <tr>
+                                      <td colSpan="5" className="py-2 px-3 italic font-semibold text-slate-700 border-t border-slate-400 text-center" contentEditable="true">
+                                        (Rupees {convertNumberToWords(Math.round(selectedHistoryTicket.grand_total || 0))})
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+
+                              <div className="grid grid-cols-12 gap-2 text-[11px] leading-tight text-slate-800 mt-6 avoid-break w-full" contentEditable="true">
+                                <div className="col-span-1 font-bold">a)</div>
+                                <div className="col-span-3 font-bold uppercase">TERMS OF PAYMENTS</div>
+                                <div className="col-span-8">{primaryLine.payment_terms || "100% Payment shall be paid after receipt of material at site."}</div>
+                                
+                                <div className="col-span-1 font-bold">b)</div>
+                                <div className="col-span-3 font-bold uppercase">DELIVERY / DEPLOYMENT</div>
+                                <div className="col-span-8">Time is an essence of this Agreement. The services has to be activated within {primaryLine.time_of_delivery || "2-3 days"} from the date of issue of PO.</div>
+                                
+                                <div className="col-span-1 font-bold">c)</div>
+                                <div className="col-span-3 font-bold uppercase">PROJECT</div>
+                                <div className="col-span-8 font-bold">{selectedHistoryTicket.project_name}</div>
+                              </div>
+
+                              <p className="font-bold text-[11px] mt-4 avoid-break w-full">Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
+                              
+                              <div contentEditable="true" className="pt-4 text-[11px] leading-relaxed text-slate-800 space-y-3 w-full">
+                                <p className="font-bold avoid-break">The placement of order is subject to the following Terms & Conditions:-</p>
+                                
+                                <p className="avoid-break"><strong>1. PRICE:</strong><br/>The cost of Subscription with GST as shown above is Rs. {(selectedHistoryTicket.grand_total || 0).toLocaleString('en-IN')}/- (Rupees {convertNumberToWords(Math.round(selectedHistoryTicket.grand_total || 0))}).</p>
+                                
+                                <p className="avoid-break"><strong>2. VALIDITY / TENURE:</strong><br/>The subscription/license is valid for {primaryLine.contract_tenure_months || 12} Months from the date of activation.</p>
+                                
+                                <p className="avoid-break"><strong>3. UPTIME & SUPPORT:</strong><br/>Vendor guarantees standard SLA uptime and provides technical support during the tenure without any financial implications.</p>
+                                
+                                <p className="avoid-break"><strong>4. TAXES & DUTIES:</strong><br/>Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
+                                
+                                <p className="avoid-break"><strong>5. CORRESPONDENCE:</strong><br/>All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013.<br/>Tel: 022-40499999</p>
+                                
+                                <p className="avoid-break"><strong>6. REFERENCE:</strong><br/>Quotation Dated {primaryLine.contract_start_date ? new Date(primaryLine.contract_start_date).toLocaleDateString() : 'Recently Submitted'}.</p>
+                                
+                                <p className="avoid-break"><strong>7. BILLING:</strong><br/>Tax invoice to be submitted along with activation proof/license keys. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification.</p>
+                                
+                                <p className="avoid-break"><strong>8. DELIVERY / ACTIVATION DETAILS:</strong><br/>Contract Person: {primaryLine.site_contact_person || "Site Coordinator"}, Contact No.: {primaryLine.site_contact_phone || "N/A"}.<br/><span className="font-bold uppercase">{selectedHistoryTicket.project_name}</span><br/>{primaryLine.delivery_address || "Address Pending"}</p>
+                                
+                                <p className="avoid-break"><strong>9. LEGAL COMPLIANCE:</strong><br/>Any disputes or differences arising between the Client and Vendor with respect to this Agreement and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai. The venue of arbitration shall be in Mumbai.</p>
+                                
+                                <p className="avoid-break pt-2">Please acknowledge of the duplicate of this Document as an acceptance of this Agreement.<br/><br/>Thanking you,<br/>Yours faithfully</p>
+                              </div>
+                            </div>
+                          )}
+
                           {/* 🎯 UNIVERSAL 2-COLUMN SIGNATURE STRIP */}
                           <div className="pt-16 mt-16 flex justify-between items-end text-xs font-sans relative z-10 avoid-break w-full" contentEditable="false">
                             <div className="w-64 text-left space-y-1">
@@ -1570,6 +1672,7 @@ export default function PurchaseExecutiveDashboard({ currentUser }) {
                   </div>
                 </Card>
               )}
+
             </div>
           </div>
         </div>

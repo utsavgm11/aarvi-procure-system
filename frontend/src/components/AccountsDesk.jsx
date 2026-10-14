@@ -87,7 +87,7 @@ export default function AccountsDesk({ currentUser }) {
     return grandTotal;
   };
 
-  // 🎯 NEW HELPER: Mathematical Offset Engine & Billing Logic
+  // 🎯 MATHEMATICAL OFFSET ENGINE & BILLING LOGIC
   const getLeaseMetrics = (po) => {
     if (!po.is_recurring || !po.contract_end_date) return null;
     
@@ -112,7 +112,7 @@ export default function AccountsDesk({ currentUser }) {
     const isDueSoon = daysUntilDue >= 0 && daysUntilDue <= 3;
     const isOverdue = daysUntilDue < 0;
 
-    return { monthsLeft, threshold, isOffsetPhase, triggerDay, daysUntilDue, isDueSoon, isOverdue };
+    return { monthsLeft, threshold, isOffsetPhase, triggerDay, daysUntilDue, isDueSoon, isOverdue, deposit };
   };
 
   const handlePreview = (url, title) => {
@@ -142,10 +142,23 @@ export default function AccountsDesk({ currentUser }) {
       ? po.remaining_balance 
       : calculatePayableNow(po.payment_terms, po.grand_total);
 
+    const isFirstPayment = !po.disbursed_amount || po.disbursed_amount === 0;
+
+    // 🎯 INITIAL DISBURSEMENT MATH: 1st Month Rent + Security Deposit
+    if (metrics && isFirstPayment) {
+      const depositAmt = parseFloat(po.security_deposit_amount) || 0;
+      const firstMonthRent = parseFloat(po.monthly_rate) || defaultAmount;
+      
+      if (depositAmt > 0) {
+        defaultAmount = firstMonthRent + depositAmt;
+        defaultRemark = `Initial Disbursement: 1st Month Rent (₹${firstMonthRent.toLocaleString('en-IN')}) + Security Deposit (₹${depositAmt.toLocaleString('en-IN')})`;
+      }
+    }
+
     // 🎯 IF DEPOSIT OFFSET PHASE IS ACTIVE -> Auto-fill the adjustment data
     if (metrics?.isOffsetPhase) {
       defaultUtr = `OFFSET-ADJ-${new Date().getTime().toString().slice(-6)}`;
-      defaultRemark = `Automatic rent offset logged against ₹${po.security_deposit_amount.toLocaleString('en-IN')} Security Deposit holding.`;
+      defaultRemark = `Automatic rent offset logged against ₹${parseFloat(po.security_deposit_amount || 0).toLocaleString('en-IN')} Security Deposit holding.`;
       defaultAmount = po.monthly_rate || defaultAmount;
     }
 
@@ -350,6 +363,7 @@ export default function AccountsDesk({ currentUser }) {
                   <p><strong className="text-slate-900 uppercase">Payment Terms:</strong> {selectedSystemPo.payment_terms || "100% Payable on Delivery"}</p>
                   <p><strong className="text-slate-900 uppercase">Billing Status:</strong> Proforma Invoice Generated</p>
                 </div>
+
               </div>
             </div>
           </div>
@@ -818,6 +832,8 @@ export default function AccountsDesk({ currentUser }) {
       {/* 🎯 DISBURSEMENT & TDS MODAL */}
       {selectedPo && (() => {
         const metrics = getLeaseMetrics(selectedPo);
+        const isFirstPayment = !selectedPo.disbursed_amount || selectedPo.disbursed_amount === 0;
+
         return (
           <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
             <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
@@ -855,6 +871,19 @@ export default function AccountsDesk({ currentUser }) {
                       <h4 className="text-rose-800 font-black text-sm uppercase tracking-wider mb-1">Deposit Offset Period Active</h4>
                       <p className="text-rose-700 text-xs font-semibold leading-relaxed">
                         Do not release cash. Adjust this month's rent against the ₹{selectedPo.security_deposit_amount.toLocaleString('en-IN')} Security Deposit held by the vendor.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* 🎯 INITIAL DISBURSEMENT MATH BANNER */}
+                {!metrics?.isOffsetPhase && isFirstPayment && metrics?.deposit > 0 && (
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex gap-3 items-center shadow-sm mb-2 mt-2">
+                    <Calculator className="text-indigo-600 shrink-0" size={20} />
+                    <div>
+                      <h4 className="text-indigo-900 font-black text-[11px] uppercase tracking-wider">Initial Payment Auto-Calculation</h4>
+                      <p className="text-indigo-700 text-[10px] font-semibold mt-0.5 leading-tight">
+                        Payable amount includes 1st Month Rent (₹{(parseFloat(selectedPo.monthly_rate) || calculatePayableNow(selectedPo.payment_terms, selectedPo.grand_total)).toLocaleString('en-IN')}) + Security Deposit (₹{metrics.deposit.toLocaleString('en-IN')}).
                       </p>
                     </div>
                   </div>

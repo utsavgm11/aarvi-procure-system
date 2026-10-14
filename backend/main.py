@@ -28,7 +28,6 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 # 1. System Logging Configurations
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AarviProcure")
-
 app = FastAPI(title="Aarvi Encon - Workflow ERP Engine", version="3.2.0")
 
 # 🎯 Configure Cloudinary securely
@@ -42,7 +41,6 @@ cloudinary.config(
 UPLOAD_DIR = "storage/quotation_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs("storage/po_templates", exist_ok=True)
-
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
 # 2. Complete CORS Rules
@@ -98,7 +96,6 @@ class DirectPOItemRow(BaseModel):
     special_terms: Optional[str] = ""
     quality_remarks: Optional[str] = ""
     file_url: Optional[str] = ""
-    # 🎯 NEW: Financial Offset & Trigger Constraints
     security_deposit_amount: Optional[float] = 0.0
     billing_trigger_date: Optional[int] = 5
 
@@ -155,14 +152,12 @@ class QuotationRowItem(BaseModel):
     site_contact_phone: Optional[str] = None
     base_total_value: Optional[float] = 0.0
     net_amount_payable: Optional[float] = 0.0
-    # 🎯 RECURRING & SUBSCRIPTION FIELDS
     is_recurring: Optional[bool] = False
     recurring_type: Optional[str] = "FIXED_LEASE" 
     billing_cycle: Optional[str] = "MONTHLY"       
     contract_tenure_months: Optional[int] = 1
     monthly_rate: Optional[float] = 0.0
     approved_spending_cap: Optional[float] = 0.0
-    # 🎯 NEW: Financial Offset & Trigger Constraints
     security_deposit_amount: Optional[float] = 0.0
     billing_trigger_date: Optional[int] = 5
 
@@ -327,7 +322,6 @@ def raise_direct_manager_purchase_order(
             quality_remarks=row.quality_remarks,
             file_url=row.file_url,
             is_selected=True,
-            # 🎯 Add explicit recurring variables for Direct POs too
             security_deposit_amount=getattr(row, 'security_deposit_amount', 0.0),
             billing_trigger_date=getattr(row, 'billing_trigger_date', 5)
         )
@@ -490,7 +484,6 @@ def dual_sign_approve(
                 project_name=ticket.project_name,
                 status="Pending PM Vetting"
             )
-
     if ticket.status == "Pending Sourcing":
         purchase_execs = db.query(models.User).filter(models.User.role == "Purchase Executive", models.User.is_active == True).all()
         for pe in purchase_execs:
@@ -899,7 +892,7 @@ def get_purchase_history(db: Session = Depends(get_db)):
         models.MaterialTicket.status.in_([
             "Pending Project Manager", "Pending Director", "Awaiting Digital Signature", 
             "Approved", "Dispatched", "PI Pending PM Approval", "PI Approved - Sent to Accounts",
-            "Partially Delivered", "Material Discrepancy Raised", "Delivered - GRN Logged"
+            "Partially Delivered", "Material Discrepancy Raised", "Delivered - GRN Logged", "Closed / Completed"
         ])
     ).order_by(models.MaterialTicket.created_at.desc()).all()
     
@@ -949,7 +942,7 @@ def get_pm_history(manager_id: int, db: Session = Depends(get_db)):
         models.MaterialTicket.status.in_([
             "Pending Director", "Awaiting Digital Signature", "Approved", 
             "Dispatched", "PI Pending PM Approval", "PI Approved - Sent to Accounts",
-            "Partially Delivered", "Material Discrepancy Raised", "Delivered - GRN Logged"
+            "Partially Delivered", "Material Discrepancy Raised", "Delivered - GRN Logged", "Closed / Completed"
         ])
     ).order_by(models.MaterialTicket.created_at.desc()).all()
     
@@ -972,7 +965,7 @@ def get_pm_history(manager_id: int, db: Session = Depends(get_db)):
 @app.get("/api/requisitions/director-history", response_model=List[dict])
 def get_director_history(db: Session = Depends(get_db)):
     tickets = db.query(models.MaterialTicket).filter(
-        models.MaterialTicket.status.in_(["Awaiting Digital Signature", "Approved", "Dispatched"])
+        models.MaterialTicket.status.in_(["Awaiting Digital Signature", "Approved", "Dispatched", "Delivered - GRN Logged", "Closed / Completed"])
     ).order_by(models.MaterialTicket.created_at.desc()).all()
     
     response = []
@@ -1105,6 +1098,11 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
     net_total = sum(float(q.net_amount_payable or q.total_amount or 0) for q in winning_quotes)
     gst_adj = net_total - base_total
     
+    # 🎯 FIX #3: Identify Subscription Category
+    category = ticket.category if ticket else "GOODS"
+    is_subscription = category == "SUBSCRIPTION"
+    title_text = "IT & SOFTWARE SUBSCRIPTION AGREEMENT" if is_subscription else "PURCHASE ORDER"
+
     def number_to_words(num):
         if num == 0: return 'Zero'
         ones = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen ']
@@ -1126,6 +1124,7 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
         return str_val.strip() + ' Only'
         
     amount_in_words = f"Rupees {number_to_words(int(round(net_total)))}"
+    
     table_rows_html = ""
     for idx, q in enumerate(winning_quotes, start=1):
         qty = q.quantity or 1
@@ -1140,7 +1139,33 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
             <td style="text-align: right; border: 1px solid #94a3b8; padding: 5px; font-weight: bold;">{q.base_total_value:,.2f}</td>
         </tr>
         """
-        
+
+    # 🎯 DYNAMIC CLAUSES BASED ON IT / SUBSCRIPTION
+    if is_subscription:
+        terms_html = f"""
+        <p><b>1. PRICE:</b> The cost of Subscription with GST as shown above is Rs. {net_total:,.2f}/- ({amount_in_words}).</p>
+        <p><b>2. VALIDITY / TENURE:</b> The subscription/license is valid for {getattr(primary_quote, 'contract_tenure_months', 12)} Months from the date of activation.</p>
+        <p><b>3. UPTIME & SUPPORT:</b> Vendor guarantees standard SLA uptime and provides technical support during the tenure.</p>
+        <p><b>4. TAXES & DUTIES:</b> Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
+        <p><b>5. CORRESPONDENCE:</b> All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013. Tel: 022-40499999</p>
+        <p><b>6. REFERENCE:</b> Quotation Dated {contract_date_str}.</p>
+        <p><b>7. BILLING:</b> Tax invoice to be submitted along with activation proof/license keys.</p>
+        <p><b>8. DELIVERY / ACTIVATION:</b> Digital delivery/activation for: Contract Person: {site_contact}, Contact No.: {site_phone}. {project_name}.</p>
+        <p><b>9. LEGAL COMPLIANCE:</b> Any disputes or differences arising between the Client and Vendor with respect to this Agreement and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai.</p>
+        """
+    else:
+        terms_html = f"""
+        <p><b>1. PRICE:</b> The cost of Purchase with GST as shown above is Rs. {net_total:,.2f}/- ({amount_in_words}). This is a fixed-price order and no escalation is applicable.</p>
+        <p><b>2. QUALITY:</b> If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.</p>
+        <p><b>3. LIQUIDITY DAMAGE: (NOT APPLICABLE)</b> If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.</p>
+        <p><b>4. TAXES & DUTIES:</b> Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
+        <p><b>5. CORRESPONDENCE:</b> All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013. Tel: 022-40499999</p>
+        <p><b>6. REFERENCE:</b> Quotation Dated {contract_date_str}.</p>
+        <p><b>7. BILLING:</b> Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents: a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
+        <p><b>8. DELIVERY ADDRESS:</b> Contract Person: {site_contact}, Contact No.: {site_phone}. {project_name}. {delivery_address}</p>
+        <p><b>9. LEGAL COMPLIANCE:</b> Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai.</p>
+        """
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -1161,7 +1186,7 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
             </tr>
         </table>
         
-        <h2 style="text-align: center; font-size: 12pt; margin-top: 10px; background-color: #f1f5f9; padding: 5px; border: 1px solid #94a3b8;">PURCHASE ORDER</h2>
+        <h2 style="text-align: center; font-size: 12pt; margin-top: 10px; background-color: #f1f5f9; padding: 5px; border: 1px solid #94a3b8;">{title_text}</h2>
         
         <table style="width: 100%; margin-top: 10px;">
             <tr>
@@ -1173,8 +1198,8 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
                 </td>
             </tr>
         </table>
-        <p style="margin-top: 15px;"><b>Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}.</b></p>
-        <p>Dear Sir,<br/>With reference to Quotation Dated {contract_date_str}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of goods with your company.</p>
+        <p style="margin-top: 15px;"><b>Subject: {"Subscription Agreement" if is_subscription else "Purchase Order"} for {winning_quotes[0].product_description if winning_quotes else 'Materials'}.</b></p>
+        <p>Dear Sir,<br/>With reference to Quotation Dated {contract_date_str}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of goods/services with your company.</p>
         <table class="border-table">
             <thead>
                 <tr>
@@ -1206,23 +1231,15 @@ def generate_native_vector_pdf(po_number: str, db: Session = Depends(get_db)):
         </table>
         <div class="tc-section" style="margin-top: 15px;">
             <p><b>a) TERMS OF PAYMENTS:</b> {payment_terms}</p>
-            <p><b>b) DELIVERY:</b> Time is an essence of this Purchase Order. The material has to be delivered within {time_of_delivery} from the date of issue of PO.</p>
+            <p><b>b) DELIVERY:</b> Time is an essence of this Order. The material/service has to be delivered within {time_of_delivery} from the date of issue.</p>
             <p><b>c) PROJECT:</b> {project_name}</p>
             
             <p style="margin-top: 15px;"><b>Our GST Registration no.:</b> 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)</p>
             <p><b>The placement of order is subject to the following Terms & Conditions:-</b></p>
             
-            <p><b>1. PRICE:</b> The cost of Purchase with GST as shown above is Rs. {net_total:,.2f}/- ({amount_in_words}). This is a fixed-price order and no escalation is applicable.</p>
-            <p><b>2. QUALITY:</b> If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.</p>
-            <p><b>3. LIQUIDITY DAMAGE: (NOT APPLICABLE)</b> If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.</p>
-            <p><b>4. TAXES & DUTIES:</b> Prevailing Taxes & Duties (i.e. GST) shall be as shown above.</p>
-            <p><b>5. CORRESPONDENCE:</b> All the correspondence pertaining to this order is to be made to:<br/>M/s. Aarvi Encon Ltd.<br/>B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013. Tel: 022-40499999</p>
-            <p><b>6. REFERENCE:</b> Quotation Dated {contract_date_str}.</p>
-            <p><b>7. BILLING:</b> Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents: a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.</p>
-            <p><b>8. DELIVERY ADDRESS:</b> Contract Person: {site_contact}, Contact No.: {site_phone}. {project_name}. {delivery_address}</p>
-            <p><b>9. LEGAL COMPLIANCE:</b> Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai.</p>
+            {terms_html}
             
-            <p style="margin-top: 15px;">Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.</p>
+            <p style="margin-top: 15px;">Please acknowledge of the duplicate of this Document as an acceptance of this Agreement.</p>
             <p>Thanking you,</p>
         </div>
         <table style="width: 100%; margin-top: 40px; page-break-inside: avoid;">
@@ -1281,6 +1298,11 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     net_total = sum(float(q.net_amount_payable or q.total_amount or 0) for q in winning_quotes)
     gst_adj = net_total - base_total
     
+    # 🎯 FIX #3: Identify Subscription Category
+    category = ticket.category if ticket else "GOODS"
+    is_subscription = category == "SUBSCRIPTION"
+    title_text = "IT & SOFTWARE SUBSCRIPTION AGREEMENT" if is_subscription else "PURCHASE ORDER"
+
     def number_to_words(num):
         if num == 0: return 'Zero'
         ones = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen ']
@@ -1321,15 +1343,15 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     run_ref.font.size = Pt(9)
     p_title = doc.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run_title = p_title.add_run("PURCHASE ORDER")
+    run_title = p_title.add_run(title_text)
     run_title.font.bold = True
     run_title.font.size = Pt(12)
     
     p_vendor = doc.add_paragraph()
     p_vendor.add_run(f"M/s. {vendor_name}\n").bold = True
     p_vendor.add_run(f"{vendor_address}\nCell No.: {vendor_contact} | EMAIL:- {vendor_email}\n").font.size = Pt(9)
-    doc.add_paragraph(f"Subject: Purchase Order for {winning_quotes[0].product_description if winning_quotes else 'Materials'}").runs[0].font.bold = True
-    doc.add_paragraph(f"Dear Sir,\nWith reference to Quotation Dated {contract_date_str}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of goods with your company.")
+    doc.add_paragraph(f"Subject: {'Subscription Agreement' if is_subscription else 'Purchase Order'} for {winning_quotes[0].product_description if winning_quotes else 'Materials'}").runs[0].font.bold = True
+    doc.add_paragraph(f"Dear Sir,\nWith reference to Quotation Dated {contract_date_str}, and subsequent discussion, we are pleased to inform you that company has decided to place order for the supply of goods/services with your company.")
     
     table = doc.add_table(rows=1, cols=5)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -1368,26 +1390,41 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
     doc.add_paragraph(f"({amount_in_words})").alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     doc.add_paragraph().add_run(f"a) TERMS OF PAYMENTS: {payment_terms}").font.bold = True
-    doc.add_paragraph().add_run(f"b) DELIVERY: Time is an essence of this Purchase Order. The material has to be delivered within {time_of_delivery} from the date of issue of PO.").font.bold = True
+    doc.add_paragraph().add_run(f"b) DELIVERY: Time is an essence of this Order. The material/service has to be delivered within {time_of_delivery} from the date of issue.").font.bold = True
     doc.add_paragraph().add_run(f"c) PROJECT: {project_name}").font.bold = True
     doc.add_paragraph("Our GST Registration no.: 27AAACA3640H1Z0 (Please Confirm the GST No. Before the Preparation of Invoices.)")
     doc.add_paragraph("The placement of order is subject to the following Terms & Conditions:-").runs[0].font.bold = True
-    terms = [
-        f"1. PRICE: The cost of Purchase with GST as shown above is Rs. {net_total:,.2f}/-. This is a fixed-price order and no escalation is applicable.",
-        "2. QUALITY: If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.",
-        "3. LIQUIDITY DAMAGE: (NOT APPLICABLE) If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.",
-        "4. TAXES & DUTIES: Prevailing Taxes & Duties (i.e. GST) shall be as shown above.",
-        "5. CORRESPONDENCE: All the correspondence pertaining to this order is to be made to: M/s. Aarvi Encon Ltd., B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013. Tel: 022-40499999",
-        f"6. REFERENCE: Quotation Dated {contract_date_str}.",
-        "7. BILLING: Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents: a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.",
-        f"8. DELIVERY ADDRESS: Contract Person: {site_contact}, Contact No.: {site_phone}. {project_name}. {delivery_address}",
-        "9. LEGAL COMPLIANCE: Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai."
-    ]
+    
+    if is_subscription:
+        terms = [
+            f"1. PRICE: The cost of Subscription with GST as shown above is Rs. {net_total:,.2f}/-.",
+            f"2. VALIDITY / TENURE: The subscription/license is valid for {getattr(primary_quote, 'contract_tenure_months', 12)} Months from the date of activation.",
+            "3. UPTIME & SUPPORT: Vendor guarantees standard SLA uptime and provides technical support during the tenure.",
+            "4. TAXES & DUTIES: Prevailing Taxes & Duties (i.e. GST) shall be as shown above.",
+            "5. CORRESPONDENCE: All the correspondence pertaining to this order is to be made to: M/s. Aarvi Encon Ltd., B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013. Tel: 022-40499999",
+            f"6. REFERENCE: Quotation Dated {contract_date_str}.",
+            "7. BILLING: Tax invoice to be submitted along with activation proof/license keys.",
+            f"8. DELIVERY / ACTIVATION: Digital delivery/activation for: Contract Person: {site_contact}, Contact No.: {site_phone}. {project_name}.",
+            "9. LEGAL COMPLIANCE: Any disputes or differences arising between the Client and Vendor with respect to this Agreement and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai."
+        ]
+    else:
+        terms = [
+            f"1. PRICE: The cost of Purchase with GST as shown above is Rs. {net_total:,.2f}/-. This is a fixed-price order and no escalation is applicable.",
+            "2. QUALITY: If the material supplied is not to the satisfaction of our engineer, then the same has to be replaced without any financial implications.",
+            "3. LIQUIDITY DAMAGE: (NOT APPLICABLE) If the supplier fails to deliver all the above-mentioned items within 1 week from the date of PO & Liquidity damages @ 0.5% of the order value per week, subject to a maximum of 5% of the order value will be applicable.",
+            "4. TAXES & DUTIES: Prevailing Taxes & Duties (i.e. GST) shall be as shown above.",
+            "5. CORRESPONDENCE: All the correspondence pertaining to this order is to be made to: M/s. Aarvi Encon Ltd., B-1/603, 6th Floor, Marathon Innova, Marathon Nextgen Complex, G.K. Marg Lower Parel (W), Mumbai -400013. Tel: 022-40499999",
+            f"6. REFERENCE: Quotation Dated {contract_date_str}.",
+            "7. BILLING: Bill to be submitted in 2 sets. Original Bill to be submitted to Head Office Mumbai with copy of Bill to Site for Certification / Verification along with following documents: a) Tax invoice b) Delivery Challan c) P.O. Acceptance Copy.",
+            f"8. DELIVERY ADDRESS: Contract Person: {site_contact}, Contact No.: {site_phone}. {project_name}. {delivery_address}",
+            "9. LEGAL COMPLIANCE: Any disputes or differences arising between the Client and Vendor with respect to this Purchase Order and terms & conditions or any other matter connected with or incidental thereto, it should be exclusive under the arbitration and jurisdiction of the courts of Mumbai."
+        ]
+        
     for term in terms:
         p = doc.add_paragraph(term)
         p.runs[0].font.size = Pt(9)
         
-    doc.add_paragraph("Please acknowledge of the duplicate of this Purchase Order as an acceptance of this Purchase Order.\nThanking you,\nYours faithfully")
+    doc.add_paragraph("Please acknowledge of the duplicate of this Document as an acceptance of this Agreement.\nThanking you,\nYours faithfully")
     sig_table = doc.add_table(rows=1, cols=2)
     sig_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     c1, c2 = sig_table.rows[0].cells
@@ -1407,6 +1444,7 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
 # -------------------------------------------------------------------
 @app.get("/api/purchase-orders/finalized", response_model=List[dict])
 def get_finalized_purchase_orders(db: Session = Depends(get_db)):
+    # 🎯 FIX #5: Added "Closed / Completed" so they remain visible in the Master Ledger
     orders = db.query(
         models.PurchaseOrder, 
         models.MaterialTicket
@@ -1414,7 +1452,7 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
         models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number
     ).filter(models.MaterialTicket.status.in_([
         "Approved", "PI Pending PM Approval", "PI Approved - Sent to Accounts", 
-        "Dispatched", "Partially Delivered", "Material Discrepancy Raised", "Delivered - GRN Logged", "Partially Disbursed"
+        "Dispatched", "Partially Delivered", "Material Discrepancy Raised", "Delivered - GRN Logged", "Partially Disbursed", "Closed / Completed"
     ])).order_by(models.PurchaseOrder.generated_at.desc()).all()
     
     response = []
@@ -1734,7 +1772,6 @@ def mark_po_gst_as_paid(
     
     log_msg = f"GST Portal Reflection Verified by {payload.user_name}. GST Status marked as PAID. Remarks: {payload.remarks}"
     
-    # Check if Order is 100% complete (Delivered + Fully Disbursed + GST Reflected)
     winning_quotes = db.query(models.Quotation).filter(
         models.Quotation.ticket_number == po.ticket_number,
         models.Quotation.is_selected == True
@@ -1743,10 +1780,13 @@ def mark_po_gst_as_paid(
     disbursed = float(getattr(po, 'disbursed_amount', 0) or 0)
     
     is_fully_paid = (grand_total - disbursed) <= 1.0
-    is_delivered = ticket and ticket.status in ["Delivered - GRN Logged", "Dispatched"]
+    is_delivered = ticket and ticket.status in ["Delivered - GRN Logged", "Closed / Completed"]
+    
+    # 🎯 FIX #5: Master PO Status mapping - Order closed if fully delivered and paid
     if is_fully_paid and is_delivered:
-        ticket.status = "Delivered - GRN Logged"
-        log_msg += " | All financial, delivery, and GST liabilities fulfilled. Order officially closed."
+        ticket.status = "Closed / Completed"
+        log_msg += " | All financial, delivery, and GST liabilities fulfilled. Order officially Closed / Completed."
+        
     db.add(models.TicketHistory(
         ticket_number=po.ticket_number,
         user_name=payload.user_name,
@@ -1832,7 +1872,6 @@ def update_vendor_profile(vendor_id: int, payload: VendorUpdatePayload, db: Sess
     vendor.contact_number = payload.contact_number
     vendor.email = payload.email
     
-    # Safely assign optional fields in case DB model wasn't migrated yet
     if hasattr(vendor, 'gst_number'): vendor.gst_number = payload.gst_number
     if hasattr(vendor, 'pan_number'): vendor.pan_number = payload.pan_number
     if hasattr(vendor, 'bank_details'): vendor.bank_details = payload.bank_details
@@ -1874,7 +1913,7 @@ async def upload_vendor_documents(
         except Exception as e:
             logger.error(f"Failed to upload {doc_name}: {str(e)}")
             return None
-    # Safely assign URLs if files are uploaded
+            
     if aadhar_file and hasattr(vendor, 'aadhar_url'): vendor.aadhar_url = upload_to_cloud(aadhar_file, "AADHAR")
     if pan_file and hasattr(vendor, 'pan_url'): vendor.pan_url = upload_to_cloud(pan_file, "PAN")
     if reg_cert_file and hasattr(vendor, 'reg_cert_url'): vendor.reg_cert_url = upload_to_cloud(reg_cert_file, "REG")
@@ -1882,6 +1921,7 @@ async def upload_vendor_documents(
     if electricity_bill_file and hasattr(vendor, 'electricity_bill_url'): vendor.electricity_bill_url = upload_to_cloud(electricity_bill_file, "ELECTRICITY")
     if cancelled_cheque_file and hasattr(vendor, 'cancelled_cheque_url'): vendor.cancelled_cheque_url = upload_to_cloud(cancelled_cheque_file, "CHEQUE")
     if iso_cert_file and hasattr(vendor, 'iso_cert_url'): vendor.iso_cert_url = upload_to_cloud(iso_cert_file, "ISO")
+    
     db.commit()
     return {"message": "Vendor documents securely uploaded and linked to profile."}
 
@@ -2237,7 +2277,6 @@ async def process_po_disbursement(
     grand_total = float(sum((q.total_amount or 0) for q in winning_quotes)) if winning_quotes else 0.0
     previous_disbursed = float(getattr(po, 'disbursed_amount', 0) or 0)
     
-    # Total offsets = Base Bank Transfer + Any TDS Deducted by Accounts
     new_total_disbursed = previous_disbursed + float(disbursed_amount) + float(tds_amount)
     po.disbursed_amount = new_total_disbursed
     
@@ -2268,14 +2307,19 @@ async def process_po_disbursement(
     ticket = db.query(models.MaterialTicket).filter(models.MaterialTicket.ticket_number == po.ticket_number).first()
     if ticket:
         remaining_balance = grand_total - new_total_disbursed
+        is_delivered = ticket.status in ["Delivered - GRN Logged", "Closed / Completed"]
         
-        # Adjust log message to clearly denote the TDS withheld by Accounts
+        # 🎯 FIX #5: Master PO Status mapping - Order closed if fully delivered and paid
         if remaining_balance > 1.0:
-            ticket.status = "Partially Disbursed"
+            ticket.status = "Delivered - GRN Logged" if is_delivered else "Partially Disbursed"
             log_msg = f"Partial Payment UTR {utr_no} logged (Bank Transfer: ₹{float(disbursed_amount):,.2f} | TDS Deducted: ₹{float(tds_amount):,.2f}). Total Disbursed: ₹{new_total_disbursed:,.2f} / ₹{grand_total:,.2f}. Outstanding Balance: ₹{remaining_balance:,.2f}."
         else:
-            ticket.status = "Dispatched"
-            log_msg = f"Final Payment UTR {utr_no} logged (Bank Transfer: ₹{float(disbursed_amount):,.2f} | TDS Deducted: ₹{float(tds_amount):,.2f}). Order 100% Financially Cleared (Total: ₹{new_total_disbursed:,.2f}) and released for site dispatch."
+            ticket.status = "Closed / Completed" if is_delivered else "Dispatched"
+            log_msg = f"Final Payment UTR {utr_no} logged (Bank Transfer: ₹{float(disbursed_amount):,.2f} | TDS Deducted: ₹{float(tds_amount):,.2f}). Order 100% Financially Cleared (Total: ₹{new_total_disbursed:,.2f})."
+            if is_delivered:
+                log_msg += " Order is fully delivered and paid. Closed / Completed."
+            else:
+                log_msg += " Released for site dispatch."
             
         if po.payment_advice_url:
             log_msg += f" | Proof File: {po.payment_advice_url}"
@@ -2364,15 +2408,27 @@ async def process_goods_receipt_note(
             
     has_extra_charges = float(extra_km or 0) > 0 or float(extra_fuel_charges or 0) > 0
     
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.ticket_number == ticket_number).first()
+    winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == ticket_number, models.Quotation.is_selected == True).all()
+    grand_total = float(sum((q.total_amount or 0) for q in winning_quotes)) if winning_quotes else 0.0
+    disbursed = float(getattr(po, 'disbursed_amount', 0) or 0) if po else 0.0
+    is_fully_paid = (grand_total - disbursed) <= 1.0
+
     if receipt_type == "CLEAN":
         if has_extra_charges:
             ticket.status = "Extra Usage - Pending Purchase"
             action = "Variable Usage Logged - Pending Verification"
             detail_text = f"Monthly log submitted with Extra Charges (KM: {extra_km}, Fuel: ₹{extra_fuel_charges}) by {user_name}. Paused for Purchase Executive verification. Remarks: {remarks or 'None'}"
         else:
-            ticket.status = "Delivered - GRN Logged"
-            action = "Material Delivered & Clean GRN Verified"
-            detail_text = f"100% Goods verified at site by {user_name}. Remarks: {remarks or 'None'}"
+            # 🎯 FIX #5: Master PO Status mapping - Order closed if fully delivered and paid
+            if is_fully_paid:
+                ticket.status = "Closed / Completed"
+                action = "Material Delivered & Order Closed"
+                detail_text = f"100% Goods verified at site by {user_name}. Order is fully paid and delivered. Closed/Completed."
+            else:
+                ticket.status = "Delivered - GRN Logged"
+                action = "Material Delivered & Clean GRN Verified"
+                detail_text = f"100% Goods verified at site by {user_name}. Pending final accounts clearance."
             
     elif receipt_type == "PARTIAL":
         ticket.status = "Partially Delivered"
@@ -2657,60 +2713,57 @@ def renew_recurring_contract(
 # -------------------------------------------------------------------
 @app.get("/api/analytics/director-summary", response_model=dict)
 def get_director_analytics_summary(db: Session = Depends(get_db)):
-    closed_statuses = ["Delivered - GRN Logged", "Contract Terminated & Closed", "Rejected"]
+    closed_statuses = ["Delivered - GRN Logged", "Contract Terminated & Closed", "Rejected", "Closed / Completed"]
     
     active_count = db.query(models.MaterialTicket).filter(
         models.MaterialTicket.status.notin_(closed_statuses)
     ).count()
-
     pending_director_count = db.query(models.MaterialTicket).filter(
         models.MaterialTicket.status == "Pending Director"
     ).count()
-
+    
     winning_data = db.query(models.Quotation, models.TicketItem, models.MaterialTicket)\
         .join(models.MaterialTicket, models.Quotation.ticket_number == models.MaterialTicket.ticket_number)\
         .join(models.TicketItem, (models.Quotation.ticket_number == models.TicketItem.ticket_number) & (models.Quotation.item_index == models.TicketItem.item_index))\
         .filter(models.Quotation.is_selected == True).all()
-
+        
     total_spend = 0.0
     active_monthly_spend = 0.0
     reimbursable_spend = 0.0
     non_reimbursable_spend = 0.0
-
     category_spend = {"GOODS": 0.0, "VEHICLE": 0.0, "ACCOMMODATION": 0.0, "FOOD": 0.0, "SUBSCRIPTION": 0.0}
     pm_spend_map = {}
     project_spend_map = {}
-
+    
     for quote, item, ticket in winning_data:
         amount = float(quote.net_amount_payable or quote.total_amount or quote.base_total_value or 0)
         total_spend += amount
-
         if getattr(item, 'is_reimbursable', False):
             reimbursable_spend += amount
         else:
             non_reimbursable_spend += amount
-
+            
         is_recurring_ticket = getattr(quote, 'is_recurring', False) or (ticket.category in ["VEHICLE", "ACCOMMODATION", "SUBSCRIPTION"])
         inactive_lease_statuses = [
             "Pending Sourcing", "Pending PM Vetting", "Vetting Active", "Awaiting Coordinator Sign-Off",
-            "Pending Project Manager", "Pending Director", "Rejected", "Contract Terminated & Closed"
+            "Pending Project Manager", "Pending Director", "Rejected", "Contract Terminated & Closed", "Closed / Completed"
         ]
         
         if is_recurring_ticket and ticket.status not in inactive_lease_statuses:
             m_rate = float(quote.monthly_rate or quote.unit_price or 0)
             active_monthly_spend += m_rate
-
+            
         cat_key = (ticket.category or "GOODS").upper()
         if cat_key in category_spend:
             category_spend[cat_key] += amount
-
+            
         pm_user = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
         pm_name = pm_user.name if pm_user else "Unassigned / Direct"
         if pm_name not in pm_spend_map:
             pm_spend_map[pm_name] = {"pm_name": pm_name, "total_spend": 0.0, "po_count": set()}
         pm_spend_map[pm_name]["total_spend"] += amount
         pm_spend_map[pm_name]["po_count"].add(ticket.ticket_number)
-
+        
         p_code = ticket.project_code or "UNKNOWN"
         p_name = ticket.project_name or "Unclassified Site"
         if p_code not in project_spend_map:
@@ -2724,13 +2777,13 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
             }
         project_spend_map[p_code]["total_spend"] += amount
         project_spend_map[p_code]["ticket_count"].add(ticket.ticket_number)
-
+        
     pm_spend = [
         {"pm_name": pm, "total_spend": data["total_spend"], "orders_count": len(data["po_count"])}
         for pm, data in pm_spend_map.items()
     ]
     pm_spend.sort(key=lambda x: x["total_spend"], reverse=True)
-
+    
     all_projects = [
         {
             "project_code": data["project_code"],
@@ -2743,7 +2796,7 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
         for code, data in project_spend_map.items()
     ]
     all_projects.sort(key=lambda x: x["total_spend"], reverse=True)
-
+    
     return {
         "active_procurements_count": active_count,
         "pending_director_action_count": pending_director_count,
