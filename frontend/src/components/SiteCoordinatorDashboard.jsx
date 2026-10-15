@@ -11,7 +11,6 @@ import { Card, Input, Button, StatusBadge } from './ui/SharedUI';
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
 export default function SiteCoordinatorDashboard() {
-  // 🎯 Dynamically grab the REAL logged-in user
   const storedSession = localStorage.getItem('aarvi_session') || sessionStorage.getItem('aarvi_session');
   const activeUser = storedSession ? JSON.parse(storedSession) : {};
   const currentUserId = activeUser.id;
@@ -23,14 +22,10 @@ export default function SiteCoordinatorDashboard() {
   const [projectName, setProjectName] = useState('');
   const [category, setCategory] = useState('GOODS'); 
   
-  // Dynamic API States
   const [siteManagers, setSiteManagers] = useState([]);
   const [projectManagers, setProjectManagers] = useState([]);
   
-  // 🎯 NEW: Self-Learning Material Types State
   const [dynamicMaterialTypes, setDynamicMaterialTypes] = useState(['Consumable', 'Asset']);
-
-  // Routing States
   const [siteManagerId, setSiteManagerId] = useState('');
   const [projectManagerId, setProjectManagerId] = useState('');
   const [items, setItems] = useState([{ product_description: '', make_brand: '', quantity: 1, purpose: '', item_type: 'Consumable' }]);
@@ -38,7 +33,6 @@ export default function SiteCoordinatorDashboard() {
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
   
-  // History & Negotiation
   const [history, setHistory] = useState([]);
   const [proposals, setProposals] = useState([]);
   const [selectedProposal, setSelectedProposal] = useState(null);
@@ -46,19 +40,16 @@ export default function SiteCoordinatorDashboard() {
   const [historyLogs, setHistoryLogs] = useState([]);
   const [coordinatorRemarks, setCoordinatorRemarks] = useState('');
 
-  // 🎯 GRN & DISCREPANCY STATES
   const [grnModalTicket, setGrnModalTicket] = useState(null);
-  const [receiptType, setReceiptType] = useState('CLEAN'); // 'CLEAN' | 'PARTIAL' | 'DISCREPANCY'
+  const [receiptType, setReceiptType] = useState('CLEAN'); 
   const [discrepancyCategory, setDiscrepancyCategory] = useState('Damaged Goods'); 
   const [grnFile, setGrnFile] = useState(null);
   const [grnRemarks, setGrnRemarks] = useState('');
-
-  // 🎯 NEW: VARIABLE USAGE & EXTRA CHARGES STATES
+  
   const [extraKm, setExtraKm] = useState('');
   const [extraKmRate, setExtraKmRate] = useState('');
   const [extraFuelCharges, setExtraFuelCharges] = useState('');
 
-  // Initial Fetches (Managers + Dynamic Material Types)
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
@@ -67,7 +58,6 @@ export default function SiteCoordinatorDashboard() {
         const pmRes = await axios.get(`${API_BASE_URL}/users/by-role?role=Project Manager`);
         setProjectManagers(pmRes.data);
         
-        // 🎯 Fetch self-learning categories from DB
         const matRes = await axios.get(`${API_BASE_URL}/system/material-types`);
         if (matRes.data && matRes.data.length > 0) {
             setDynamicMaterialTypes(matRes.data);
@@ -109,7 +99,6 @@ export default function SiteCoordinatorDashboard() {
     return () => { isMounted = false; };
   }, [activeTab, fetchPipelineHistory]); 
 
-  // Proposal Handlers
   const openProposal = async (ticket) => {
     setSelectedProposal(ticket);
     setCoordinatorRemarks('');
@@ -158,9 +147,9 @@ export default function SiteCoordinatorDashboard() {
     finally { setLoading(false); }
   };
 
-  // New Request Handlers
   const addRow = () => setItems([...items, { product_description: '', make_brand: '', quantity: 1, purpose: '', item_type: 'Consumable' }]);
   const removeRow = (index) => items.length > 1 && setItems(items.filter((_, i) => i !== index));
+
   const handleItemChange = (index, field, value) => {
     const newItems = [...items];
     newItems[index][field] = value;
@@ -188,7 +177,6 @@ export default function SiteCoordinatorDashboard() {
     finally { setLoading(false); }
   };
 
-  // 🎯 RESET GRN MODAL HELPER
   const closeGrnModal = () => {
     setGrnModalTicket(null);
     setGrnFile(null);
@@ -199,7 +187,6 @@ export default function SiteCoordinatorDashboard() {
     setExtraFuelCharges('');
   };
 
-  // 🎯 GRN SUBMIT HANDLER (Updated with Extra Usage Data)
   const submitGrn = async () => {
     if (receiptType === 'DISCREPANCY' && !grnRemarks.trim()) {
       setAlert({ type: 'error', message: "Please describe the defect/issue in the remarks box before raising a ticket." });
@@ -211,7 +198,6 @@ export default function SiteCoordinatorDashboard() {
     formData.append('receipt_type', receiptType);
     formData.append('discrepancy_category', discrepancyCategory);
     
-    // Formatting the final remarks to include variable usage natively
     let combinedRemarks = grnRemarks;
     if (extraKm || extraFuelCharges) {
       combinedRemarks += ` | [Extra Usage Logged] KM Driven: ${extraKm || 0} @ ₹${extraKmRate || 0}/km, Extra Fuel/Utility: ₹${extraFuelCharges || 0}`;
@@ -220,7 +206,6 @@ export default function SiteCoordinatorDashboard() {
     formData.append('remarks', combinedRemarks);
     formData.append('user_name', currentUserName);
     
-    // Pass explicit form data fields so the backend can capture them for Accounts review later
     formData.append('extra_km', extraKm || 0);
     formData.append('extra_km_rate', extraKmRate || 0);
     formData.append('extra_fuel_charges', extraFuelCharges || 0);
@@ -241,7 +226,6 @@ export default function SiteCoordinatorDashboard() {
     finally { setLoading(false); }
   };
 
- // 🎯 5-STEP STATUS MAP
   const getStepStatus = (currentStatus, stepIndex) => {
     const statusMap = {
       'Vetting Active': 1, 'Awaiting Coordinator Sign-Off': 1, 'Approved by Manager': 1, 'Approved by Coordinator': 1, 'Pending PM Vetting': 1, 
@@ -249,7 +233,7 @@ export default function SiteCoordinatorDashboard() {
       'Pending Purchase Approval': 3, 'Pending Project Manager': 3, 'Pending Director': 3, 'Query Raised': 3,
       'Awaiting Digital Signature': 4, 'Approved': 4, 'PI Pending PM Approval': 4, 'PI Approved - Sent to Accounts': 4, 
       'Partially Disbursed': 5, 'Dispatched': 5, 'Partially Delivered': 5, 'Material Discrepancy Raised': 5,
-      'Delivered - GRN Logged': 6 
+      'Delivered - GRN Logged': 6, 'Closed / Completed': 6 
     };
     const currentStep = statusMap[currentStatus] || 1;
     if (currentStep > stepIndex) return 'completed';
@@ -260,12 +244,10 @@ export default function SiteCoordinatorDashboard() {
   return (
     <div className="space-y-6 relative pb-10 sm:px-2 md:px-4">
       
-      {/* 🎯 DATALIST FOR SELF LEARNING DROPDOWNS */}
       <datalist id="dynamic-material-types">
         {dynamicMaterialTypes.map((type, idx) => <option key={idx} value={type} />)}
       </datalist>
 
-      {/* HEADER ACTIONS BAR (Responsive) */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-extrabold text-[#2c2a57] tracking-tight">Site Coordinator Workspace</h1>
@@ -286,7 +268,6 @@ export default function SiteCoordinatorDashboard() {
         </div>
       )}
 
-      {/* VIEW A: NEW REQUEST FORM SUBMISSION CONTAINER */}
       {activeTab === 'new_request' && (
         <form onSubmit={handleSubmit} className="space-y-6 max-w-6xl animate-in fade-in duration-300">
           <Card className="p-4 md:p-5 space-y-4">
@@ -321,7 +302,6 @@ export default function SiteCoordinatorDashboard() {
               </div>
             </div>
           </Card>
-
           <Card className="overflow-hidden">
             <div className="p-4 border-b border-slate-100 flex items-center space-x-2 bg-slate-50">
               <FileSpreadsheet className="text-[#0b9c54]" size={18} />
@@ -349,7 +329,6 @@ export default function SiteCoordinatorDashboard() {
                       <td className="py-2 px-2"><input value={item.make_brand} onChange={e => handleItemChange(index, 'make_brand', e.target.value)} placeholder="Tata, Finolex..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                       <td className="py-2 px-2"><input type="number" min="1" required value={item.quantity} onChange={e => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm font-bold text-center text-slate-800 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                       
-                      {/* 🎯 SELF LEARNING INPUT INSTEAD OF STRICT SELECT */}
                       <td className="py-2 px-2">
                         <input 
                           list="dynamic-material-types"
@@ -359,7 +338,6 @@ export default function SiteCoordinatorDashboard() {
                           className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs md:text-sm font-semibold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none" 
                         />
                       </td>
-
                       <td className="py-2 px-2"><input value={item.purpose} onChange={e => handleItemChange(index, 'purpose', e.target.value)} placeholder="Site use case..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                       <td className="py-2 text-center">
                         <button type="button" onClick={() => removeRow(index)} disabled={items.length === 1} className="text-slate-400 hover:text-rose-600 disabled:opacity-20 p-2"><Trash2 size={16} /></button>
@@ -378,7 +356,6 @@ export default function SiteCoordinatorDashboard() {
         </form>
       )}
 
-      {/* VIEW B: MANAGER PROPOSALS & INTERACTIVE CELL NEGOTIATIONS */}
       {activeTab === 'proposals' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1500px] animate-in fade-in duration-300">
           
@@ -431,7 +408,6 @@ export default function SiteCoordinatorDashboard() {
                             <td className="py-1 px-1"><input type="text" value={item.make_brand || ''} onChange={(e) => handleProposalCellChange(idx, 'make_brand', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-[11px] md:text-xs text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             <td className="py-1 px-1"><input type="number" value={item.quantity} onChange={(e) => handleProposalCellChange(idx, 'quantity', parseInt(e.target.value) || 1)} className="w-full bg-slate-50 border border-slate-200 rounded text-center text-[11px] md:text-xs font-bold text-amber-700 focus:bg-white focus:border-[#2c2a57] outline-none py-1.5" /></td>
                             
-                            {/* 🎯 SELF LEARNING INPUT INSTEAD OF STRICT SELECT */}
                             <td className="py-1 px-1">
                               <input 
                                 list="dynamic-material-types"
@@ -441,7 +417,6 @@ export default function SiteCoordinatorDashboard() {
                                 className="w-full bg-slate-50 border border-slate-200 rounded px-1 py-1.5 text-[10px] md:text-[11px] font-semibold text-slate-700 focus:bg-white focus:border-[#2c2a57] outline-none" 
                               />
                             </td>
-
                             <td className="py-1 px-1"><input type="text" value={item.purpose || ''} onChange={(e) => handleProposalCellChange(idx, 'purpose', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-[11px] md:text-xs text-slate-600 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                             <td className="py-1 text-center"><button type="button" onClick={() => removeProposalRow(idx)} className="text-slate-400 hover:text-rose-600 p-1"><Trash2 size={14} /></button></td>
                           </tr>
@@ -482,7 +457,6 @@ export default function SiteCoordinatorDashboard() {
         </div>
       )}
 
-      {/* VIEW C: LIVE PIPELINE PROGRESS STEPPER TRACKER */}
       {activeTab === 'history' && (
         <div className="space-y-4 max-w-5xl animate-in fade-in duration-300">
           <div className="flex items-center space-x-2"><Clock className="text-[#0b9c54]" size={18} /><h2 className="text-xs md:text-sm font-bold text-[#2c2a57] uppercase tracking-wider">Live Material Pipeline Tracker</h2></div>
@@ -494,19 +468,16 @@ export default function SiteCoordinatorDashboard() {
           ) : (
             history.map((ticket) => {
               
-              // 🎯 12-MONTH CONTINUOUS LOOP LOGIC
               const canLogGrn = 
                 ['Dispatched', 'Partially Delivered', 'Partially Disbursed'].includes(ticket.status) || 
                 (ticket.status === 'Delivered - GRN Logged' && ['VEHICLE', 'ACCOMMODATION', 'SUBSCRIPTION'].includes(ticket.category));
-
-              // 🎯 DYNAMIC GRN TEXT LOGIC
+              
               const isFirstTime = ['Dispatched', 'Partially Disbursed'].includes(ticket.status);
               const buttonText = isFirstTime ? "Log Initial Receipt/GRN" : "Upload Next Monthly Log";
-
+              
               return (
                 <Card key={ticket.ticket_number} className="p-3 md:p-4 bg-white border border-slate-200 flex flex-col space-y-4 md:space-y-5">
                   
-                  {/* Master Info Strip */}
                   <div className="flex flex-col sm:flex-row justify-between sm:items-start md:items-center bg-slate-50 p-3 rounded-xl border border-slate-100 gap-3">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -520,11 +491,9 @@ export default function SiteCoordinatorDashboard() {
                     </div>
                   </div>
 
-                  {/* 🎯 EXPANDED 5-STEP VISUAL TRACK MATRIX */}
                   <div className="overflow-x-auto custom-scrollbar pb-2">
                     <div className="grid grid-cols-5 min-w-[550px] md:min-w-full gap-2 relative pt-2">
                       
-                      {/* Step 1: Site Alignment */}
                       <div className="text-center flex flex-col items-center relative group">
                         <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
                           getStepStatus(ticket.status, 1) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
@@ -542,7 +511,6 @@ export default function SiteCoordinatorDashboard() {
                         <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 1) === 'active' ? 'text-indigo-600' : 'text-slate-600'}`}>Site Handshake</span>
                       </div>
 
-                      {/* Step 2: Sourcing Desk */}
                       <div className="text-center flex flex-col items-center relative group">
                         <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
                           getStepStatus(ticket.status, 2) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
@@ -560,7 +528,6 @@ export default function SiteCoordinatorDashboard() {
                         <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 2) === 'active' ? 'text-cyan-600' : 'text-slate-400'}`}>Sourcing Hub</span>
                       </div>
 
-                      {/* Step 3: Management Clearance */}
                       <div className="text-center flex flex-col items-center relative group">
                         <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
                           getStepStatus(ticket.status, 3) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
@@ -578,7 +545,6 @@ export default function SiteCoordinatorDashboard() {
                         <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 3) === 'active' ? 'text-amber-600' : 'text-slate-400'}`}>Mgmt Approval</span>
                       </div>
 
-                      {/* Step 4: PO Compilation & Payment */}
                       <div className="text-center flex flex-col items-center relative group">
                         <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
                           getStepStatus(ticket.status, 4) === 'completed' ? 'bg-emerald-50 border-emerald-400 text-emerald-600' :
@@ -596,7 +562,6 @@ export default function SiteCoordinatorDashboard() {
                         <span className={`text-[9px] md:text-[10px] font-bold mt-2 tracking-tight ${getStepStatus(ticket.status, 4) === 'active' ? 'text-purple-600' : 'text-slate-400'}`}>Finance & PO</span>
                       </div>
 
-                      {/* Step 5: Material Delivery & GRN Upload */}
                       <div className="text-center flex flex-col items-center relative group">
                         <div className={`w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center border-2 font-bold text-[10px] md:text-xs transition-all relative ${
                           getStepStatus(ticket.status, 5) === 'completed' ? 'bg-[#0b9c54] border-[#0b9c54] text-white' :
@@ -618,7 +583,6 @@ export default function SiteCoordinatorDashboard() {
                     </div>
                   </div>
 
-                  {/* 🎯 ACTION ZONE: Show Inspection & GRN Button */}
                   {canLogGrn && (
                     <div className="bg-slate-50 p-3 md:p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div>
@@ -635,7 +599,6 @@ export default function SiteCoordinatorDashboard() {
                     </div>
                   )}
 
-                  {/* 🎯 WARNING ZONE: Shown if an issue was raised */}
                   {ticket.status === 'Material Discrepancy Raised' && (
                     <div className="bg-rose-50 p-3 md:p-3.5 border border-rose-200 rounded-xl flex items-start gap-3">
                       <ShieldAlert size={18} className="text-rose-600 shrink-0 mt-0.5" />
@@ -689,7 +652,11 @@ export default function SiteCoordinatorDashboard() {
                     className={`p-3 rounded-xl border text-center transition-all flex sm:flex-col items-center justify-start sm:justify-center gap-3 sm:gap-1.5 ${receiptType === 'CLEAN' ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-3xs font-extrabold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                   >
                     <CheckCircle2 size={16} className={receiptType === 'CLEAN' ? 'text-emerald-600' : 'text-slate-400'} />
-                    <span className="text-[11px]">100% Perfect / Log OK</span>
+                    <span className="text-[11px]">
+                      {grnModalTicket?.category === 'SUBSCRIPTION' ? 'Subscription Active' : 
+                       grnModalTicket?.category === 'VEHICLE' ? 'Log OK' : 
+                       '100% Delivered'}
+                    </span>
                   </button>
                   <button 
                     type="button" 
@@ -730,8 +697,8 @@ export default function SiteCoordinatorDashboard() {
                 </div>
               )}
 
-              {/* 🎯 NEW: EXTRA USAGE / SERVICE LOGGING (Vehicles, Food, Utilities) */}
-              {['VEHICLE', 'ACCOMMODATION', 'FOOD', 'UTILITIES', 'SUBSCRIPTION'].includes(grnModalTicket?.category) && (
+              {/* 🎯 ONLY SHOW VEHICLE VARIABLE USAGE FOR VEHICLE LEASES */}
+              {grnModalTicket?.category === 'VEHICLE' && (
                 <div className="bg-indigo-50/40 border border-indigo-100 p-3 sm:p-4 rounded-xl space-y-3">
                   <label className="text-[10px] font-black text-indigo-800 uppercase tracking-widest block border-b border-indigo-100 pb-1.5">
                     Variable Usage & Extra Charges (Optional)
@@ -770,9 +737,14 @@ export default function SiteCoordinatorDashboard() {
                   onChange={e => setGrnRemarks(e.target.value)} 
                   placeholder={receiptType === 'DISCREPANCY' ? "Describe exactly what is broken/missing..." : "e.g. Logbook attached for current month..."} 
                 />
+                
                 <div className="bg-slate-100 border border-slate-200 p-3 rounded-xl space-y-2">
                   <label className="text-[9px] sm:text-[10px] font-extrabold text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
-                    <UploadCloud size={14} /> {receiptType === 'DISCREPANCY' ? 'Attach Photo Proof *' : 'Attach Logbook / GRN (PDF/Word) *'}
+                    <UploadCloud size={14} /> 
+                    {receiptType === 'DISCREPANCY' ? 'Attach Photo Proof *' : 
+                     grnModalTicket?.category === 'VEHICLE' ? 'Attach Logbook Sheet (PDF/Image) *' : 
+                     grnModalTicket?.category === 'SUBSCRIPTION' ? 'Attach License/Invoice Proof (PDF/Image) *' : 
+                     'Attach Delivery Challan / GRN (PDF/Image) *'}
                   </label>
                   <input 
                     type="file" 
@@ -800,7 +772,6 @@ export default function SiteCoordinatorDashboard() {
           </div>
         </div>
       )}
-
     </div>
   );
 }
