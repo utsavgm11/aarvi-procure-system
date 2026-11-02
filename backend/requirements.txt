@@ -13,3 +13,4 @@ docxtpl
 cloudinary
 xhtml2pdf
 python-docx
+APScheduler
