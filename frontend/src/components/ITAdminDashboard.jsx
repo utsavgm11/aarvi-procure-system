@@ -13,7 +13,7 @@ export default function ITAdminDashboard() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
-
+  
   // Form states
   const [empcode, setEmpcode] = useState(''); 
   const [name, setName] = useState('');
@@ -151,6 +151,8 @@ export default function ITAdminDashboard() {
           <div className="lg:col-span-2">
             <Input label="Access Passcode" type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
           </div>
+          
+          {/* 🎯 NEW DROPDOWN WITH INVOICE TEAM ADDED */}
           <div className="lg:col-span-2">
             <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">System Designation</label>
             <select 
@@ -163,6 +165,8 @@ export default function ITAdminDashboard() {
               <option value="Purchase Executive">Purchase Executive</option>
               <option value="Project Manager">Project Manager</option>
               <option value="Accounts Executive">Accounts Executive</option> 
+              <option value="Finance Manager">Finance Manager</option>
+              <option value="Invoice Team">Invoice Team</option> {/* Added here */}
               <option value="Director">Director</option>
               <option value="Admin">IT Admin</option>
             </select>
@@ -203,11 +207,10 @@ export default function ITAdminDashboard() {
               <div className="flex flex-col space-y-1">
                 <div className="flex items-center text-xs text-slate-600"><Mail size={12} className="mr-1.5 text-slate-400"/> {u.email}</div>
               </div>
-
               <div className="flex items-center justify-between pt-2 border-t border-slate-100">
                 <span className={`text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide border ${
                   u.role === 'Admin' ? 'bg-purple-50 text-purple-700 border-purple-200' : 
-                  u.role === 'Accounts Executive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                  (u.role === 'Accounts Executive' || u.role === 'Invoice Team') ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                   'bg-blue-50 text-blue-700 border-blue-200'
                 }`}>
                   {u.role}
@@ -254,7 +257,7 @@ export default function ITAdminDashboard() {
                   <td className="py-3.5 px-6">
                     <span className={`text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide border ${
                       u.role === 'Admin' ? 'bg-purple-50 text-purple-700 border-purple-200' : 
-                      u.role === 'Accounts Executive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                      (u.role === 'Accounts Executive' || u.role === 'Invoice Team') ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                       'bg-blue-50 text-blue-700 border-blue-200'
                     }`}>
                       {u.role}
@@ -340,7 +343,8 @@ export default function ITAdminDashboard() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Role Field */}
+                
+                {/* 🎯 EDIT MODAL: DROPDOWN ADDED INVOICE TEAM */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">System Designation</label>
                   <select 
@@ -352,6 +356,8 @@ export default function ITAdminDashboard() {
                     <option value="Purchase Executive">Purchase Executive</option>
                     <option value="Project Manager">Project Manager</option>
                     <option value="Accounts Executive">Accounts Executive</option>
+                    <option value="Finance Manager">Finance Manager</option>
+                    <option value="Invoice Team">Invoice Team</option> {/* Added here */}
                     <option value="Director">Director</option>
                     <option value="Admin">IT Admin</option>
                   </select>
@@ -393,7 +399,6 @@ export default function ITAdminDashboard() {
           </div>
         </div>
       )}
-
     </div>
   );
 }

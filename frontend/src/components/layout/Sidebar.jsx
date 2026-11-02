@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { 
   LayoutDashboard, FileSpreadsheet, FileCheck, ShieldAlert, 
-  LogOut, ShoppingCart, CheckSquare, ShieldCheck, Building2, Zap, Landmark
+  LogOut, ShoppingCart, CheckSquare, ShieldCheck, Building2, Zap, Landmark, Receipt
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -41,22 +41,17 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
   // 🎯 RENDER FREE-OPTIMIZED TAB-AWARE POLLING (30 Seconds)
   useEffect(() => {
     let isMounted = true;
-
     const syncIfVisible = () => {
       if (document.visibilityState === 'visible' && isMounted) {
         fetchCounts();
       }
     };
-
-    // Initial fetch
+    
     syncIfVisible();
-
-    // 30-Second Tab-Aware Interval
+    
     const interval = setInterval(syncIfVisible, 30000);
-
-    // Visibility Listener (Instant Sync on Tab Focus)
     document.addEventListener('visibilitychange', syncIfVisible);
-
+    
     return () => {
       isMounted = false;
       clearInterval(interval);
@@ -90,26 +85,40 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
           { name: 'Direct Procurement', path: '/direct-request', icon: Zap },
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileCheck, badgeKey: 'po_ledger_alerts', badgeColor: 'bg-rose-600 text-white' },
         ];
+      
+      // 🎯 Accounts / Finance Team includes the new Invoice Desk
       case 'Accounts Executive':
       case 'Accounts':
       case 'Finance Manager':
         return [
           { name: 'Accounts Desk', path: '/accounts-desk', icon: Landmark, badgeKey: 'pending_disbursements', badgeColor: 'bg-[#0b9c54] text-white' },
+          { name: 'Invoice & Recovery Desk', path: '/invoice-recovery', icon: Receipt }, 
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileSpreadsheet, badgeKey: 'po_ledger_alerts', badgeColor: 'bg-rose-600 text-white' },
         ];
+
+      // 🎯 Dedicated Invoice Team Role
+      case 'Invoice Team':
+        return [
+          { name: 'Invoice & Recovery Desk', path: '/invoice-recovery', icon: Receipt },
+        ];
+
       case 'IT Manager':
         return [
           { name: 'Direct Procurement', path: '/direct-procurement', icon: Zap },
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileCheck, badgeKey: 'po_ledger_alerts', badgeColor: 'bg-rose-600 text-white' },
         ];
+      
       case 'Director':
         return [
           { name: 'Corporate Approvals', path: '/corporate-approvals', icon: CheckSquare, badgeKey: 'pending_approvals', badgeColor: 'bg-amber-500 text-white' },
+          { name: 'Invoice & Recovery Desk', path: '/invoice-recovery', icon: Receipt },
           { name: 'Master PO Ledger', path: '/po-ledger', icon: FileCheck, badgeKey: 'po_ledger_alerts', badgeColor: 'bg-rose-600 text-white' },
         ];
+      
       case 'Admin':
         return [
           { name: 'IT Control Center', path: '/admin', icon: ShieldCheck },
+          { name: 'Invoice & Recovery Desk', path: '/invoice-recovery', icon: Receipt },
           { name: 'Direct Procurement', path: '/direct-procurement', icon: Zap }
         ];  
       default:
@@ -163,7 +172,7 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
                     />
                     <span className="truncate">{item.name}</span>
                   </div>
-
+                  
                   {/* 🎯 DYNAMIC NUMERIC BADGE PILL */}
                   {badgeValue > 0 && (
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-black font-mono tracking-tight shadow-3xs flex-shrink-0 ml-2 animate-in zoom-in ${item.badgeColor || 'bg-slate-800 text-white'}`}>
@@ -205,7 +214,6 @@ export default function Sidebar({ isMobileOpen, setIsMobileOpen, userSession, se
             <span>Secure Logout</span>
           </button>
         </div>
-
       </div>
     </aside>
   );
