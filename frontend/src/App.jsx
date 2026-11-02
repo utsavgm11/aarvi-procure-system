@@ -99,7 +99,10 @@ function AppRoutes({ userSession, setUserSession }) {
           </RoleRoute>
         } />
 
-        <Route path="/invoice-recovery" element={<InvoiceRecoveryDashboard currentUser={activeUser} />} />
+        {/* 🎯 INVOICE & CLIENT RECOVERY DESK */}
+        <Route path="invoice-recovery" element={
+          <InvoiceRecoveryDashboard currentUser={userSession} />
+        } />
 
         {/* ⚡ FAST-TRACK ROUTES */}
         <Route path="direct-procurement" element={
@@ -120,7 +123,6 @@ function AppRoutes({ userSession, setUserSession }) {
             <SiteManagerDashboard currentUser={userSession} />
           </RoleRoute>
         } />
-
         <Route path="pos" element={
           <RoleRoute allowedRoles={['Purchase Executive', 'Project Manager', 'Director']} userRole={currentRole}>
             <PODistributionDashboard currentUser={userSession} />
@@ -130,19 +132,16 @@ function AppRoutes({ userSession, setUserSession }) {
         <Route path="po-ledger" element={
           <MasterPOLedgerDesk currentUser={userSession} />
         } />
-
         <Route path="vendors" element={
           <RoleRoute allowedRoles={['Purchase Executive', 'Project Manager', 'Director', 'Admin']} userRole={currentRole}>
             <VendorMasterDesk />
           </RoleRoute>
         } />
-
         <Route path="admin" element={
           <RoleRoute allowedRoles={['Admin']} userRole={currentRole}>
             <ITAdminDashboard />
           </RoleRoute>
         } />
-
         <Route path="inbox" element={<div className="text-center py-20 text-slate-500 font-medium mt-10">Manager Inbox Grid Gateway Coming Soon...</div>} />
         <Route path="dashboard" element={<div className="text-center py-20 text-slate-500 font-medium mt-10">Management Control Dashboard Coming Soon...</div>} />
         
