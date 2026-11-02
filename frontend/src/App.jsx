@@ -14,6 +14,7 @@ import PODistributionDashboard from './components/PODistributionDashboard';
 import MasterPOLedgerDesk from './components/MasterPOLedgerDesk'; 
 import AccountsDesk from './components/AccountsDesk';
 import ManagerRequestPortal from './components/ManagerRequestPortal';
+import InvoiceRecoveryDashboard from './components/InvoiceRecoveryDashboard';
 
 // 🎯 Smart Root Router Landing Check Wrapper
 const getRoleHomePath = (role) => {
@@ -97,6 +98,8 @@ function AppRoutes({ userSession, setUserSession }) {
             <AccountsDesk currentUser={userSession} />
           </RoleRoute>
         } />
+
+        <Route path="/invoice-recovery" element={<InvoiceRecoveryDashboard currentUser={activeUser} />} />
 
         {/* ⚡ FAST-TRACK ROUTES */}
         <Route path="direct-procurement" element={

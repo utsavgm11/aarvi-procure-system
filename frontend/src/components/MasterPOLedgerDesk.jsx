@@ -5,19 +5,22 @@ import {
   FileCheck, Search, ChevronDown, ChevronUp, Landmark, Layers3, 
   Calendar, ArrowLeft, Clock, Edit, Eye, X, Printer, Filter,
   UploadCloud, Paperclip, Trash2, FileText, CheckCircle2,
-  ShieldAlert, AlertOctagon, Wallet, ExternalLink, Download, Scissors, RefreshCw, AlertTriangle
+  ShieldAlert, AlertOctagon, Wallet, ExternalLink, Download, Scissors, RefreshCw, AlertTriangle,
+  Receipt, DollarSign, Tag, CheckSquare
 } from 'lucide-react';
 import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
 
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
 export default function MasterPOLedgerDesk({ currentUser }) {
-  // 🎯 3-TAB ARCHITECTURE STATE
-  const [activeMasterTab, setActiveMasterTab] = useState('ledger'); // 'ledger' | 'renewals'
+  // 🎯 3-TAB ARCHITECTURE: 'ledger' | 'employee_claims' | 'renewals'
+  const [activeMasterTab, setActiveMasterTab] = useState('ledger'); 
   
   const [ledgerList, setLedgerList] = useState([]);
   const [expiringContracts, setExpiringContracts] = useState([]); 
+  const [employeeClaims, setEmployeeClaims] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [claimsLoading, setClaimsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
   const [expandedRows, setExpandedRows] = useState({});
@@ -26,15 +29,13 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   
   // 🎯 Modal Preview State
   const [previewDoc, setPreviewDoc] = useState(null);
-
   // Store dynamically fetched history logs for expanded rows
   const [rowLogs, setRowLogs] = useState({});
-
   // Filter Dropdown Selection States
   const [selectedProjectFilter, setSelectedProjectFilter] = useState('ALL');
   const [selectedTimeFilter, setSelectedTimeFilter] = useState('ALL'); 
   const [selectedPMFilter, setSelectedPMFilter] = useState('ALL'); 
-
+  
   // Form states for PI, Tax Invoice, and Signed PO
   const [invoiceForms, setInvoiceForms] = useState({});
   const [taxInvoiceForms, setTaxInvoiceForms] = useState({});
@@ -43,7 +44,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const [editingInvoices, setEditingInvoices] = useState({});
   const [editingTaxInvoices, setEditingTaxInvoices] = useState({});
   const [editingPOs, setEditingPOs] = useState({});
-
+  
   // 🎯 Form states for Billing Date Editor
   const [editingBillingDate, setEditingBillingDate] = useState({});
   const [billingDateForms, setBillingDateForms] = useState({});
@@ -84,7 +85,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
           tax_invoice_date: po.tax_invoice_date || '',
           file: null
         };
-
         initialPoFileForms[po.po_number] = {
           file: null
         };
@@ -93,7 +93,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       setInvoiceForms(initialForms);
       setTaxInvoiceForms(initialTaxForms);
       setPoFileForms(initialPoFileForms);
-
     } catch (err) {
       console.error("Error fetching Master PO Ledger", err);
     } finally {
@@ -110,16 +109,34 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     }
   }, []);
 
+  const fetchEmployeeClaims = useCallback(async () => {
+    setClaimsLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/expenses/project-ledger`);
+      setEmployeeClaims(res.data);
+    } catch (err) {
+      console.error("Error fetching employee expense claims ledger", err);
+    } finally {
+      setClaimsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     const timer = setTimeout(() => {
       if (isMounted) {
         if (activeMasterTab === 'ledger') fetchLedgerPOs();
         if (activeMasterTab === 'renewals') fetchExpiringContracts();
+        if (activeMasterTab === 'employee_claims') fetchEmployeeClaims();
       }
     }, 0);
     return () => { isMounted = false; clearTimeout(timer); };
-  }, [activeMasterTab, fetchLedgerPOs, fetchExpiringContracts]);
+  }, [activeMasterTab, fetchLedgerPOs, fetchExpiringContracts, fetchEmployeeClaims]);
+
+  // Load claims on mount in parallel for KPI computations
+  useEffect(() => {
+    fetchEmployeeClaims();
+  }, [fetchEmployeeClaims]);
 
   const toggleExpandRow = async (poNumber, ticketNumber) => {
     const isCurrentlyExpanded = !!expandedRows[poNumber];
@@ -158,15 +175,11 @@ export default function MasterPOLedgerDesk({ currentUser }) {
   const handleTruncatePO = async (poNumber) => {
     const actualMonthsUsed = prompt("Early Contract Closure.\nHow many total months were actually consumed? (e.g. 4)");
     if (!actualMonthsUsed || isNaN(actualMonthsUsed)) return;
-
     const depositAdjusted = prompt("Security Deposit Recovery.\nEnter amount of deposit being offset/adjusted from final payout: (e.g. 100000)");
     if (!depositAdjusted || isNaN(depositAdjusted)) return;
-
     const remarks = prompt("Provide reasoning for early termination (Required):");
     if (!remarks) return;
-
     if (!window.confirm(`WARNING: You are about to permanently truncate PO ${poNumber} to ${actualMonthsUsed} months and adjust ₹${depositAdjusted} from the final payout. This will close the contract. Proceed?`)) return;
-
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/truncate`, {
         user_name: currentUser?.name || "System User",
@@ -183,14 +196,12 @@ export default function MasterPOLedgerDesk({ currentUser }) {
 
   // 🎯 RENEWAL SUBMISSION
   const [renewalForm, setRenewalForm] = useState({});
-
   const handleRenewSubmit = async (poNumber) => {
     const formState = renewalForm[poNumber];
     if (!formState || !formState.months || !formState.endDate || !formState.remarks) {
       alert("Please fill all renewal fields.");
       return;
     }
-
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/renew`, {
         user_name: currentUser?.name || "System User",
@@ -220,12 +231,10 @@ export default function MasterPOLedgerDesk({ currentUser }) {
         alert("Valid billing date (1-28) required.");
         return;
       }
-
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/billing-date`, {
         user_name: currentUser?.name || "System User",
         billing_trigger_date: newDate
       });
-
       alert("Billing cycle successfully updated.");
       setEditingBillingDate(prev => ({...prev, [poNumber]: false}));
       fetchLedgerPOs();
@@ -252,10 +261,8 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       alert("Please select a signed PO file first.");
       return;
     }
-
     const formData = new FormData();
     formData.append('file', formState.file);
-
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/signed-po`, formData, { 
         headers: { 'Content-Type': 'multipart/form-data'} 
@@ -306,7 +313,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     formData.append('invoice_remark', ""); 
     
     if (formState.file) formData.append('file', formState.file);
-
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/invoice`, formData, { headers: { 'Content-Type': 'multipart/form-data'} });
       setEditingInvoices(prev => ({ ...prev, [poNumber]: false }));
@@ -321,7 +327,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     formData.append('tax_invoice_date', formState.tax_invoice_date);
     
     if (formState.file) formData.append('file', formState.file);
-
     try {
       await axios.put(`${API_BASE_URL}/purchase-orders/${poNumber}/tax-invoice`, formData, { headers: { 'Content-Type': 'multipart/form-data'} });
       setEditingTaxInvoices(prev => ({ ...prev, [poNumber]: false }));
@@ -363,6 +368,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     } catch(e) { return true; }
   };
 
+  // 🎯 FILTERED POs
   const filteredLedger = useMemo(() => {
     return ledgerList.filter(po => {
       // 1. Role Based Filtering
@@ -371,7 +377,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       } else {
         if (selectedPMFilter !== 'ALL' && po.project_manager !== selectedPMFilter) return false;
       }
-
       // 2. Dropdown Filters
       if (selectedProjectFilter !== 'ALL' && po.project_code !== selectedProjectFilter) return false;
       if (selectedTimeFilter === '6_MONTHS' && !isWithinLast6Months(po.generated_at)) return false;
@@ -390,42 +395,126 @@ export default function MasterPOLedgerDesk({ currentUser }) {
     });
   }, [ledgerList, selectedProjectFilter, selectedTimeFilter, selectedPMFilter, searchQuery, currentUser, canViewAll]);
 
+  // 🎯 FILTERED EMPLOYEE CLAIMS
+  const filteredClaims = useMemo(() => {
+    return employeeClaims.filter(c => {
+      if (selectedProjectFilter !== 'ALL' && c.project_code !== selectedProjectFilter) return false;
+      if (selectedTimeFilter === '6_MONTHS' && !isWithinLast6Months(c.created_at)) return false;
+
+      if (searchQuery) {
+        const search = searchQuery.toLowerCase();
+        const matches = 
+          c.claim_number.toLowerCase().includes(search) ||
+          c.project_code.toLowerCase().includes(search) ||
+          c.emp_name.toLowerCase().includes(search) ||
+          c.emp_code.toLowerCase().includes(search) ||
+          c.expense_category.toLowerCase().includes(search) ||
+          (c.client_invoice_no && c.client_invoice_no.toLowerCase().includes(search));
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }, [employeeClaims, selectedProjectFilter, selectedTimeFilter, searchQuery]);
+
+  // 🎯 UNIFIED METRICS: Combining Vendor POs + Employee Claims
   const analyticsMetrics = useMemo(() => {
-    let totalSpend = 0;
-    let reimbursableTotal = 0;
-    let nonReimbursableTotal = 0;
+    let poSpend = 0;
+    let reimbursablePO = 0;
+    let nonReimbursablePO = 0;
     const projectCodes = new Set();
     
     filteredLedger.forEach(po => {
-      totalSpend += po.grand_total;
+      poSpend += po.grand_total;
       projectCodes.add(po.project_code);
       
       const itemArray = po.items || [];
       if (itemArray.length === 0) {
-        nonReimbursableTotal += po.grand_total; 
+        nonReimbursablePO += po.grand_total; 
       } else {
         const reimbursableCount = itemArray.filter(i => i.is_reimbursable).length;
         const ratio = reimbursableCount / itemArray.length;
-        reimbursableTotal += po.grand_total * ratio;
-        nonReimbursableTotal += po.grand_total * (1 - ratio);
+        reimbursablePO += po.grand_total * ratio;
+        nonReimbursablePO += po.grand_total * (1 - ratio);
       }
     });
 
-    const reimbursablePercentage = totalSpend > 0 ? (reimbursableTotal / totalSpend) * 100 : 0;
-    const nonReimbursablePercentage = totalSpend > 0 ? (nonReimbursableTotal / totalSpend) * 100 : 0;
+    let claimsSpend = 0;
+    let claimsBillable = 0;
+    let claimsCompany = 0;
+    filteredClaims.forEach(c => {
+      const amt = parseFloat(c.total_amount) || 0;
+      claimsSpend += amt;
+      projectCodes.add(c.project_code);
+      if (c.is_billable_to_client) {
+        claimsBillable += amt;
+      } else {
+        claimsCompany += amt;
+      }
+    });
 
-    return { totalSpend, reimbursableTotal, nonReimbursableTotal, reimbursablePercentage, nonReimbursablePercentage, uniqueSitesCount: projectCodes.size };
-  }, [filteredLedger]);
+    const totalOutflow = poSpend + claimsSpend;
+    const totalReimbursable = reimbursablePO + claimsBillable;
+    const totalCompanyCost = nonReimbursablePO + claimsCompany;
 
-  const uniqueProjectFilterOptions = useMemo(() => ['ALL', ...new Set(ledgerList.map(po => po.project_code))], [ledgerList]);
+    const reimbursablePercentage = totalOutflow > 0 ? (totalReimbursable / totalOutflow) * 100 : 0;
+    const nonReimbursablePercentage = totalOutflow > 0 ? (totalCompanyCost / totalOutflow) * 100 : 0;
+
+    return { 
+      poSpend, 
+      claimsSpend, 
+      totalOutflow, 
+      totalReimbursable, 
+      totalCompanyCost, 
+      reimbursablePercentage, 
+      nonReimbursablePercentage, 
+      uniqueSitesCount: projectCodes.size 
+    };
+  }, [filteredLedger, filteredClaims]);
+
+  // Unified Project Filter Options combining both sources
+  const uniqueProjectFilterOptions = useMemo(() => {
+    const set = new Set(ledgerList.map(po => po.project_code));
+    employeeClaims.forEach(c => set.add(c.project_code));
+    return ['ALL', ...Array.from(set).filter(Boolean)];
+  }, [ledgerList, employeeClaims]);
+
   const uniquePMOptions = useMemo(() => ['ALL', ...new Set(ledgerList.map(po => po.project_manager).filter(pm => pm && pm !== "Pending / N/A"))], [ledgerList]);
 
+  // 🎯 CONTEXT-AWARE CSV EXPORT
   const handleExportToExcel = () => {
+    if (activeMasterTab === 'employee_claims') {
+      if (!filteredClaims || filteredClaims.length === 0) {
+        alert("No employee claims to export based on current filters.");
+        return;
+      }
+      const headers = [
+        "Claim Number", "Date Raised", "Project Code", "Employee Code", "Employee Name", 
+        "Expense Category", "Total Amount", "Billable to Client", "Disbursement Status", 
+        "NEFT UTR", "Paid Date", "Client Invoice No", "Recovery Status"
+      ];
+      const csvRows = filteredClaims.map(c => [
+        `"${c.claim_number}"`, `"${c.created_at}"`, `"${c.project_code}"`, `"${c.emp_code}"`, `"${c.emp_name}"`,
+        `"${c.expense_category}"`, `"${c.total_amount}"`, `"${c.is_billable_to_client ? 'YES' : 'NO'}"`, `"${c.status}"`,
+        `"${c.neft_utr || 'Pending'}"`, `"${c.paid_date || 'Unpaid'}"`, `"${c.client_invoice_no || 'N/A'}"`, `"${c.is_recovered ? 'Recovered' : 'Pending'}"`
+      ].join(','));
+      
+      const csvString = [headers.join(','), ...csvRows].join('\n');
+      const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.setAttribute('href', url);
+      a.setAttribute('download', `Aarvi_Employee_Claims_${selectedProjectFilter}_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
+
+    // Default: Export Vendor PO Ledger
     if (!filteredLedger || filteredLedger.length === 0) {
       alert("No records to export based on current filters.");
       return;
     }
-
     const headers = [
       "PO Number", "PO Date", "Project Manager", "Project Code", "Project Name", "Vendor Name", 
       "Product Descriptions", "Quantities", "Duration of Contract", "Payment Terms", 
@@ -433,12 +522,10 @@ export default function MasterPOLedgerDesk({ currentUser }) {
       "Tax Invoice No", "Tax Invoice Date", 
       "Disbursed Payment", "Remaining Balance", "Payment UTR", "Payment Date", "Current Status"
     ];
-
     const csvRows = filteredLedger.map(po => {
       const products = po.items ? po.items.map(i => i.desc).join(" | ").replace(/"/g, '""') : "N/A";
       const quantities = po.items ? po.items.map(i => i.qty).join(" | ") : "0";
       const balance = Math.max(0, po.grand_total - po.disbursed_amount);
-
       return [
         `"${po.po_number}"`, `"${po.generated_at}"`, `"${po.project_manager}"`, `"${po.project_code}"`, `"${po.project_name}"`, `"${po.vendor_name}"`,
         `"${products}"`, `"${quantities}"`, `"${po.contract_duration}"`, `"${po.payment_terms}"`,
@@ -447,7 +534,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
         `"${po.disbursed_amount}"`, `"${balance}"`, `"${po.utr_no}"`, `"${po.payment_date}"`, `"${po.status}"`
       ].join(',');
     });
-
     const csvString = [headers.join(','), ...csvRows].join('\n');
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
@@ -494,11 +580,11 @@ export default function MasterPOLedgerDesk({ currentUser }) {
         </div>
       )}
 
-      {/* HEADER SECTION WITH 🎯 TAB NAVIGATION */}
+      {/* HEADER SECTION WITH 🎯 3-TAB NAVIGATION */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-[#2c2a57] tracking-tight">Master PO & Spend Ledger</h1>
-          <p className="text-sm text-slate-500 font-medium mt-1">Track all authorized purchases, monitor deliveries, and renew expiring contracts.</p>
+          <p className="text-sm text-slate-500 font-medium mt-1">Audit vendor procurements, track employee field claims, and manage contract renewals.</p>
         </div>
         
         <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
@@ -507,29 +593,243 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             onClick={() => setActiveMasterTab('ledger')} 
             className="text-[11px] md:text-xs py-2 px-3 flex-1 md:flex-none whitespace-nowrap"
           >
-            <Wallet size={14} className="mr-1.5 inline" /> <span>Master Spend Ledger</span>
+            <Wallet size={14} className="mr-1.5 inline" /> <span>Vendor POs ({filteredLedger.length})</span>
           </Button>
+
+          {/* 🎯 NEW TAB: Employee Expense Claims Ledger */}
+          <Button 
+            variant={activeMasterTab === 'employee_claims' ? 'primary' : 'ghost'} 
+            onClick={() => setActiveMasterTab('employee_claims')} 
+            className="text-[11px] md:text-xs py-2 px-3 flex-1 md:flex-none whitespace-nowrap"
+          >
+            <Receipt size={14} className="mr-1.5 inline" /> 
+            <span>Employee Claims ({filteredClaims.length})</span>
+          </Button>
+
           <Button 
             variant={activeMasterTab === 'renewals' ? 'primary' : 'ghost'} 
             onClick={() => setActiveMasterTab('renewals')} 
             className="text-[11px] md:text-xs py-2 px-3 flex-1 md:flex-none whitespace-nowrap"
           >
             <RefreshCw size={14} className="mr-1.5 inline" /> 
-            <span>Active Contracts & Renewals {expiringContracts.length > 0 && <span className="ml-1 bg-rose-500 text-white px-1.5 py-0.5 rounded-full text-[9px]">{expiringContracts.length}</span>}</span>
+            <span>Leases & Renewals {expiringContracts.length > 0 && <span className="ml-1 bg-rose-500 text-white px-1.5 py-0.5 rounded-full text-[9px]">{expiringContracts.length}</span>}</span>
           </Button>
         </div>
       </div>
 
-      {/* CONDITIONAL RENDERING FOR THE 3 TABS */}
-      {activeMasterTab === 'renewals' ? (
+      {/* 📊 UNIFIED PROJECT BURN ANALYTICS CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <Card className="p-4 flex items-center justify-between border-l-4 border-emerald-500 bg-white shadow-2xs">
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Project Outflow</p>
+            <h3 className="text-xl font-black text-slate-900 mt-0.5">₹{analyticsMetrics.totalOutflow.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</h3>
+            <div className="flex gap-3 text-[10px] font-bold text-slate-500 mt-1">
+              <span>Vendor POs: ₹{analyticsMetrics.poSpend.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              <span>•</span>
+              <span className="text-indigo-600">Claims: ₹{analyticsMetrics.claimsSpend.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+            </div>
+          </div>
+          <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600 shrink-0"><Landmark size={20} /></div>
+        </Card>
+
+        <Card className="p-4 flex items-center justify-between bg-white shadow-2xs border border-slate-200">
+          <div className="space-y-1.5 flex-1 pr-2">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Reimbursable Split</p>
+            <div className="space-y-1">
+              <div className="text-xs font-bold text-slate-700 flex justify-between">
+                <span className="text-cyan-600">Client Billable:</span>
+                <span>₹{analyticsMetrics.totalReimbursable.toLocaleString('en-IN', { maximumFractionDigits: 0 })} ({analyticsMetrics.reimbursablePercentage.toFixed(1)}%)</span>
+              </div>
+              <div className="text-xs font-bold text-slate-700 flex justify-between">
+                <span className="text-amber-600">Company Cost:</span>
+                <span>₹{analyticsMetrics.totalCompanyCost.toLocaleString('en-IN', { maximumFractionDigits: 0 })} ({analyticsMetrics.nonReimbursablePercentage.toFixed(1)}%)</span>
+              </div>
+            </div>
+          </div>
+          <div className="relative w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0"
+               style={{ background: `conic-gradient(#06b6d4 0% ${analyticsMetrics.reimbursablePercentage}%, #f59e0b ${analyticsMetrics.reimbursablePercentage}% 100%)` }}>
+            <div className="w-8 h-8 bg-white rounded-full absolute"></div>
+          </div>
+        </Card>
+
+        <Card className="p-4 grid grid-cols-2 gap-2 bg-white shadow-2xs border border-slate-200">
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><FileCheck size={12} /> Active Scope</p>
+            <h4 className="text-base font-black text-slate-800 mt-1">{filteredLedger.length} POs / {filteredClaims.length} Claims</h4>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><Layers3 size={12} /> Sites Served</p>
+            <h4 className="text-base font-black text-slate-800 mt-1">{analyticsMetrics.uniqueSitesCount} Projects</h4>
+          </div>
+        </Card>
+      </div>
+
+      {/* 🔍 SHARED SEARCH & PROJECT FILTER BAR */}
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
+          <input 
+            type="text" 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={activeMasterTab === 'employee_claims' ? "Search Claim Number, Employee Code, Name, or Category..." : "Search PO number, vendor, or project..."} 
+            className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-1.5 text-xs text-slate-800 outline-none focus:border-[#2c2a57] shadow-3xs"
+          />
+        </div>
         
-        /* 🎯 TAB 2: ACTIVE CONTRACTS & RENEWALS DASHBOARD */
+        <div className="flex flex-wrap items-center gap-2">
+          
+          {canViewAll && activeMasterTab === 'ledger' && (
+            <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
+              <Filter size={12} className="text-slate-400" />
+              <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Manager:</span>
+              <select value={selectedPMFilter} onChange={(e) => setSelectedPMFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer max-w-[120px] truncate">
+                {uniquePMOptions.map(pm => <option key={pm} value={pm}>{pm}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Unified Project Code Selector */}
+          <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
+            <Filter size={12} className="text-slate-400" />
+            <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Site:</span>
+            <select value={selectedProjectFilter} onChange={(e) => setSelectedProjectFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer max-w-[140px] truncate">
+              {uniqueProjectFilterOptions.map(code => <option key={code} value={code}>{code}</option>)}
+            </select>
+          </div>
+          
+          <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
+            <Calendar size={12} className="text-slate-400" />
+            <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Duration:</span>
+            <select value={selectedTimeFilter} onChange={(e) => setSelectedTimeFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer">
+              <option value="ALL">All-Time</option>
+              <option value="6_MONTHS">Last 6 Months</option>
+            </select>
+          </div>
+
+          <button 
+            onClick={handleExportToExcel}
+            className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-1.5 px-3 py-1.5 text-[11px] font-bold shadow-3xs w-full sm:w-auto cursor-pointer"
+          >
+            <Download size={13} /> 
+            <span>{activeMasterTab === 'employee_claims' ? 'Export Claims CSV' : 'Export POs CSV'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 🎯 TAB 2: EMPLOYEE EXPENSE CLAIMS LEDGER */}
+      {activeMasterTab === 'employee_claims' && (
+        <div className="space-y-4 animate-in fade-in duration-300">
+          <Card className="overflow-hidden border-slate-200 shadow-sm bg-white">
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+              <div>
+                <h3 className="font-black text-[#2c2a57] text-sm flex items-center gap-2">
+                  <Receipt size={16} className="text-indigo-600" /> Employee Field Expense Audit Trail
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">Comprehensive ledger of Daily Allowances, Travel, Food claims, bank NEFT payouts, and client recovery.</p>
+              </div>
+              <span className="text-xs font-bold text-slate-600 bg-white border border-slate-200 px-3 py-1 rounded-lg">
+                Total Claims: {filteredClaims.length}
+              </span>
+            </div>
+
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left border-collapse min-w-[1050px]">
+                <thead>
+                  <tr className="text-[10px] uppercase font-black tracking-wider text-slate-500 bg-slate-50 border-b border-slate-200">
+                    <th className="p-3.5">Claim Details</th>
+                    <th className="p-3.5">Project Code</th>
+                    <th className="p-3.5">Employee Name</th>
+                    <th className="p-3.5">Category</th>
+                    <th className="p-3.5 text-right">Amount Claimed</th>
+                    <th className="p-3.5">Accounts Payout (NEFT)</th>
+                    <th className="p-3.5">Client Billing Recovery</th>
+                    <th className="p-3.5 text-center">Receipt</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
+                  {claimsLoading ? (
+                    <tr>
+                      <td colSpan="8" className="p-8 text-center text-slate-400">Loading employee expense ledger...</td>
+                    </tr>
+                  ) : filteredClaims.length === 0 ? (
+                    <tr>
+                      <td colSpan="8" className="p-8 text-center text-slate-400 text-sm">No employee claims found for this filter.</td>
+                    </tr>
+                  ) : (
+                    filteredClaims.map((claim) => (
+                      <tr key={claim.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="p-3.5">
+                          <span className="font-mono font-black text-[#2c2a57] block">{claim.claim_number}</span>
+                          <span className="text-[10px] text-slate-400">{claim.created_at}</span>
+                        </td>
+                        <td className="p-3.5 font-bold text-slate-900">{claim.project_code}</td>
+                        <td className="p-3.5">
+                          <span className="font-bold text-slate-800 block">{claim.emp_name}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">{claim.emp_code}</span>
+                        </td>
+                        <td className="p-3.5">
+                          <span className="text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                            {claim.expense_category}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-right font-mono font-black text-slate-900">
+                          ₹{parseFloat(claim.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-3.5">
+                          {claim.status === "Pending Accounts" ? (
+                            <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                              Awaiting NEFT Payout
+                            </span>
+                          ) : (
+                            <div>
+                              <span className="font-mono text-[11px] font-bold text-slate-800 block">{claim.neft_utr}</span>
+                              <span className="text-[9px] text-slate-400">Paid: {claim.paid_date}</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3.5">
+                          {!claim.is_billable_to_client ? (
+                            <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">Company Cost</span>
+                          ) : claim.is_recovered ? (
+                            <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              ✓ Recovered ({claim.recovered_date})
+                            </span>
+                          ) : claim.client_invoice_no !== "Not Invoiced" ? (
+                            <div>
+                              <span className="text-[10px] font-bold text-indigo-700 block">Inv: {claim.client_invoice_no}</span>
+                              <span className="text-[9px] text-amber-600 font-bold">Awaiting Client Payment</span>
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-bold text-amber-600">Pending Invoicing</span>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <button 
+                            onClick={() => handlePreviewFile(claim.receipt_url, `Receipt: ${claim.claim_number}`)}
+                            className="p-1.5 text-slate-500 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 rounded border border-slate-200 cursor-pointer"
+                            title="View Attached Bill Receipt"
+                          >
+                            <ExternalLink size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* 🎯 TAB 3: ACTIVE CONTRACTS & RENEWALS DASHBOARD */}
+      {activeMasterTab === 'renewals' && (
         <div className="space-y-6 animate-in fade-in duration-300">
           <div className="bg-indigo-50 border border-indigo-200 p-5 rounded-xl">
             <h2 className="font-black text-indigo-900 flex items-center gap-2"><RefreshCw size={18}/> Contract Expiry Monitor</h2>
             <p className="text-sm text-indigo-700 mt-1">Displays recurring leases (Vehicles, Accommodation, Subscriptions) expiring in the next 45 days.</p>
           </div>
-
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {expiringContracts.length === 0 ? (
               <Card className="p-12 text-center text-slate-400 border-dashed border-2 col-span-full">
@@ -547,7 +847,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                       </span>
                       <span className="font-bold text-sm">{contract.days_remaining} Days Left</span>
                     </div>
-
                     <div className="p-5 space-y-4">
                       <div>
                         <div className="flex justify-between items-start mb-1">
@@ -557,7 +856,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                         <p className="text-sm font-bold text-slate-800">{contract.project_name}</p>
                         <p className="text-xs text-slate-500 truncate mt-0.5">Vendor: {contract.vendor_name}</p>
                       </div>
-
                       <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 grid grid-cols-2 gap-3 text-xs">
                         <div>
                           <span className="text-[9px] font-bold uppercase text-slate-400 block">Current Expiry Date</span>
@@ -608,20 +906,19 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             )}
           </div>
         </div>
+      )}
 
-      ) : selectedPoForView ? (
-        
-        /* 🎯 TAB 3: DOCUMENT PREVIEW (Sub-view of Ledger) */
+      {/* 🎯 SUB-VIEW: SYSTEM PO DOCUMENT PREVIEW */}
+      {selectedPoForView && (
         <div className="space-y-4 animate-in fade-in duration-200 pb-10">
           <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-            <button onClick={() => setSelectedPoForView(null)} className="flex items-center space-x-2 text-sm font-bold text-slate-500 hover:text-[#2c2a57] transition-colors">
+            <button onClick={() => setSelectedPoForView(null)} className="flex items-center space-x-2 text-sm font-bold text-slate-500 hover:text-[#2c2a57] transition-colors cursor-pointer">
               <ArrowLeft size={16} /> <span>Return to Ledger</span>
             </button>
             <Button variant="primary" onClick={() => window.print()} className="shadow-sm bg-[#0b9c54] hover:bg-emerald-600">
               <Printer size={16} className="mr-2 hidden sm:inline" /> <span>Print Document</span>
             </Button>
           </div>
-
           <div className="bg-white p-6 sm:p-12 mx-auto border border-slate-200 shadow-lg max-w-4xl text-sm text-slate-800 font-sans overflow-x-auto">
             <div className="min-w-[600px]">
               <div className="flex justify-between items-start border-b-[3px] border-[#2c2a57] pb-6 mb-8">
@@ -647,7 +944,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   <p className="text-slate-600 text-xs mt-1 font-mono">Project Code: {selectedPoForView.project_code}</p>
                 </div>
               </div>
-
               <table className="w-full text-left mb-8 border-collapse">
                 <thead>
                   <tr className="bg-slate-800 text-white text-[10px] uppercase tracking-wider">
@@ -668,7 +964,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                   ))}
                 </tbody>
               </table>
-
               <div className="flex justify-end mb-10">
                 <div className="w-72 space-y-2 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
                   <div className="flex justify-between text-sm font-black text-[#2c2a57]">
@@ -680,105 +975,12 @@ export default function MasterPOLedgerDesk({ currentUser }) {
             </div>
           </div>
         </div>
+      )}
 
-      ) : (
-        /* 🎯 TAB 1: MASTER SPEND LEDGER */
+      {/* 🎯 TAB 1: MASTER SPEND LEDGER (VENDOR POs) */}
+      {activeMasterTab === 'ledger' && !selectedPoForView && (
         <div className="animate-in fade-in duration-300">
           
-          {/* 📊 ANALYTICS CARDS */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
-            <Card className="p-4 flex items-center space-x-4 border-l-4 border-emerald-500 bg-white shadow-2xs">
-              <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600"><Landmark size={20} /></div>
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Spent</p>
-                <h3 className="text-xl font-black text-slate-900 mt-0.5">₹{analyticsMetrics.totalSpend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</h3>
-              </div>
-            </Card>
-
-            <Card className="p-4 flex items-center justify-between bg-white shadow-2xs border border-slate-200">
-              <div className="space-y-1.5 flex-1 pr-2">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Reimbursable Breakdown</p>
-                <div className="space-y-1">
-                  <div className="text-xs font-bold text-slate-700 flex justify-between">
-                    <span className="text-cyan-600">Reimbursable:</span>
-                    <span>₹{analyticsMetrics.reimbursableTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} ({analyticsMetrics.reimbursablePercentage.toFixed(1)}%)</span>
-                  </div>
-                  <div className="text-xs font-bold text-slate-700 flex justify-between">
-                    <span className="text-amber-600">Company Cost:</span>
-                    <span>₹{analyticsMetrics.nonReimbursableTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} ({analyticsMetrics.nonReimbursablePercentage.toFixed(1)}%)</span>
-                  </div>
-                </div>
-              </div>
-              <div className="relative w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0"
-                   style={{ background: `conic-gradient(#06b6d4 0% ${analyticsMetrics.reimbursablePercentage}%, #f59e0b ${analyticsMetrics.reimbursablePercentage}% 100%)` }}>
-                <div className="w-8 h-8 bg-white rounded-full absolute"></div>
-              </div>
-            </Card>
-
-            <Card className="p-4 grid grid-cols-2 gap-2 bg-white shadow-2xs border border-slate-200">
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><FileCheck size={12} /> Active Orders</p>
-                <h4 className="text-base font-black text-slate-800 mt-1">{filteredLedger.length}</h4>
-              </div>
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><Layers3 size={12} /> Sites Served</p>
-                <h4 className="text-base font-black text-slate-800 mt-1">{analyticsMetrics.uniqueSitesCount}</h4>
-              </div>
-            </Card>
-          </div>
-
-          {/* 🔍 SEARCH & FILTERS */}
-          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 mb-6">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
-              <input 
-                type="text" 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search PO number, vendor, or project..." 
-                className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-1.5 text-xs text-slate-800 outline-none focus:border-[#2c2a57] shadow-3xs"
-              />
-            </div>
-            
-            <div className="flex flex-wrap items-center gap-2">
-              
-              {canViewAll && (
-                <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
-                  <Filter size={12} className="text-slate-400" />
-                  <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Manager:</span>
-                  <select value={selectedPMFilter} onChange={(e) => setSelectedPMFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer max-w-[120px] truncate">
-                    {uniquePMOptions.map(pm => <option key={pm} value={pm}>{pm}</option>)}
-                  </select>
-                </div>
-              )}
-
-              <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
-                <Filter size={12} className="text-slate-400" />
-                <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Site:</span>
-                <select value={selectedProjectFilter} onChange={(e) => setSelectedProjectFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer max-w-[120px] truncate">
-                  {uniqueProjectFilterOptions.map(code => <option key={code} value={code}>{code}</option>)}
-                </select>
-              </div>
-              
-              <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-3xs">
-                <Calendar size={12} className="text-slate-400" />
-                <span className="text-[11px] font-bold text-slate-500 uppercase hidden sm:inline">Duration:</span>
-                <select value={selectedTimeFilter} onChange={(e) => setSelectedTimeFilter(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer">
-                  <option value="ALL">All-Time</option>
-                  <option value="6_MONTHS">Last 6 Months</option>
-                </select>
-              </div>
-
-              <button 
-                onClick={handleExportToExcel}
-                className="bg-[#0b9c54] hover:bg-emerald-600 text-white rounded-lg transition-all flex items-center justify-center space-x-1.5 px-3 py-1.5 text-[11px] font-bold shadow-3xs w-full sm:w-auto"
-              >
-                <Download size={13} /> <span>Export CSV</span>
-              </button>
-
-            </div>
-          </div>
-
           {/* 📱 MOBILE RESPONSIVE CARDS (Hidden on larger screens) */}
           <div className="md:hidden space-y-4">
             {filteredLedger.length === 0 ? (
@@ -794,7 +996,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                 const isDiscrepancy = po.status === 'Material Discrepancy Raised';
                 const isShortage = po.status === 'Partially Delivered';
                 const isDelivered = po.status === 'Delivered - GRN Logged';
-
                 return (
                   <Card key={po.po_number} className="p-4 space-y-4 bg-white border-slate-200">
                     <div className="flex justify-between items-start border-b border-slate-100 pb-3">
@@ -833,12 +1034,11 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                     <button 
                       type="button"
                       onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} 
-                      className="w-full py-2 flex items-center justify-center gap-2 text-xs font-bold text-[#2c2a57] bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200"
+                      className="w-full py-2 flex items-center justify-center gap-2 text-xs font-bold text-[#2c2a57] bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200 cursor-pointer"
                     >
                       {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>} 
                       {isExpanded ? "Hide Details & Documents" : "View Details & Documents"}
                     </button>
-
                     {/* EXPANDED MOBILE VIEW */}
                     {isExpanded && (
                       <div className="pt-2 space-y-4 border-t border-slate-200 animate-in fade-in">
@@ -849,7 +1049,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                               <p className="text-xs font-medium text-slate-800 mt-1">{rowLogs[po.po_number]?.find(l => l.action_taken.includes("Delivered") || l.action_taken.includes("ALERT"))?.remarks.split(' | ')[0]}</p>
                            </div>
                         )}
-
                         {/* 🎯 RECURRING CONTRACT SUMMARY (Mobile) */}
                         {po.is_recurring && po.status !== 'Contract Terminated & Closed' && (() => {
                           const metrics = getLeaseMetrics(po);
@@ -864,12 +1063,10 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                 <span className="font-black text-purple-900">{metrics?.monthsLeft || 0} Mos</span>
                               </div>
                               
-                              {/* 🎯 NEW: Display Duration (Months) */}
                               <div className="flex justify-between items-center text-xs border-t border-purple-100 pt-2">
                                 <span className="font-bold text-indigo-600 uppercase">Total Contract Tenure</span>
                                 <span className="font-black text-indigo-900">{po.contract_duration || 'N/A'} Mos</span>
                               </div>
-
                               <div className="flex justify-between items-center text-xs border-t border-purple-100 pt-2">
                                 <span className="font-bold text-emerald-600 uppercase">Paid Till Now</span>
                                 <span className="font-mono font-black text-emerald-700">₹{paid.toLocaleString('en-IN')}</span>
@@ -901,7 +1098,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                          setEditingBillingDate(prev => ({...prev, [po.po_number]: true}));
                                          setBillingDateForms(prev => ({...prev, [po.po_number]: po.billing_trigger_date}));
                                        }} 
-                                       className="text-purple-600 bg-white p-1.5 rounded border border-purple-200 shadow-3xs"
+                                       className="text-purple-600 bg-white p-1.5 rounded border border-purple-200 shadow-3xs cursor-pointer"
                                      >
                                        <Edit size={12} />
                                      </button>
@@ -911,39 +1108,35 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                             </div>
                           );
                         })()}
-
                         <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
                            <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Documents</span>
                            <div className="flex flex-col gap-2">
                               {po.signed_po_url ? (
-                                <button type="button" onClick={() => handlePreviewFile(po.signed_po_url, `Signed PO: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 px-3 py-2 rounded-lg hover:bg-indigo-50 flex justify-between items-center">
+                                <button type="button" onClick={() => handlePreviewFile(po.signed_po_url, `Signed PO: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 px-3 py-2 rounded-lg hover:bg-indigo-50 flex justify-between items-center cursor-pointer">
                                   <span>✍️ Signed PO</span><ExternalLink size={12}/>
                                 </button>
                               ) : (
-                                <button type="button" onClick={() => openPoDocumentSection(po)} className="text-[10px] font-bold text-slate-700 bg-white border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-100 flex justify-between items-center">
+                                <button type="button" onClick={() => openPoDocumentSection(po)} className="text-[10px] font-bold text-slate-700 bg-white border border-slate-200 px-3 py-2 rounded-lg hover:bg-slate-100 flex justify-between items-center cursor-pointer">
                                   <span>📄 View System PO</span><ExternalLink size={12}/>
                                 </button>
                               )}
-
                               {po.proforma_invoice_url && (
-                                <button type="button" onClick={() => handlePreviewFile(po.proforma_invoice_url, `Proforma Invoice: ${po.invoice_no || po.po_number}`)} className="text-[10px] font-bold text-amber-700 bg-white border border-amber-200 px-3 py-2 rounded-lg hover:bg-amber-50 flex justify-between items-center">
+                                <button type="button" onClick={() => handlePreviewFile(po.proforma_invoice_url, `Proforma Invoice: ${po.invoice_no || po.po_number}`)} className="text-[10px] font-bold text-amber-700 bg-white border border-amber-200 px-3 py-2 rounded-lg hover:bg-amber-50 flex justify-between items-center cursor-pointer">
                                   <span>📄 PI {po.invoice_no ? `(${po.invoice_no})` : ''}</span><ExternalLink size={12}/>
                                 </button>
                               )}
-
                               {po.tax_invoice_url && (
-                                <button type="button" onClick={() => handlePreviewFile(po.tax_invoice_url, `Tax Invoice: ${po.tax_invoice_no || po.po_number}`)} className="text-[10px] font-bold text-emerald-700 bg-white border border-emerald-200 px-3 py-2 rounded-lg hover:bg-emerald-50 flex justify-between items-center">
+                                <button type="button" onClick={() => handlePreviewFile(po.tax_invoice_url, `Tax Invoice: ${po.tax_invoice_no || po.po_number}`)} className="text-[10px] font-bold text-emerald-700 bg-white border border-emerald-200 px-3 py-2 rounded-lg hover:bg-emerald-50 flex justify-between items-center cursor-pointer">
                                   <span>🧾 Tax Inv {po.tax_invoice_no ? `(${po.tax_invoice_no})` : ''}</span><ExternalLink size={12}/>
                                 </button>
                               )}
                            </div>
                         </div>
-
                         <div className="space-y-2">
                           <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider flex justify-between items-center">
                             Ordered Items
                             
-                            {/* 🎯 EARLY CLOSE BUTTON MOBILE */}
+                            {/* EARLY CLOSE BUTTON MOBILE */}
                             {isManagerOrDirector && ['VEHICLE', 'ACCOMMODATION', 'SUBSCRIPTION'].includes(po.category) && po.status !== 'Contract Terminated & Closed' && (
                               <button 
                                 onClick={() => handleTruncatePO(po.po_number)}
@@ -962,7 +1155,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                             ))}
                           </div>
                         </div>
-
                         <div className="space-y-2">
                           <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Payment History</span>
                           <div className="flex flex-col gap-2">
@@ -973,7 +1165,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   <p className={`font-bold ${log.action_taken.includes("Closure") ? "text-rose-900" : log.action_taken.includes("Renewed") ? "text-indigo-900" : "text-slate-800"}`}>{log.remarks.split(' | ')[0]}</p>
                                   <p className="text-[9px] text-slate-400 mt-1 font-mono">{log.timestamp.split(' ')[0]}</p>
                                   {log.remarks.includes('Proof File:') && (
-                                    <button type="button" onClick={() => handlePreviewFile(log.remarks.split('Proof File: ')[1], `Bank Receipt: ${po.po_number}`)} className="mt-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded inline-flex items-center gap-1 font-bold transition-colors">
+                                    <button type="button" onClick={() => handlePreviewFile(log.remarks.split('Proof File: ')[1], `Bank Receipt: ${po.po_number}`)} className="mt-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded inline-flex items-center gap-1 font-bold transition-colors cursor-pointer">
                                       <Paperclip size={10} /> View Bank Receipt
                                     </button>
                                   )}
@@ -981,7 +1173,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                               ))}
                           </div>
                         </div>
-
                       </div>
                     )}
                   </Card>
@@ -1033,20 +1224,18 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                         l.action_taken.includes("Partial Delivery") || 
                         l.action_taken.includes("CRITICAL ALERT")
                       );
-
                       // Financial Progress Math
                       const total = po.grand_total || 0;
                       const paid = po.disbursed_amount || 0;
                       const pending = Math.max(0, total - paid);
                       const progressPct = total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : 0;
-
                       return (
                         <React.Fragment key={po.po_number}>
                           <tr className={`transition-colors ${isExpanded ? 'bg-indigo-50/10' : 'hover:bg-slate-50/60'}`}>
                             
                             {/* Expand Button */}
                             <td className="p-4 text-center align-top">
-                              <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className={`p-1.5 border rounded-lg shadow-3xs transition-colors ${isExpanded ? 'bg-[#2c2a57] text-white border-[#2c2a57]' : 'text-slate-400 bg-white hover:text-[#2c2a57]'}`}>
+                              <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className={`p-1.5 border rounded-lg shadow-3xs transition-colors cursor-pointer ${isExpanded ? 'bg-[#2c2a57] text-white border-[#2c2a57]' : 'text-slate-400 bg-white hover:text-[#2c2a57]'}`}>
                                 {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                               </button>
                             </td>
@@ -1075,7 +1264,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                 {po.status}
                               </div>
                             </td>
-
                             {/* Vendor */}
                             <td className="p-4 space-y-0.5 leading-tight align-top">
                               <div className="font-extrabold text-slate-800 uppercase line-clamp-2 pr-2" title={po.vendor_name}>{po.vendor_name}</div>
@@ -1106,36 +1294,35 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                   <div className="border border-indigo-300 bg-white p-2.5 rounded-xl shadow-md space-y-2 z-10">
                                     <div className="flex justify-between items-center mb-1">
                                       <span className="text-[9px] font-black uppercase text-indigo-700">Upload Signed PO</span>
-                                      <button onClick={() => toggleEditPO(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
+                                      <button onClick={() => toggleEditPO(po.po_number)} className="text-slate-400 hover:text-rose-500 cursor-pointer"><X size={12} /></button>
                                     </div>
                                     <div className="flex items-center justify-between mt-1 pt-1 border-t border-slate-100">
                                       <label className="cursor-pointer text-[9px] font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 flex items-center">
                                         <input type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" onChange={(e) => handlePoFileChange(po.po_number, e)} className="hidden" />
                                         <UploadCloud size={10} className="mr-1"/> {poFileForm.file ? "Change File" : "Attach File"}
                                       </label>
-                                      <button onClick={() => handleSaveSignedPo(po.po_number)} className="bg-[#2c2a57] hover:bg-indigo-900 text-white font-bold text-[9px] px-3 py-1 rounded">Submit</button>
+                                      <button onClick={() => handleSaveSignedPo(po.po_number)} className="bg-[#2c2a57] hover:bg-indigo-900 text-white font-bold text-[9px] px-3 py-1 rounded cursor-pointer">Submit</button>
                                     </div>
                                   </div>
                                 ) : (
                                   <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs group">
                                     <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#2c2a57]"/> Order Document</span>
                                     <div className="flex items-center gap-1.5">
-                                      <button type="button" onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-1.5 py-0.5 bg-slate-100 rounded">View PO</button>
+                                      <button type="button" onClick={() => openPoDocumentSection(po)} className="text-[10px] font-black text-[#2c2a57] hover:underline px-1.5 py-0.5 bg-slate-100 rounded cursor-pointer">View PO</button>
                                       {po.signed_po_url ? (
-                                        <button type="button" onClick={() => handlePreviewFile(po.signed_po_url, `Signed PO: ${po.po_number}`)} className="text-[10px] font-black text-emerald-700 hover:underline px-1.5 py-0.5 bg-emerald-50 rounded flex items-center gap-1">Signed</button>
+                                        <button type="button" onClick={() => handlePreviewFile(po.signed_po_url, `Signed PO: ${po.po_number}`)} className="text-[10px] font-black text-emerald-700 hover:underline px-1.5 py-0.5 bg-emerald-50 rounded flex items-center gap-1 cursor-pointer">Signed</button>
                                       ) : (
-                                        isPurchaseExecutive && <button onClick={() => toggleEditPO(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:border-indigo-400 bg-slate-50">+ Add Signed</button>
+                                        isPurchaseExecutive && <button onClick={() => toggleEditPO(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-indigo-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 hover:border-indigo-400 bg-slate-50 cursor-pointer">+ Add Signed</button>
                                       )}
                                     </div>
                                   </div>
                                 )}
-
                                 {/* 2. Proforma Invoice (PI) */}
                                 {isEditingPI && isPurchaseExecutive ? (
                                   <div className="border border-amber-300 bg-white p-2.5 rounded-xl shadow-md space-y-2 z-10">
                                     <div className="flex justify-between items-center mb-1">
                                       <span className="text-[9px] font-black uppercase text-amber-600">Upload Proforma (PI)</span>
-                                      <button onClick={() => toggleEditInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
+                                      <button onClick={() => toggleEditInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500 cursor-pointer"><X size={12} /></button>
                                     </div>
                                     <div className="flex gap-2">
                                       <input type="text" value={piForm.invoice_no} onChange={(e) => handleInputChange(po.po_number, 'invoice_no', e.target.value)} placeholder="Inv No." className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] w-1/2 outline-none" />
@@ -1149,7 +1336,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                         <input type="file" accept=".pdf,.png,.jpg" onChange={(e) => handleFileChange(po.po_number, e)} className="hidden" />
                                         <UploadCloud size={10} className="mr-1"/> Attach PI
                                       </label>
-                                      <button onClick={() => handleSaveInvoiceDetails(po.po_number)} className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-4 py-1.5 rounded">Submit</button>
+                                      <button onClick={() => handleSaveInvoiceDetails(po.po_number)} className="bg-amber-500 hover:bg-amber-600 text-white font-bold text-[9px] px-4 py-1.5 rounded cursor-pointer">Submit</button>
                                     </div>
                                   </div>
                                 ) : (
@@ -1157,25 +1344,24 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                     <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-amber-500"/> Proforma Invoice</span>
                                     {po.proforma_invoice_url ? (
                                       <div className="flex items-center gap-1.5">
-                                        <button type="button" onClick={() => handlePreviewFile(po.proforma_invoice_url, `Proforma Invoice: ${po.invoice_no || po.po_number}`)} className="text-[10px] font-black text-amber-600 hover:underline px-2 py-0.5 bg-amber-50 rounded">View PI</button>
+                                        <button type="button" onClick={() => handlePreviewFile(po.proforma_invoice_url, `Proforma Invoice: ${po.invoice_no || po.po_number}`)} className="text-[10px] font-black text-amber-600 hover:underline px-2 py-0.5 bg-amber-50 rounded cursor-pointer">View PI</button>
                                         {isPurchaseExecutive && (
-                                          <button type="button" onClick={() => handleDeleteInvoiceFile(po.po_number)} className="text-slate-300 hover:text-rose-500 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={12}/></button>
+                                          <button type="button" onClick={() => handleDeleteInvoiceFile(po.po_number)} className="text-slate-300 hover:text-rose-500 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"><Trash2 size={12}/></button>
                                         )}
                                       </div>
                                     ) : (
                                       isPurchaseExecutive ? (
-                                        <button type="button" onClick={() => toggleEditInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-amber-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 bg-slate-50">+ Add PI</button>
+                                        <button type="button" onClick={() => toggleEditInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-amber-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 bg-slate-50 cursor-pointer">+ Add PI</button>
                                       ) : <span className="text-[9px] text-slate-400 italic">Not Uploaded</span>
                                     )}
                                   </div>
                                 )}
-
                                 {/* 3. Final Tax Invoice */}
                                 {isEditingTax && isPurchaseExecutive ? (
                                   <div className="border border-emerald-300 bg-white p-2.5 rounded-xl shadow-md space-y-2 z-10">
                                     <div className="flex justify-between items-center mb-1">
                                       <span className="text-[9px] font-black uppercase text-emerald-600">Upload Final Tax Invoice</span>
-                                      <button type="button" onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500"><X size={12} /></button>
+                                      <button type="button" onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-slate-400 hover:text-rose-500 cursor-pointer"><X size={12} /></button>
                                     </div>
                                     <div className="flex gap-2">
                                       <input type="text" value={taxForm.tax_invoice_no} onChange={(e) => handleTaxInputChange(po.po_number, 'tax_invoice_no', e.target.value)} placeholder="Tax Inv No." className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-[10px] w-1/2 outline-none" />
@@ -1186,19 +1372,19 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                         <input type="file" accept=".pdf,.png,.jpg" onChange={(e) => handleTaxFileChange(po.po_number, e)} className="hidden" />
                                         <UploadCloud size={10} className="mr-1"/> Attach Tax Inv
                                       </label>
-                                      <button type="button" onClick={() => handleSaveTaxInvoiceDetails(po.po_number)} className="bg-[#0b9c54] text-white font-bold text-[9px] px-4 py-1.5 rounded">Submit</button>
+                                      <button type="button" onClick={() => handleSaveTaxInvoiceDetails(po.po_number)} className="bg-[#0b9c54] text-white font-bold text-[9px] px-4 py-1.5 rounded cursor-pointer">Submit</button>
                                     </div>
                                   </div>
                                 ) : (
                                   <div className="flex justify-between items-center bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg shadow-3xs group">
                                     <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1.5"><FileText size={12} className="text-[#0b9c54]"/> Final Tax Invoice</span>
                                     {po.tax_invoice_url ? (
-                                      <button type="button" onClick={() => handlePreviewFile(po.tax_invoice_url, `Tax Invoice: ${po.tax_invoice_no || po.po_number}`)} className="text-[10px] font-black text-emerald-700 hover:underline px-2 py-0.5 bg-emerald-50 rounded flex items-center gap-1">
+                                      <button type="button" onClick={() => handlePreviewFile(po.tax_invoice_url, `Tax Invoice: ${po.tax_invoice_no || po.po_number}`)} className="text-[10px] font-black text-emerald-700 hover:underline px-2 py-0.5 bg-emerald-50 rounded flex items-center gap-1 cursor-pointer">
                                         View
                                       </button>
                                     ) : (
                                       isPurchaseExecutive ? (
-                                        <button type="button" onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-emerald-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 bg-slate-50">+ Add Tax Inv</button>
+                                        <button type="button" onClick={() => toggleEditTaxInvoice(po.po_number)} className="text-[9px] font-bold text-slate-400 hover:text-emerald-600 border border-dashed border-slate-300 rounded px-1.5 py-0.5 bg-slate-50 cursor-pointer">+ Add Tax Inv</button>
                                       ) : <span className="text-[9px] text-slate-400 italic">Not Uploaded</span>
                                     )}
                                   </div>
@@ -1207,7 +1393,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                               </div>
                             </td>
                           </tr>
-
                           {/* 🎯 EXPANDED SPLIT-PANE ROW (Desktop) */}
                           {isExpanded && (
                             <tr className="bg-slate-50/80 border-b-2 border-slate-200">
@@ -1228,7 +1413,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                         <span className="text-[10px] text-slate-500 font-mono bg-white px-2 py-1 rounded border border-slate-200">Inspector: {grnLogEntry.user_name} ({grnLogEntry.timestamp.split(' ')[0]})</span>
                                         
                                         {grnLogEntry.remarks.includes('Proof File:') && (
-                                          <button type="button" onClick={() => handlePreviewFile(grnLogEntry.remarks.split('Proof File: ')[1], `GRN Proof: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1 transition-colors">
+                                          <button type="button" onClick={() => handlePreviewFile(grnLogEntry.remarks.split('Proof File: ')[1], `GRN Proof: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1 transition-colors cursor-pointer">
                                             <Paperclip size={12} /> View Inspector's Photo Proof
                                           </button>
                                         )}
@@ -1236,7 +1421,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                     </div>
                                   </div>
                                 )}
-
                                 {/* 🎯 RECURRING CONTRACT: LIVE FINANCIAL SUMMARY & BILLING CONTROLS */}
                                 {po.is_recurring && po.status !== 'Contract Terminated & Closed' && (() => {
                                   const metrics = getLeaseMetrics(po);
@@ -1253,13 +1437,11 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                           <span className="text-[10px] font-bold uppercase text-purple-600 tracking-wider">Time Remaining</span>
                                           <span className="font-black text-purple-900 text-lg">{metrics?.monthsLeft || 0} Mos</span>
                                         </div>
-
-                                        {/* 🎯 NEW: Display Duration (Months) */}
+                                        
                                         <div className="flex flex-col border-l border-purple-200 pl-6">
                                           <span className="text-[10px] font-bold uppercase text-indigo-600 tracking-wider">Contract Tenure</span>
                                           <span className="font-black text-indigo-900 text-lg">{po.contract_duration || 'N/A'} Mos</span>
                                         </div>
-
                                         <div className="flex flex-col border-l border-purple-200 pl-6">
                                           <span className="text-[10px] font-bold uppercase text-emerald-600 tracking-wider">Total Paid Till Now</span>
                                           <span className="font-mono font-black text-emerald-700 text-lg">₹{paid.toLocaleString('en-IN')}</span>
@@ -1283,10 +1465,10 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                                onChange={(e) => setBillingDateForms(prev => ({...prev, [po.po_number]: e.target.value}))}
                                                className="w-14 px-2 py-1 border border-purple-300 rounded text-xs text-center outline-none focus:border-purple-500"
                                              />
-                                             <button onClick={() => handleBillingDateSubmit(po.po_number)} className="bg-emerald-500 text-white p-1 rounded hover:bg-emerald-600 transition-colors">
+                                             <button onClick={() => handleBillingDateSubmit(po.po_number)} className="bg-emerald-500 text-white p-1 rounded hover:bg-emerald-600 transition-colors cursor-pointer">
                                                <CheckCircle2 size={14} />
                                              </button>
-                                             <button onClick={() => setEditingBillingDate(prev => ({...prev, [po.po_number]: false}))} className="bg-slate-200 text-slate-600 p-1 rounded hover:bg-slate-300 transition-colors">
+                                             <button onClick={() => setEditingBillingDate(prev => ({...prev, [po.po_number]: false}))} className="bg-slate-200 text-slate-600 p-1 rounded hover:bg-slate-300 transition-colors cursor-pointer">
                                                <X size={14} />
                                              </button>
                                            </div>
@@ -1297,7 +1479,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                                  setEditingBillingDate(prev => ({...prev, [po.po_number]: true}));
                                                  setBillingDateForms(prev => ({...prev, [po.po_number]: po.billing_trigger_date}));
                                                }} 
-                                               className="text-purple-600 bg-purple-50 hover:bg-purple-100 p-1.5 rounded border border-purple-200 ml-2 transition-colors"
+                                               className="text-purple-600 bg-purple-50 hover:bg-purple-100 p-1.5 rounded border border-purple-200 ml-2 transition-colors cursor-pointer"
                                                title="Edit Billing Date"
                                              >
                                                <Edit size={14} />
@@ -1305,11 +1487,9 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                            )
                                          )}
                                       </div>
-
                                     </div>
                                   );
                                 })()}
-
                                 {/* 50/50 Split Grid: Items & Payments */}
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                   
@@ -1318,7 +1498,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                     <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-200 pb-2 flex justify-between items-center">
                                       <span>Contract Scope & Items</span>
                                       
-                                      {/* 🎯 EARLY CLOSE BUTTON FOR PM/DIRECTORS */}
+                                      {/* EARLY CLOSE BUTTON FOR PM/DIRECTORS */}
                                       {isManagerOrDirector && ['VEHICLE', 'ACCOMMODATION', 'SUBSCRIPTION'].includes(po.category) && po.status !== 'Contract Terminated & Closed' && (
                                         <button 
                                           onClick={() => handleTruncatePO(po.po_number)}
@@ -1342,7 +1522,6 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                       ))}
                                     </div>
                                   </div>
-
                                   {/* Right Pane: Payment History */}
                                   <div className="space-y-3">
                                     <div className="flex justify-between items-end border-b border-slate-200 pb-2">
@@ -1371,7 +1550,7 @@ export default function MasterPOLedgerDesk({ currentUser }) {
                                               
                                               {log.remarks.includes('Proof File:') && (
                                                 <div className="flex justify-end pt-2 border-t border-slate-50">
-                                                  <button type="button" onClick={() => handlePreviewFile(log.remarks.split('Proof File: ')[1], `Bank Receipt: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1.5 transition-colors">
+                                                  <button type="button" onClick={() => handlePreviewFile(log.remarks.split('Proof File: ')[1], `Bank Receipt: ${po.po_number}`)} className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded flex items-center gap-1.5 transition-colors cursor-pointer">
                                                     <Wallet size={12} /> View Bank Transfer Receipt
                                                   </button>
                                                 </div>

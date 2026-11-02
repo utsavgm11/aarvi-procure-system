@@ -5,11 +5,27 @@ import {
   CheckSquare, ShieldCheck, ThumbsUp, DollarSign, Inbox, Archive, 
   Clock, Award, AlertCircle, FileText, ExternalLink, IndianRupee,
   Building2, AlertOctagon, X, Landmark, TrendingUp, ShieldAlert, 
-  Search, Users, PieChart, RefreshCw, ChevronRight, ArrowRight, Filter
+  Search, Users, PieChart, RefreshCw, ChevronRight, ArrowRight, Filter,
+  ChevronDown, ChevronUp, Layers, Tag
 } from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI';
 
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
+
+const floatVal = (val) => {
+  const num = parseFloat(val);
+  return isNaN(num) ? 0 : num;
+};
+
+// Category Badge Color Palette
+const CATEGORY_COLORS = {
+  GOODS: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', bar: 'bg-blue-600' },
+  VEHICLE: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', bar: 'bg-amber-500' },
+  ACCOMMODATION: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', bar: 'bg-purple-600' },
+  FOOD: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', bar: 'bg-emerald-500' },
+  SUBSCRIPTION: { bg: 'bg-pink-50', text: 'text-pink-700', border: 'border-pink-200', bar: 'bg-pink-500' },
+  OTHER: { bg: 'bg-slate-50', text: 'text-slate-700', border: 'border-slate-200', bar: 'bg-slate-500' }
+};
 
 export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
   // 🎯 SET DEFAULT TAB TO ANALYTICS (HOME SCREEN)
@@ -26,12 +42,15 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
   const [alert, setAlert] = useState(null);
   const [previewDoc, setPreviewDoc] = useState(null);
 
-  // 🎯 NEW: Analytics States
+  // 🎯 Analytics States
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
   const [projectSearch, setProjectSearch] = useState('');
   const [pmFilter, setPmFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+
+  // 🎯 NEW: State for expanded project category breakdown view
+  const [expandedProjects, setExpandedProjects] = useState({});
 
   // Safely grab current user
   const storedSession = localStorage.getItem('aarvi_session') || sessionStorage.getItem('aarvi_session');
@@ -86,17 +105,31 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
       }
     }, 0);
     return () => { 
-      isMounted = false;
-      clearTimeout(timer);
+      isMounted = false; 
+      clearTimeout(timer); 
     };
   }, [activeTab, fetchAnalytics, fetchDirectorQueue, fetchDirectorHistory]);
+
+  const toggleExpandProject = (projectCode) => {
+    setExpandedProjects(prev => ({
+      ...prev,
+      [projectCode]: !prev[projectCode]
+    }));
+  };
 
   // --- ANALYTICS MEMOIZED FILTERS ---
   const filteredProjects = useMemo(() => {
     if (!analyticsData?.all_projects) return [];
     return analyticsData.all_projects.filter(p => {
       if (pmFilter !== 'ALL' && p.pm_name !== pmFilter) return false;
-      if (categoryFilter !== 'ALL' && p.category !== categoryFilter) return false;
+      
+      // Category filter checks primary category or if the category exists in the project's breakdown
+      if (categoryFilter !== 'ALL') {
+        const hasCategoryInBreakdown = p.category_breakdown && p.category_breakdown[categoryFilter] > 0;
+        const matchesPrimary = p.category === categoryFilter;
+        if (!hasCategoryInBreakdown && !matchesPrimary) return false;
+      }
+
       if (projectSearch) {
         const query = projectSearch.toLowerCase();
         return p.project_code.toLowerCase().includes(query) ||
@@ -123,7 +156,7 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
       
       const quotesRes = await axios.get(`${API_BASE_URL}/requisitions/${ticket.ticket_number}/quotations`);
       
-      // Auto-select the lowest bid if no bid is currently selected
+      // Auto-select lowest bid if no bid is selected
       let fetchedQuotes = quotesRes.data;
       itemsRes.data.forEach(item => {
         const itemBids = fetchedQuotes.filter(q => q.item_index === item.item_index);
@@ -199,10 +232,10 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
       });
       setSelectedTicket(null);
       fetchDirectorQueue();
-    } catch (err) {
-      setAlert({ type: 'error', message: err.response?.data?.detail || "Failed to apply executive board authorization." });
-    } finally {
-      setLoading(false);
+    } catch (err) { 
+      setAlert({ type: 'error', message: err.response?.data?.detail || "Failed to apply executive board authorization." }); 
+    } finally { 
+      setLoading(false); 
     }
   };
 
@@ -275,7 +308,6 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
           >
             <Inbox size={14} /> 
             <span>CAPEX Backlog</span>
-            {/* Red Dot Alert for Pending Approvals */}
             {analyticsData?.pending_director_action_count > 0 && activeTab !== 'queue' && (
               <span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-3 w-3">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
@@ -373,12 +405,13 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
               {/* MID SECTION: CATEGORY & MANAGER BREAKDOWNS */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
-                {/* Category Breakdown Progress */}
+                {/* Global Category Breakdown Progress */}
                 <Card className="lg:col-span-5 p-5 bg-white space-y-4">
-                  <h2 className="text-xs font-black text-[#2c2a57] uppercase tracking-widest border-b border-slate-100 pb-2">Category Capital Allocation</h2>
+                  <h2 className="text-xs font-black text-[#2c2a57] uppercase tracking-widest border-b border-slate-100 pb-2">Category Capital Allocation (Portfolio)</h2>
                   <div className="space-y-4 pt-1">
                     {Object.entries(analyticsData.category_spend).map(([cat, amount]) => {
                       const pct = analyticsData.total_spend > 0 ? (amount / analyticsData.total_spend * 100).toFixed(1) : 0;
+                      const style = CATEGORY_COLORS[cat] || CATEGORY_COLORS.OTHER;
                       return (
                         <div key={cat} className="space-y-1.5">
                           <div className="flex justify-between text-xs font-bold">
@@ -387,12 +420,7 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden shadow-inner">
                             <div 
-                              className={`h-2 rounded-full ${
-                                cat === 'GOODS' ? 'bg-blue-600' :
-                                cat === 'VEHICLE' ? 'bg-amber-500' :
-                                cat === 'ACCOMMODATION' ? 'bg-purple-600' :
-                                cat === 'FOOD' ? 'bg-emerald-500' : 'bg-pink-500'
-                              }`}
+                              className={`h-2 rounded-full ${style.bar}`}
                               style={{ width: `${pct}%` }}
                             ></div>
                           </div>
@@ -433,18 +461,18 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
                 </Card>
               </div>
 
-              {/* DRILL-DOWN PROJECT SPEND EXPLORER */}
-              <Card className="p-0 overflow-hidden bg-white">
+              {/* 🎯 DRILL-DOWN PROJECT & CATEGORY SPEND EXPLORER */}
+              <Card className="p-0 overflow-hidden bg-white border border-slate-200 shadow-sm">
                 <div className="p-5 border-b border-slate-100 bg-slate-50">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                     <div>
                       <h2 className="text-sm font-black text-[#2c2a57] uppercase tracking-wider flex items-center gap-2">
                         <Building2 size={18} className="text-indigo-600" />
-                        <span>Project & Sub-Project Financial Explorer</span>
+                        <span>Project-Wise Costing & Expense Category Breakdown</span>
                       </h2>
-                      <p className="text-[11px] text-slate-500 mt-1">Click inspect on any project to drill down directly into its Master PO Ledger records.</p>
+                      <p className="text-[11px] text-slate-500 mt-1">Examine committed capital, order volume, and category-level cost allocation per project.</p>
                     </div>
-
+                    
                     <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                       <div className="relative flex-1 sm:w-56">
                         <Search className="absolute left-2.5 top-2 text-slate-400" size={14} />
@@ -465,60 +493,154 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
                       </div>
 
                       <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1.5 shadow-3xs">
-                        <Filter size={12} className="text-slate-400" />
-                        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="bg-transparent text-[11px] font-bold text-slate-700 outline-none cursor-pointer max-w-[100px]">
+                        <Tag size={12} className="text-slate-400" />
+                        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="bg-transparent text-[11px] font-bold text-slate-700 outline-none cursor-pointer max-w-[120px]">
                           <option value="ALL">All Categories</option>
                           <option value="GOODS">Goods</option>
                           <option value="VEHICLE">Vehicle</option>
                           <option value="ACCOMMODATION">Guest House</option>
                           <option value="FOOD">Food</option>
+                          <option value="SUBSCRIPTION">Subscription</option>
                         </select>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Scrollable Projects Table */}
-                <div className="overflow-x-auto custom-scrollbar max-h-96 bg-white p-2">
+                {/* Table with Expandable Category Breakdown */}
+                <div className="overflow-x-auto custom-scrollbar bg-white p-2">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
                       <tr className="text-[10px] uppercase font-black tracking-wider text-slate-400 bg-slate-50 border-b border-slate-200">
-                        <th className="py-2.5 px-4 rounded-tl-lg">Project Code</th>
+                        <th className="py-2.5 px-3 w-8 text-center"></th>
+                        <th className="py-2.5 px-4">Project Code</th>
                         <th className="py-2.5 px-3">Project / Sub-Project Name</th>
                         <th className="py-2.5 px-3">Project Manager</th>
                         <th className="py-2.5 px-3 text-center">Orders</th>
-                        <th className="py-2.5 px-3 text-right">Committed Spend</th>
-                        <th className="py-2.5 px-4 text-center rounded-tr-lg">Action</th>
+                        <th className="py-2.5 px-3">Category Allocation Mix</th>
+                        <th className="py-2.5 px-3 text-right">Total Committed</th>
+                        <th className="py-2.5 px-4 text-center">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-medium">
                       {filteredProjects.length === 0 ? (
                         <tr>
-                          <td colSpan="6" className="p-8 text-center text-slate-400 italic">No projects found matching the specified filters.</td>
+                          <td colSpan="8" className="p-8 text-center text-slate-400 italic">No projects found matching the specified filters.</td>
                         </tr>
                       ) : (
-                        filteredProjects.map((proj) => (
-                          <tr key={proj.project_code} className="hover:bg-indigo-50/40 transition-colors group">
-                            <td className="py-3 px-4 font-mono font-black text-[#2c2a57]">{proj.project_code}</td>
-                            <td className="py-3 px-3 font-bold text-slate-800">{proj.project_name}</td>
-                            <td className="py-3 px-3 text-slate-600">{proj.pm_name}</td>
-                            <td className="py-3 px-3 text-center">
-                              <span className="font-mono font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
-                                {proj.orders_count}
-                              </span>
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono font-black text-slate-900">₹{proj.total_spend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
-                            <td className="py-3 px-4 text-center">
-                              <button 
-                                onClick={() => onNavigateToLedger && onNavigateToLedger(proj.project_code)}
-                                className="text-[10px] font-extrabold text-[#2c2a57] bg-slate-100 hover:bg-[#2c2a57] hover:text-white px-3 py-1.5 rounded-lg border border-slate-200 transition-all inline-flex items-center gap-1 shadow-3xs cursor-pointer group-hover:border-[#2c2a57]/50"
-                              >
-                                <span>Inspect in Ledger</span>
-                                <ChevronRight size={12} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+                        filteredProjects.map((proj) => {
+                          const isExpanded = !!expandedProjects[proj.project_code];
+                          
+                          // Fallback: if category_breakdown not yet populated from backend, synthesize it from primary category
+                          const breakdown = proj.category_breakdown && Object.keys(proj.category_breakdown).length > 0
+                            ? proj.category_breakdown
+                            : { [(proj.category || 'GOODS').toUpperCase()]: proj.total_spend };
+
+                          return (
+                            <React.Fragment key={proj.project_code}>
+                              <tr className={`hover:bg-indigo-50/30 transition-colors group ${isExpanded ? 'bg-indigo-50/20' : ''}`}>
+                                <td className="py-3 px-3 text-center">
+                                  <button 
+                                    onClick={() => toggleExpandProject(proj.project_code)}
+                                    className="p-1 rounded text-slate-400 hover:text-[#2c2a57] hover:bg-slate-100 transition-colors cursor-pointer"
+                                    title="View Category Breakdown"
+                                  >
+                                    {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                  </button>
+                                </td>
+                                <td className="py-3 px-4 font-mono font-black text-[#2c2a57]">{proj.project_code}</td>
+                                <td className="py-3 px-3 font-bold text-slate-800">{proj.project_name}</td>
+                                <td className="py-3 px-3 text-slate-600">{proj.pm_name}</td>
+                                <td className="py-3 px-3 text-center">
+                                  <span className="font-mono font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
+                                    {proj.orders_count}
+                                  </span>
+                                </td>
+                                
+                                {/* 🎯 MINI CATEGORY ALLOCATION TAGS */}
+                                <td className="py-3 px-3">
+                                  <div className="flex flex-wrap gap-1 max-w-xs">
+                                    {Object.entries(breakdown).map(([catName, catAmt]) => {
+                                      const style = CATEGORY_COLORS[catName] || CATEGORY_COLORS.OTHER;
+                                      return (
+                                        <span 
+                                          key={catName} 
+                                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${style.bg} ${style.text} ${style.border}`}
+                                        >
+                                          {catName}: ₹{catAmt >= 100000 ? `${(catAmt / 100000).toFixed(1)}L` : catAmt.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </td>
+
+                                <td className="py-3 px-3 text-right font-mono font-black text-slate-900">
+                                  ₹{proj.total_spend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                </td>
+                                
+                                <td className="py-3 px-4 text-center">
+                                  <button 
+                                    onClick={() => onNavigateToLedger && onNavigateToLedger(proj.project_code)}
+                                    className="text-[10px] font-extrabold text-[#2c2a57] bg-slate-100 hover:bg-[#2c2a57] hover:text-white px-3 py-1.5 rounded-lg border border-slate-200 transition-all inline-flex items-center gap-1 shadow-3xs cursor-pointer group-hover:border-[#2c2a57]/50"
+                                  >
+                                    <span>Inspect</span>
+                                    <ChevronRight size={12} />
+                                  </button>
+                                </td>
+                              </tr>
+
+                              {/* 🎯 EXPANDABLE DETAILED CATEGORY COSTING ROW */}
+                              {isExpanded && (
+                                <tr className="bg-slate-50/70 border-b border-slate-200 animate-in fade-in">
+                                  <td colSpan="8" className="p-4 pl-12 pr-6">
+                                    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-3xs space-y-3">
+                                      <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                                        <div className="flex items-center gap-2">
+                                          <Layers size={14} className="text-indigo-600" />
+                                          <span className="text-[11px] font-black uppercase text-[#2c2a57] tracking-wider">
+                                            Cost Category Distribution for {proj.project_code} ({proj.project_name})
+                                          </span>
+                                        </div>
+                                        <span className="text-xs font-mono font-black text-[#0b9c54]">
+                                          Total: ₹{proj.total_spend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                        </span>
+                                      </div>
+
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 pt-1">
+                                        {Object.entries(breakdown).map(([cName, cSpend]) => {
+                                          const pctOfProject = proj.total_spend > 0 ? ((cSpend / proj.total_spend) * 100).toFixed(1) : 0;
+                                          const style = CATEGORY_COLORS[cName] || CATEGORY_COLORS.OTHER;
+
+                                          return (
+                                            <div key={cName} className={`p-3 rounded-lg border ${style.border} ${style.bg} flex flex-col justify-between space-y-2`}>
+                                              <div className="flex justify-between items-center">
+                                                <span className={`text-[10px] font-black uppercase tracking-wider ${style.text}`}>{cName}</span>
+                                                <span className={`text-[10px] font-bold ${style.text}`}>{pctOfProject}%</span>
+                                              </div>
+                                              
+                                              <div>
+                                                <span className="font-mono font-black text-slate-900 text-sm block">
+                                                  ₹{cSpend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                                </span>
+                                              </div>
+
+                                              <div className="w-full bg-white/70 rounded-full h-1.5 overflow-hidden">
+                                                <div 
+                                                  className={`h-1.5 rounded-full ${style.bar}`}
+                                                  style={{ width: `${pctOfProject}%` }}
+                                                ></div>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -570,7 +692,7 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
             {selectedTicket ? (
               <div className="space-y-6 animate-in fade-in duration-200">
                 
-                {/* 🎯 Header Card with Grand Total Financial Summary */}
+                {/* Header Card with Grand Total Financial Summary */}
                 <Card className="p-4 bg-white border-slate-200 space-y-3 shadow-xs">
                   <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-slate-100 pb-3">
                     <div className="flex items-center space-x-3">
@@ -584,7 +706,8 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
                       <StatusBadge status={selectedTicket.status} />
                     </div>
                   </div>
-                  {/* 💰 Financial Commitment Metric Box */}
+                  
+                  {/* Financial Commitment Metric Box */}
                   <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex justify-between items-center">
                     <div>
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">Total CAPEX Commitment</span>
@@ -616,7 +739,6 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
                               <span className="text-[11px] text-slate-400 font-medium block mt-0.5">Technical Justification: <span className="italic text-slate-600 font-semibold">{item.purpose}</span></span>
                             </div>
                             
-                            {/* Dynamic Reimbursable Badge */}
                             {item.is_reimbursable && (
                               <div className="flex items-center space-x-1 bg-cyan-50 border border-cyan-200 text-cyan-800 text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-tight h-max shrink-0">
                                 <AlertCircle size={10} />
@@ -625,7 +747,6 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
                             )}
                           </div>
                           
-                          {/* Bids Grid */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                             {itemBids.map((bid, bIdx) => {
                               const isWinner = bid.is_selected === true;
@@ -653,7 +774,7 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
                                     {bid.special_terms && (
                                       <span className="text-[9px] font-medium text-slate-500 italic block line-clamp-1">Terms: {bid.special_terms}</span>
                                     )}
-                                    {/* 🎯 View Vendor Quote PDF File Link */}
+
                                     {bid.file_url && (
                                       <button 
                                         onClick={(e) => {
@@ -761,7 +882,6 @@ export default function DirectorDashboard({ currentUser, onNavigateToLedger }) {
           )}
         </Card>
       )}
-
     </div>
   );
 }

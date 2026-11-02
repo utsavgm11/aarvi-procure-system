@@ -5,32 +5,28 @@ import {
   Landmark, Search, Calendar, FileText, UploadCloud, CheckCircle2, 
   Clock, ExternalLink, Paperclip, ShieldCheck, ArrowRight, X, Building2,
   Filter, CheckSquare, Download, Wallet, AlertCircle, Printer, ChevronDown, ChevronUp,
-  DollarSign, Calculator, AlertOctagon, Repeat
+  DollarSign, Calculator, AlertOctagon, Repeat, Receipt, Send
 } from 'lucide-react';
 import { Card, Button, StatusBadge, Input } from './ui/SharedUI';
-
 // Assets for System PO Rendering
 import aarviLogo from '../assets/logo.png';
 import Letterhead from '../assets/letter_head.jpg';
-
 const API_BASE_URL = "https://aarvi-procure-system.onrender.com/api";
 
 export default function AccountsDesk({ currentUser }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('pending'); // 'pending' or 'history'
+  const [activeTab, setActiveTab] = useState('pending'); // 'pending', 'history', or 'employee_claims'
   const [selectedPo, setSelectedPo] = useState(null);
   
   // Payment Ledger Expansion State
   const [expandedRows, setExpandedRows] = useState({});
   const [rowLogs, setRowLogs] = useState({});
-
   // Modals State
   const [previewDoc, setPreviewDoc] = useState(null); 
   const [selectedSystemPo, setSelectedSystemPo] = useState(null); 
   const [poItems, setPoItems] = useState([]);
-
   // Form States
   const [utrNo, setUtrNo] = useState('');
   const [paymentDate, setPaymentDate] = useState('');
@@ -40,6 +36,11 @@ export default function AccountsDesk({ currentUser }) {
   const [paymentFile, setPaymentFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState(null);
+
+  // 🎯 NEW: Employee Expense Claims States for Accounts Payout
+  const [pendingClaims, setPendingClaims] = useState([]);
+  const [claimUtrForms, setClaimUtrForms] = useState({});
+  const [claimSubmitting, setClaimSubmitting] = useState(false);
 
   const fetchAccountsOrders = useCallback(async () => {
     setLoading(true);
@@ -53,13 +54,25 @@ export default function AccountsDesk({ currentUser }) {
     }
   }, []);
 
+  const fetchPendingClaims = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/expenses/pending-accounts`);
+      setPendingClaims(res.data);
+    } catch (err) {
+      console.error("Error fetching employee claims in Accounts Desk", err);
+    }
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     const timer = setTimeout(() => {
-      if (isMounted) fetchAccountsOrders();
+      if (isMounted) {
+        fetchAccountsOrders();
+        fetchPendingClaims();
+      }
     }, 0);
     return () => { isMounted = false; clearTimeout(timer); };
-  }, [fetchAccountsOrders]);
+  }, [fetchAccountsOrders, fetchPendingClaims]);
 
   const toggleExpandRow = async (poNumber, ticketNumber) => {
     const isCurrentlyExpanded = !!expandedRows[poNumber];
@@ -111,7 +124,6 @@ export default function AccountsDesk({ currentUser }) {
     const daysUntilDue = triggerDay - currentDay;
     const isDueSoon = daysUntilDue >= 0 && daysUntilDue <= 3;
     const isOverdue = daysUntilDue < 0;
-
     return { monthsLeft, threshold, isOffsetPhase, triggerDay, daysUntilDue, isDueSoon, isOverdue, deposit };
   };
 
@@ -141,7 +153,6 @@ export default function AccountsDesk({ currentUser }) {
     let defaultAmount = (po.remaining_balance && po.remaining_balance > 0) 
       ? po.remaining_balance 
       : calculatePayableNow(po.payment_terms, po.grand_total);
-
     const isFirstPayment = !po.disbursed_amount || po.disbursed_amount === 0;
 
     // 🎯 INITIAL DISBURSEMENT MATH: 1st Month Rent + Security Deposit
@@ -212,12 +223,37 @@ export default function AccountsDesk({ currentUser }) {
         const fullPaymentCleared = totalCleared >= (selectedPo.remaining_balance || selectedPo.grand_total);
         setSelectedPo(null);
         fetchAccountsOrders();
+        fetchPendingClaims();
         if (fullPaymentCleared) setActiveTab('history');
       }, 1500);
     } catch (err) {
       setAlert({ type: 'error', message: "Failed to submit payment disbursement details." });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // 🎯 NEW: DISBURSE EMPLOYEE CLAIM VIA NEFT HANDLER
+  const handleDisburseClaim = async (claimId, claimNo) => {
+    const utr = claimUtrForms[claimId];
+    if (!utr || !utr.trim()) {
+      alert("Please enter the NEFT UTR number before executing disbursement.");
+      return;
+    }
+    setClaimSubmitting(true);
+    try {
+      await axios.put(`${API_BASE_URL}/expenses/${claimId}/pay`, { neft_utr: utr.trim() });
+      setAlert({ type: 'success', message: `Claim ${claimNo} marked as Paid via NEFT: ${utr.trim()}` });
+      setClaimUtrForms(prev => {
+        const next = { ...prev };
+        delete next[claimId];
+        return next;
+      });
+      fetchPendingClaims();
+    } catch (err) {
+      setAlert({ type: 'error', message: "Failed to record NEFT payout: " + (err.response?.data?.detail || "System Error") });
+    } finally {
+      setClaimSubmitting(false);
     }
   };
 
@@ -232,13 +268,22 @@ export default function AccountsDesk({ currentUser }) {
       const matchesTab = activeTab === 'pending' 
         ? (po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed')
         : (po.status === 'Dispatched' || po.status === 'Partially Delivered' || po.status === 'Material Discrepancy Raised' || po.status === 'Delivered - GRN Logged');
-
       return matchesSearch && matchesTab;
     });
   }, [orders, searchQuery, activeTab]);
 
+  const filteredClaims = useMemo(() => {
+    return pendingClaims.filter(c => 
+      c.claim_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.emp_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.emp_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.project_code.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [pendingClaims, searchQuery]);
+
   const pendingCount = useMemo(() => orders.filter(o => o.status === 'PI Approved - Sent to Accounts' || o.status === 'Partially Disbursed').length, [orders]);
   const completedCount = useMemo(() => orders.filter(o => o.status === 'Dispatched' || o.status === 'Partially Delivered' || o.status === 'Material Discrepancy Raised' || o.status === 'Delivered - GRN Logged').length, [orders]);
+  const claimsCount = useMemo(() => pendingClaims.length, [pendingClaims]);
 
   return (
     <div className="space-y-6 relative pb-10 sm:px-2 md:px-4 lg:px-0">
@@ -270,8 +315,8 @@ export default function AccountsDesk({ currentUser }) {
               ) : (
                 <iframe 
                   src={previewDoc.url} 
-                  className="w-full h-full border-0"
-                  title="Document Preview"
+                  className="w-full h-full border-0" 
+                  title="Document Preview" 
                 />
               )}
             </div>
@@ -303,7 +348,6 @@ export default function AccountsDesk({ currentUser }) {
                 </button>
               </div>
             </div>
-
             <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
               <div className="bg-white p-8 md:p-12 mx-auto border border-slate-200 shadow-sm max-w-4xl text-sm text-slate-800 font-sans print:shadow-none print:border-none print:p-0">
                 
@@ -319,7 +363,6 @@ export default function AccountsDesk({ currentUser }) {
                     Purchase Order
                   </h1>
                 </div>
-
                 <div className="grid grid-cols-2 gap-12 my-8">
                   <div>
                     <h3 className="text-[10px] font-black uppercase text-indigo-500 tracking-wider mb-1">To Vendor</h3>
@@ -333,7 +376,6 @@ export default function AccountsDesk({ currentUser }) {
                     <p className="text-slate-600 text-xs mt-1 font-mono">Project Code: {selectedSystemPo.project_code}</p>
                   </div>
                 </div>
-
                 <table className="w-full text-left mb-6 border-collapse border border-slate-400">
                   <thead>
                     <tr className="bg-slate-50 text-slate-700 text-[10px] uppercase tracking-wider border-b border-slate-400">
@@ -358,23 +400,21 @@ export default function AccountsDesk({ currentUser }) {
                     </tr>
                   </tbody>
                 </table>
-
                 <div className="text-xs space-y-2 mt-8 text-slate-700">
                   <p><strong className="text-slate-900 uppercase">Payment Terms:</strong> {selectedSystemPo.payment_terms || "100% Payable on Delivery"}</p>
                   <p><strong className="text-slate-900 uppercase">Billing Status:</strong> Proforma Invoice Generated</p>
                 </div>
-
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* HEADER SECTION */}
+      {/* HEADER SECTION WITH 3 TABS */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-extrabold text-[#2c2a57] tracking-tight">Accounts & Disbursement Desk</h1>
-          <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">Verify Proforma Invoices, execute bank transfers, and manage recurring rent offsets.</p>
+          <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">Verify Proforma Invoices, execute PO transfers, and clear employee expense claims.</p>
         </div>
         
         <div className="flex flex-wrap gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
@@ -383,8 +423,19 @@ export default function AccountsDesk({ currentUser }) {
             onClick={() => setActiveTab('pending')} 
             className="text-[11px] md:text-xs py-2 px-3 flex-1 md:flex-none whitespace-nowrap"
           >
-            <Wallet size={14} className="mr-1.5 inline" /> <span>Pending Payments ({pendingCount})</span>
+            <Wallet size={14} className="mr-1.5 inline" /> <span>Pending PO Payments ({pendingCount})</span>
           </Button>
+
+          {/* 🎯 NEW: Employee Expense Claims Tab */}
+          <Button 
+            variant={activeTab === 'employee_claims' ? 'primary' : 'ghost'} 
+            onClick={() => setActiveTab('employee_claims')} 
+            className="text-[11px] md:text-xs py-2 px-3 flex-1 md:flex-none whitespace-nowrap"
+          >
+            <Receipt size={14} className="mr-1.5 inline" /> 
+            <span>Employee Claims {claimsCount > 0 && <span className="ml-1 bg-amber-500 text-white px-1.5 py-0.5 rounded-full text-[9px]">{claimsCount}</span>}</span>
+          </Button>
+
           <Button 
             variant={activeTab === 'history' ? 'primary' : 'ghost'} 
             onClick={() => setActiveTab('history')} 
@@ -395,29 +446,36 @@ export default function AccountsDesk({ currentUser }) {
         </div>
       </div>
 
+      {alert && (
+        <div className={`p-4 rounded-xl flex items-center space-x-3 border shadow-sm ${alert.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
+          {alert.type === 'success' ? <CheckCircle2 size={18} className="flex-shrink-0" /> : <AlertCircle size={18} className="flex-shrink-0" />}
+          <span className="font-semibold text-xs md:text-sm">{alert.message}</span>
+        </div>
+      )}
+
       {/* METRICS ROW */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-5">
         <Card className="p-4 flex items-center space-x-4 border-l-4 border-indigo-500 bg-white shadow-2xs">
           <div className="p-3 rounded-xl bg-indigo-50 text-indigo-600"><Landmark size={20} /></div>
           <div>
             <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Awaiting Disbursement</p>
-            <h3 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">{pendingCount} Orders</h3>
+            <h3 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">{pendingCount} POs</h3>
           </div>
         </Card>
         
-        <Card className="p-4 flex items-center space-x-4 border-l-4 border-emerald-500 bg-white shadow-2xs">
+        <Card className="p-4 flex items-center space-x-4 border-l-4 border-amber-500 bg-white shadow-2xs">
+          <div className="p-3 rounded-xl bg-amber-50 text-amber-600"><Receipt size={20} /></div>
+          <div>
+            <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Employee Claims Due</p>
+            <h3 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">{claimsCount} Claims</h3>
+          </div>
+        </Card>
+
+        <Card className="p-4 flex items-center space-x-4 border-l-4 border-emerald-500 bg-white shadow-2xs sm:col-span-2 md:col-span-1">
           <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600"><CheckCircle2 size={20} /></div>
           <div>
             <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Disbursed & Dispatched</p>
             <h3 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">{completedCount} Orders</h3>
-          </div>
-        </Card>
-
-        <Card className="p-4 flex items-center space-x-4 border-l-4 border-amber-500 bg-white shadow-2xs sm:col-span-2 md:col-span-1">
-          <div className="p-3 rounded-xl bg-amber-50 text-amber-600"><Building2 size={20} /></div>
-          <div>
-            <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Active Workspace</p>
-            <h3 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">Finance Ledger</h3>
           </div>
         </Card>
       </div>
@@ -430,410 +488,487 @@ export default function AccountsDesk({ currentUser }) {
             type="text" 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search PO number, vendor, or project name..." 
+            placeholder={activeTab === 'employee_claims' ? "Search Claim Number, Employee Code, Name, or Project..." : "Search PO number, vendor, or project name..."} 
             className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-1.5 text-xs text-slate-800 outline-none focus:border-[#2c2a57] shadow-3xs"
           />
         </div>
       </div>
 
-      {/* 📱 MOBILE RESPONSIVE CARD VIEW (Hidden on md and up) */}
-      <div className="md:hidden space-y-4">
-        {filteredOrders.length === 0 ? (
-          <Card className="p-8 text-center text-slate-400 text-sm border-dashed border-2">
-            No orders found in this view.
-          </Card>
-        ) : (
-          filteredOrders.map((po) => {
-            const isPartiallyPaid = po.status === 'Partially Disbursed';
-            const isExpanded = !!expandedRows[po.po_number];
-            const logs = rowLogs[po.po_number] || [];
-            const paymentLogs = logs.filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"));
-            
-            // 🎯 NEW: Offset Engine Variables
-            const metrics = getLeaseMetrics(po);
+      {/* 🎯 TAB 3: EMPLOYEE CLAIMS QUEUE (ACCOUNTS OPERATIONAL DISBURSEMENT) */}
+      {activeTab === 'employee_claims' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+            <div>
+              <h2 className="font-black text-amber-900 flex items-center gap-2 text-sm md:text-base">
+                <Receipt size={18} /> Employee Expense Claims Pending Bank Transfer (NEFT)
+              </h2>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Verify employee bill receipts, transfer funds, and enter the NEFT UTR. Recoverable claims will automatically route to the Invoice Desk.
+              </p>
+            </div>
+            <span className="text-xs font-bold text-amber-900 bg-amber-200/60 px-3 py-1 rounded-lg shrink-0">
+              {filteredClaims.length} Claims
+            </span>
+          </div>
 
-            return (
-              <Card key={po.po_number} className={`p-4 space-y-4 bg-white border-slate-200 ${isPartiallyPaid ? 'border-l-4 border-l-amber-500' : ''}`}>
-                <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredClaims.length === 0 ? (
+              <Card className="p-12 text-center text-slate-400 border-dashed border-2 col-span-full">
+                No employee expense claims currently pending disbursement.
+              </Card>
+            ) : (
+              filteredClaims.map(claim => (
+                <Card key={claim.id} className="p-0 overflow-hidden border-slate-200 shadow-sm flex flex-col justify-between">
                   <div>
-                    <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
-                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">{po.ticket_number}</div>
+                    <div className="bg-slate-50 p-3 border-b border-slate-100 flex justify-between items-center">
+                      <span className="font-mono font-black text-[#2c2a57] text-xs">{claim.claim_number}</span>
+                      <span className="text-[9px] font-bold uppercase text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded">
+                        {claim.expense_category}
+                      </span>
+                    </div>
+                    
+                    <div className="p-4 space-y-3 text-xs">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-black text-slate-800 text-sm">{claim.project_code}</p>
+                          <p className="text-slate-500 font-medium">Claimant: {claim.emp_name} ({claim.emp_code})</p>
+                        </div>
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded ${claim.is_billable_to_client ? 'bg-cyan-50 text-cyan-700 border border-cyan-200' : 'bg-slate-100 text-slate-600'}`}>
+                          {claim.is_billable_to_client ? 'Client Billable' : 'Company Cost'}
+                        </span>
+                      </div>
+
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 flex justify-between items-center">
+                        <div>
+                          <span className="text-[9px] font-bold uppercase text-slate-400 block">Amount Payable</span>
+                          <span className="font-mono font-black text-slate-900 text-base">₹{claim.total_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        <button 
+                          onClick={() => handlePreview(claim.receipt_url, `Receipt: ${claim.claim_number}`)}
+                          className="text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded flex items-center gap-1"
+                        >
+                          <ExternalLink size={12} /> View Bill
+                        </button>
+                      </div>
+
+                      <p className="text-[10px] text-slate-400 font-mono">Submitted on: {claim.created_at}</p>
+                    </div>
                   </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <StatusBadge status={po.status} />
-                    {isPartiallyPaid && (
-                      <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded">
-                        View Payment Ledger {isExpanded ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
-                      </button>
-                    )}
+
+                  <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-2">
+                    <label className="text-[9px] font-black uppercase text-slate-500 tracking-wider block">NEFT UTR Number *</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        placeholder="e.g. UTRN98234123" 
+                        value={claimUtrForms[claim.id] || ''}
+                        onChange={(e) => setClaimUtrForms(prev => ({ ...prev, [claim.id]: e.target.value }))}
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-indigo-500 bg-white"
+                      />
+                      <Button 
+                        variant="primary" 
+                        onClick={() => handleDisburseClaim(claim.id, claim.claim_number)}
+                        disabled={claimSubmitting}
+                        className="bg-[#0b9c54] hover:bg-emerald-600 text-xs px-3 shrink-0"
+                      >
+                        <Send size={12} className="mr-1 inline" /> Disburse
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="col-span-2">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5">Vendor</span>
-                    <span className="font-bold text-slate-800 line-clamp-1">{po.vendor_name}</span>
+                </Card>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 📱 MOBILE RESPONSIVE CARD VIEW (Hidden on md and up) */}
+      {activeTab !== 'employee_claims' && (
+        <div className="md:hidden space-y-4">
+          {filteredOrders.length === 0 ? (
+            <Card className="p-8 text-center text-slate-400 text-sm border-dashed border-2">
+              No orders found in this view.
+            </Card>
+          ) : (
+            filteredOrders.map((po) => {
+              const isPartiallyPaid = po.status === 'Partially Disbursed';
+              const isExpanded = !!expandedRows[po.po_number];
+              const logs = rowLogs[po.po_number] || [];
+              const paymentLogs = logs.filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"));
+              
+              const metrics = getLeaseMetrics(po);
+              return (
+                <Card key={po.po_number} className={`p-4 space-y-4 bg-white border-slate-200 ${isPartiallyPaid ? 'border-l-4 border-l-amber-500' : ''}`}>
+                  <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+                    <div>
+                      <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
+                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">{po.ticket_number}</div>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <StatusBadge status={po.status} />
+                      {isPartiallyPaid && (
+                        <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className="flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded">
+                          View Payment Ledger {isExpanded ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   
-                  {/* Financial Breakdown Mobile */}
-                  <div className="col-span-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-1 mt-1">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-bold text-slate-500">Total PO Value:</span>
-                      <span className="font-mono font-bold text-slate-800">₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="col-span-2">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase block mb-0.5">Vendor</span>
+                      <span className="font-bold text-slate-800 line-clamp-1">{po.vendor_name}</span>
                     </div>
-                    {po.disbursed_amount > 0 && (
-                      <div className="flex justify-between items-center text-xs text-emerald-600 font-bold">
-                        <span>Already Paid:</span>
-                        <span className="font-mono">₹{po.disbursed_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                      </div>
-                    )}
-                    {(po.remaining_balance > 0 || !po.disbursed_amount) && (
-                      <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/60">
-                        <span className="font-bold text-rose-600">Balance Pending:</span>
-                        <span className="font-mono font-black text-rose-600 text-sm">₹{(po.remaining_balance || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                      </div>
-                    )}
                     
-                    {/* 🎯 NEW: RECURRING BILLING INFO (Mobile) */}
-                    {metrics && (
-                      <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
-                        <div className="flex justify-between text-[10px] text-purple-700 font-bold">
-                          <span>Billing Trigger: {metrics.triggerDay}{metrics.triggerDay === 1 ? 'st' : metrics.triggerDay === 2 ? 'nd' : metrics.triggerDay === 3 ? 'rd' : 'th'}</span>
-                          <span title="Months Left / Total Tenure">Left: {metrics.monthsLeft} / {po.contract_duration || 'N/A'} Mos</span>
-                        </div>
-                        {metrics.deposit > 0 && (
-                          <div className="text-[9px] text-purple-500 font-bold mt-1 uppercase tracking-tight">Deposit Held: ₹{metrics.deposit.toLocaleString()}</div>
-                        )}
+                    {/* Financial Breakdown Mobile */}
+                    <div className="col-span-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 space-y-1 mt-1">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-bold text-slate-500">Total PO Value:</span>
+                        <span className="font-mono font-bold text-slate-800">₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                       </div>
-                    )}
-
-                  </div>
-                </div>
-
-                {/* Expanded Payment Ledger Mobile */}
-                {isExpanded && isPartiallyPaid && (
-                  <div className="bg-amber-50/50 p-3 rounded-lg border border-amber-100 space-y-2">
-                    <span className="text-[9px] font-black uppercase text-amber-800 tracking-wider">Payment History Audit</span>
-                    <div className="space-y-2">
-                      {paymentLogs.map((log, idx) => (
-                        <div key={idx} className="bg-white p-2 border border-slate-200 rounded text-[10px] space-y-1">
-                          <p className="font-bold text-slate-700">{log.remarks}</p>
-                          <p className="text-[9px] font-mono text-slate-400">Logged on: {log.timestamp}</p>
-                          {log.remarks.includes('Proof File:') && (
-                            <button onClick={() => handlePreview(log.remarks.split('Proof File: ')[1], `Payment Advice`)} className="mt-1 text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded w-max flex items-center gap-1">
-                              <Paperclip size={10} /> View Bank Receipt
-                            </button>
-                          )}
+                      {po.disbursed_amount > 0 && (
+                        <div className="flex justify-between items-center text-xs text-emerald-600 font-bold">
+                          <span>Already Paid:</span>
+                          <span className="font-mono">₹{po.disbursed_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Document Links Mobile */}
-                <div className="border-t border-slate-100 pt-3 space-y-2">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block">Audit Vault:</span>
-                  <div className="flex flex-col gap-1.5">
-                    
-                    {/* 1. Signed PO / System PO */}
-                    {po.signed_po_url ? (
-                      <button 
-                        onClick={() => handlePreview(po.signed_po_url, `Signed PO Document`)} 
-                        className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-1.5 rounded hover:bg-indigo-100 transition-colors flex items-center justify-between"
-                      >
-                        <span className="flex items-center gap-1">✍️ Signed PO</span>
-                        <ExternalLink size={10} />
-                      </button>
-                    ) : (
-                      <button 
-                        onClick={() => openSystemPoView(po)} 
-                        className="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 px-2 py-1.5 rounded hover:bg-indigo-50 transition-colors flex items-center justify-between shadow-3xs"
-                      >
-                        <span className="flex items-center gap-1">📄 System Generated PO</span>
-                        <ExternalLink size={10} />
-                      </button>
-                    )}
-
-                    {/* 2. PI */}
-                    {po.proforma_invoice_url ? (
-                      <button 
-                        onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)}
-                        className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1.5 rounded hover:bg-amber-100 transition-colors flex items-center justify-between"
-                      >
-                        <span className="flex items-center gap-1">📄 PI ({po.invoice_no || 'Pending'})</span>
-                        <ExternalLink size={10} />
-                      </button>
-                    ) : (
-                      <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded w-full block">No PI Attached</span>
-                    )}
-
-                    {/* 3. Tax Invoice */}
-                    {po.tax_invoice_url ? (
-                      <button 
-                        onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)}
-                        className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1.5 rounded hover:bg-emerald-100 transition-colors flex items-center justify-between"
-                      >
-                        <span className="flex items-center gap-1">🧾 Tax Inv ({po.tax_invoice_no || 'Pending'})</span>
-                        <ExternalLink size={10} />
-                      </button>
-                    ) : (
-                      <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded w-full block">Tax Inv Pending</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 🎯 ACCOUNTS ACTION LAYER (Mobile) */}
-                <div className="pt-2">
-                  {po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed' ? (
-                    <div className="space-y-2">
-                      {metrics?.isDueSoon && !metrics?.isOffsetPhase && (
-                        <div className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-1 rounded text-center animate-pulse">
-                          ⚠️ Rent Due in {metrics.daysUntilDue} Days
+                      )}
+                      {(po.remaining_balance > 0 || !po.disbursed_amount) && (
+                        <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/60">
+                          <span className="font-bold text-rose-600">Balance Pending:</span>
+                          <span className="font-mono font-black text-rose-600 text-sm">₹{(po.remaining_balance || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                         </div>
                       )}
                       
-                      {metrics?.isOffsetPhase ? (
-                        <Button variant="danger" onClick={() => openDisbursementModal(po)} className="w-full text-xs py-2 bg-rose-600 hover:bg-rose-700 shadow-3xs flex items-center justify-center gap-1.5">
-                          <AlertOctagon size={14} /> Log Deposit Offset
-                        </Button>
-                      ) : (
-                        <Button variant="primary" onClick={() => openDisbursementModal(po)} className="w-full text-xs py-2 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs">
-                          {isPartiallyPaid ? "Clear Remaining Balance" : "Process Advance Payment"}
-                        </Button>
+                      {/* RECURRING BILLING INFO (Mobile) */}
+                      {metrics && (
+                        <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
+                          <div className="flex justify-between text-[10px] text-purple-700 font-bold">
+                            <span>Billing Trigger: {metrics.triggerDay}{metrics.triggerDay === 1 ? 'st' : metrics.triggerDay === 2 ? 'nd' : metrics.triggerDay === 3 ? 'rd' : 'th'}</span>
+                            <span title="Months Left / Total Tenure">Left: {metrics.monthsLeft} / {po.contract_duration || 'N/A'} Mos</span>
+                          </div>
+                          {metrics.deposit > 0 && (
+                            <div className="text-[9px] text-purple-500 font-bold mt-1 uppercase tracking-tight">Deposit Held: ₹{metrics.deposit.toLocaleString()}</div>
+                          )}
+                        </div>
                       )}
                     </div>
-                  ) : (
-                    <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-center space-y-1">
-                      <span className="text-[11px] font-bold text-emerald-700 block">Final UTR: {po.utr_no}</span>
-                      <span className="text-[9px] font-bold text-emerald-600 block">100% Cleared: ₹{(po.disbursed_amount || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
-                </div>
-              </Card>
-            );
-          })
-        )}
-      </div>
+                  </div>
 
-      {/* 💻 DESKTOP TABLE VIEW (Hidden on small screens) */}
-      <Card className="hidden md:block overflow-hidden border-slate-200 shadow-sm bg-white">
-        <div className="overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left border-collapse min-w-[1100px]">
-            <thead>
-              <tr className="text-[10px] uppercase font-black tracking-wider text-slate-400 bg-slate-50 border-b border-slate-200">
-                <th className="p-4 w-40">PO / Ticket Code</th>
-                <th className="p-4 w-44">Project Scope</th>
-                <th className="p-4 w-48">Vendor Information</th>
-                <th className="p-4 text-right w-44">Financial Breakdown</th>
-                <th className="p-4 w-60">Document Vault & Terms</th>
-                <th className="p-4 w-36 text-center">Workflow Status</th>
-                <th className="p-4 text-center w-40">Accounts Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
-              {filteredOrders.length === 0 ? (
-                <tr>
-                  <td colSpan="7" className="p-8 text-center text-slate-400 text-sm">
-                    No orders found in this view.
-                  </td>
-                </tr>
-              ) : (
-                filteredOrders.map((po) => {
-                  const isPartiallyPaid = po.status === 'Partially Disbursed';
-                  const isExpanded = !!expandedRows[po.po_number];
-                  const logs = rowLogs[po.po_number] || [];
-                  const paymentLogs = logs.filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"));
-                  
-                  // 🎯 NEW: Offset Engine Variables
-                  const metrics = getLeaseMetrics(po);
-
-                  return (
-                    <React.Fragment key={po.po_number}>
-                      <tr className={`hover:bg-slate-50/50 transition-colors ${isPartiallyPaid ? 'bg-amber-50/20' : ''} ${isExpanded ? 'bg-indigo-50/20' : ''} ${metrics?.isOffsetPhase ? 'bg-rose-50/20' : ''}`}>
-                        
-                        <td className="p-4 align-top">
-                          <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
-                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">{po.ticket_number}</div>
-                          {isPartiallyPaid && (
-                            <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className="mt-2 text-[9px] font-black uppercase flex items-center gap-1 text-amber-600 bg-white border border-amber-200 px-1.5 py-0.5 rounded hover:bg-amber-100">
-                              {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />} Payment Ledger
-                            </button>
-                          )}
-                        </td>
-                        
-                        <td className="p-4 align-top">
-                          <div className="font-bold text-slate-800">{po.project_code}</div>
-                          <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
-                        </td>
-                        
-                        <td className="p-4 align-top">
-                          <div className="font-extrabold text-slate-800 uppercase line-clamp-1" title={po.vendor_name}>{po.vendor_name}</div>
-                          <div className="text-[10px] font-mono text-slate-500 truncate mt-0.5">{po.vendor_contact} | {po.vendor_email}</div>
-                        </td>
-                        
-                        {/* 🎯 FINANCIAL BREAKDOWN & RECURRING INFO */}
-                        <td className="p-4 text-right font-mono align-top bg-slate-50/30 space-y-1 border-l border-slate-100">
-                          <div>
-                            <span className="text-[9px] font-bold text-slate-400 uppercase block">Total Value:</span>
-                            <span className="font-extrabold text-slate-800">₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                          </div>
-                          
-                          {po.disbursed_amount > 0 && (
-                            <div className="pt-0.5 text-emerald-600">
-                              <span className="text-[9px] font-bold uppercase block">Already Paid:</span>
-                              <span className="font-bold">₹{po.disbursed_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                            </div>
-                          )}
-
-                          {(po.remaining_balance > 0 || !po.disbursed_amount) && (
-                            <div className="pt-1 border-t border-slate-200/60">
-                              <span className="text-[9px] font-bold text-rose-500 uppercase block">Pending Balance:</span>
-                              <span className="font-black text-rose-600 text-sm">₹{(po.remaining_balance || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                            </div>
-                          )}
-                          
-                          {/* 🎯 NEW: RECURRING BILLING DATA */}
-                          {metrics && (
-                            <div className={`mt-2 p-1.5 rounded text-[9px] border text-left ${metrics.isOffsetPhase ? 'bg-rose-50 border-rose-200' : 'bg-purple-50 border-purple-100'}`}>
-                              <div className={`flex justify-between font-bold mb-0.5 ${metrics.isOffsetPhase ? 'text-rose-800' : 'text-purple-800'}`}>
-                                <span>Cycle: {metrics.triggerDay}{metrics.triggerDay === 1 ? 'st' : metrics.triggerDay === 2 ? 'nd' : metrics.triggerDay === 3 ? 'rd' : 'th'} / mo</span>
-                                <span title="Months Left / Total Tenure">Left: {metrics.monthsLeft} / {po.contract_duration || 'N/A'} Mos</span>
-                              </div>
-                              {metrics.deposit > 0 && (
-                                <div className={`font-bold border-t pt-0.5 mt-0.5 uppercase tracking-tight ${metrics.isOffsetPhase ? 'text-rose-600 border-rose-200' : 'text-purple-600 border-purple-100'}`}>
-                                  Deposit Held: ₹{metrics.deposit.toLocaleString()}
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                        </td>
-                        
-                        {/* DOCUMENT VAULT */}
-                        <td className="p-4 align-top space-y-2 border-l border-slate-100">
-                          <div className="inline-block bg-indigo-50 border border-indigo-200 rounded px-2 py-0.5 text-[10px] font-black text-indigo-800 truncate max-w-full" title={po.payment_terms}>
-                            Terms: {po.payment_terms || '100% Payable'}
-                          </div>
-                          <div className="flex flex-col gap-1.5">
-                            {/* 1. Signed PO / System PO */}
-                            {po.signed_po_url ? (
-                              <button onClick={() => handlePreview(po.signed_po_url, `Signed PO - ${po.po_number}`)} className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left">
-                                <span className="font-bold text-slate-700 flex items-center gap-1">✍️ Signed PO</span><ExternalLink size={10} className="text-indigo-400 flex-shrink-0" />
-                              </button>
-                            ) : (
-                              <button onClick={() => openSystemPoView(po)} className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left">
-                                <span className="font-bold text-slate-700 flex items-center gap-1">📄 System PO</span><span className="text-[9px] font-black text-indigo-600 uppercase">View</span>
+                  {/* Expanded Payment Ledger Mobile */}
+                  {isExpanded && isPartiallyPaid && (
+                    <div className="bg-amber-50/50 p-3 rounded-lg border border-amber-100 space-y-2">
+                      <span className="text-[9px] font-black uppercase text-amber-800 tracking-wider">Payment History Audit</span>
+                      <div className="space-y-2">
+                        {paymentLogs.map((log, idx) => (
+                          <div key={idx} className="bg-white p-2 border border-slate-200 rounded text-[10px] space-y-1">
+                            <p className="font-bold text-slate-700">{log.remarks}</p>
+                            <p className="text-[9px] font-mono text-slate-400">Logged on: {log.timestamp}</p>
+                            {log.remarks.includes('Proof File:') && (
+                              <button onClick={() => handlePreview(log.remarks.split('Proof File: ')[1], `Payment Advice`)} className="mt-1 text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded w-max flex items-center gap-1">
+                                <Paperclip size={10} /> View Bank Receipt
                               </button>
                             )}
-
-                            {/* 2. PI */}
-                            {po.proforma_invoice_url ? (
-                              <button onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)} className="flex items-center justify-between bg-amber-50/60 border border-amber-200 px-2 py-1 rounded text-[10px] hover:border-amber-400 transition-colors shadow-3xs w-full text-left">
-                                <span className="font-bold text-amber-800 flex items-center gap-1 truncate max-w-[130px]">📄 PI #{po.invoice_no}</span><ExternalLink size={10} className="text-amber-500 flex-shrink-0" />
-                              </button>
-                            ) : <span className="text-[9px] italic text-slate-400 pl-1 block">No PI Attached</span>}
-
-                            {/* 3. Tax Invoice */}
-                            {po.tax_invoice_url ? (
-                              <button onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)} className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 px-2 py-1 rounded text-[10px] hover:border-emerald-400 transition-colors shadow-3xs w-full text-left">
-                                <span className="font-bold text-emerald-800 flex items-center gap-1 truncate max-w-[130px]">🧾 Tax Inv #{po.tax_invoice_no}</span><ExternalLink size={10} className="text-emerald-500 flex-shrink-0" />
-                              </button>
-                            ) : <span className="text-[9px] italic text-slate-400 pl-1 block">Tax Inv Pending</span>}
                           </div>
-                        </td>
-                        
-                        <td className="p-4 align-top text-center">
-                          <StatusBadge status={po.status} />
-                        </td>
-                        
-                        {/* 🎯 ACCOUNTS ACTION & ALERTS */}
-                        <td className="p-4 text-center align-top border-l border-slate-100">
-                          {po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed' ? (
-                            <div className="space-y-2">
-                              
-                              {/* Warning Alerts */}
-                              {metrics?.isDueSoon && !metrics?.isOffsetPhase && (
-                                <div className="text-[9px] uppercase tracking-wider bg-amber-100 text-amber-800 font-bold px-2 py-1 rounded animate-pulse shadow-3xs">
-                                  ⚠️ Rent Due in {metrics.daysUntilDue} Days
-                                </div>
-                              )}
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-                              {metrics?.isOffsetPhase ? (
-                                <Button variant="danger" onClick={() => openDisbursementModal(po)} className="text-[11px] py-2 px-2 bg-rose-600 hover:bg-rose-700 shadow-3xs w-full font-bold flex flex-col items-center justify-center gap-0.5 h-auto">
-                                  <AlertOctagon size={12} className="mb-0.5" />
-                                  <span>Log Deposit Offset</span>
-                                </Button>
-                              ) : (
-                                <Button variant="primary" onClick={() => openDisbursementModal(po)} className="text-[11px] py-2 px-2 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs w-full font-bold">
-                                  {isPartiallyPaid ? "Pay Monthly / Balance" : "Process Payment"}
-                                </Button>
-                              )}
+                  {/* Document Links Mobile */}
+                  <div className="border-t border-slate-100 pt-3 space-y-2">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase block">Audit Vault:</span>
+                    <div className="flex flex-col gap-1.5">
+                      {po.signed_po_url ? (
+                        <button 
+                          onClick={() => handlePreview(po.signed_po_url, `Signed PO Document`)} 
+                          className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-1.5 rounded hover:bg-indigo-100 transition-colors flex items-center justify-between"
+                        >
+                          <span className="flex items-center gap-1">✍️ Signed PO</span>
+                          <ExternalLink size={10} />
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => openSystemPoView(po)} 
+                          className="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 px-2 py-1.5 rounded hover:bg-indigo-50 transition-colors flex items-center justify-between shadow-3xs"
+                        >
+                          <span className="flex items-center gap-1">📄 System Generated PO</span>
+                          <ExternalLink size={10} />
+                        </button>
+                      )}
+
+                      {po.proforma_invoice_url ? (
+                        <button 
+                          onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)} 
+                          className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1.5 rounded hover:bg-amber-100 transition-colors flex items-center justify-between"
+                        >
+                          <span className="flex items-center gap-1">📄 PI ({po.invoice_no || 'Pending'})</span>
+                          <ExternalLink size={10} />
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded w-full block">No PI Attached</span>
+                      )}
+
+                      {po.tax_invoice_url ? (
+                        <button 
+                          onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)} 
+                          className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1.5 rounded hover:bg-emerald-100 transition-colors flex items-center justify-between"
+                        >
+                          <span className="flex items-center gap-1">🧾 Tax Inv ({po.tax_invoice_no || 'Pending'})</span>
+                          <ExternalLink size={10} />
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 italic bg-slate-50 px-2 py-1 rounded w-full block">Tax Inv Pending</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ACCOUNTS ACTION LAYER (Mobile) */}
+                  <div className="pt-2">
+                    {po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed' ? (
+                      <div className="space-y-2">
+                        {metrics?.isDueSoon && !metrics?.isOffsetPhase && (
+                          <div className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-1 rounded text-center animate-pulse">
+                            ⚠️ Rent Due in {metrics.daysUntilDue} Days
+                          </div>
+                        )}
+                        
+                        {metrics?.isOffsetPhase ? (
+                          <Button variant="danger" onClick={() => openDisbursementModal(po)} className="w-full text-xs py-2 bg-rose-600 hover:bg-rose-700 shadow-3xs flex items-center justify-center gap-1.5">
+                            <AlertOctagon size={14} /> Log Deposit Offset
+                          </Button>
+                        ) : (
+                          <Button variant="primary" onClick={() => openDisbursementModal(po)} className="w-full text-xs py-2 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs">
+                            {isPartiallyPaid ? "Clear Remaining Balance" : "Process Advance Payment"}
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-center space-y-1">
+                        <span className="text-[11px] font-bold text-emerald-700 block">Final UTR: {po.utr_no}</span>
+                        <span className="text-[9px] font-bold text-emerald-600 block">100% Cleared: ₹{(po.disbursed_amount || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* 💻 DESKTOP TABLE VIEW (Hidden on small screens) */}
+      {activeTab !== 'employee_claims' && (
+        <Card className="hidden md:block overflow-hidden border-slate-200 shadow-sm bg-white">
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-left border-collapse min-w-[1100px]">
+              <thead>
+                <tr className="text-[10px] uppercase font-black tracking-wider text-slate-400 bg-slate-50 border-b border-slate-200">
+                  <th className="p-4 w-40">PO / Ticket Code</th>
+                  <th className="p-4 w-44">Project Scope</th>
+                  <th className="p-4 w-48">Vendor Information</th>
+                  <th className="p-4 text-right w-44">Financial Breakdown</th>
+                  <th className="p-4 w-60">Document Vault & Terms</th>
+                  <th className="p-4 w-36 text-center">Workflow Status</th>
+                  <th className="p-4 text-center w-40">Accounts Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
+                {filteredOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="p-8 text-center text-slate-400 text-sm">
+                      No orders found in this view.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredOrders.map((po) => {
+                    const isPartiallyPaid = po.status === 'Partially Disbursed';
+                    const isExpanded = !!expandedRows[po.po_number];
+                    const logs = rowLogs[po.po_number] || [];
+                    const paymentLogs = logs.filter(l => l.action_taken.includes("Disbursement") || l.action_taken.includes("Payment"));
+                    
+                    const metrics = getLeaseMetrics(po);
+                    return (
+                      <React.Fragment key={po.po_number}>
+                        <tr className={`hover:bg-slate-50/50 transition-colors ${isPartiallyPaid ? 'bg-amber-50/20' : ''} ${isExpanded ? 'bg-indigo-50/20' : ''} ${metrics?.isOffsetPhase ? 'bg-rose-50/20' : ''}`}>
+                          
+                          <td className="p-4 align-top">
+                            <div className="font-mono font-black text-[#2c2a57] text-sm">{po.po_number}</div>
+                            <div className="text-[10px] text-slate-400 font-mono mt-0.5">{po.ticket_number}</div>
+                            {isPartiallyPaid && (
+                              <button onClick={() => toggleExpandRow(po.po_number, po.ticket_number)} className="mt-2 text-[9px] font-black uppercase flex items-center gap-1 text-amber-600 bg-white border border-amber-200 px-1.5 py-0.5 rounded hover:bg-amber-100">
+                                {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />} Payment Ledger
+                              </button>
+                            )}
+                          </td>
+                          
+                          <td className="p-4 align-top">
+                            <div className="font-bold text-slate-800">{po.project_code}</div>
+                            <div className="text-[10px] text-slate-500 truncate w-40" title={po.project_name}>{po.project_name}</div>
+                          </td>
+                          
+                          <td className="p-4 align-top">
+                            <div className="font-extrabold text-slate-800 uppercase line-clamp-1" title={po.vendor_name}>{po.vendor_name}</div>
+                            <div className="text-[10px] font-mono text-slate-500 truncate mt-0.5">{po.vendor_contact} | {po.vendor_email}</div>
+                          </td>
+                          
+                          {/* FINANCIAL BREAKDOWN & RECURRING INFO */}
+                          <td className="p-4 text-right font-mono align-top bg-slate-50/30 space-y-1 border-l border-slate-100">
+                            <div>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase block">Total Value:</span>
+                              <span className="font-extrabold text-slate-800">₹{po.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                             </div>
-                          ) : (
-                            <div className="space-y-1.5 text-center flex flex-col items-center">
-                              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200 flex flex-col w-full">
-                                <span className="text-[8px] text-emerald-500 uppercase tracking-widest">Final UTR No:</span>
-                                {po.utr_no}
-                              </span>
-                              <span className="text-[9px] font-bold text-slate-500">
-                                Total Paid: ₹{(po.disbursed_amount || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                              </span>
-                              {po.payment_advice_url && (
-                                <button onClick={() => handlePreview(po.payment_advice_url, `Payment Receipt - ${po.utr_no}`)} className="text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded hover:text-indigo-800 hover:bg-indigo-100 font-bold text-[10px] flex items-center gap-1 justify-center transition-colors w-full mt-1">
-                                  <Download size={10} /> View Receipt
+                            
+                            {po.disbursed_amount > 0 && (
+                              <div className="pt-0.5 text-emerald-600">
+                                <span className="text-[9px] font-bold uppercase block">Already Paid:</span>
+                                <span className="font-bold">₹{po.disbursed_amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
+                            {(po.remaining_balance > 0 || !po.disbursed_amount) && (
+                              <div className="pt-1 border-t border-slate-200/60">
+                                <span className="text-[9px] font-bold text-rose-500 uppercase block">Pending Balance:</span>
+                                <span className="font-black text-rose-600 text-sm">₹{(po.remaining_balance || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
+                            
+                            {metrics && (
+                              <div className={`mt-2 p-1.5 rounded text-[9px] border text-left ${metrics.isOffsetPhase ? 'bg-rose-50 border-rose-200' : 'bg-purple-50 border-purple-100'}`}>
+                                <div className={`flex justify-between font-bold mb-0.5 ${metrics.isOffsetPhase ? 'text-rose-800' : 'text-purple-800'}`}>
+                                  <span>Cycle: {metrics.triggerDay}{metrics.triggerDay === 1 ? 'st' : metrics.triggerDay === 2 ? 'nd' : metrics.triggerDay === 3 ? 'rd' : 'th'} / mo</span>
+                                  <span title="Months Left / Total Tenure">Left: {metrics.monthsLeft} / {po.contract_duration || 'N/A'} Mos</span>
+                                </div>
+                                {metrics.deposit > 0 && (
+                                  <div className={`font-bold border-t pt-0.5 mt-0.5 uppercase tracking-tight ${metrics.isOffsetPhase ? 'text-rose-600 border-rose-200' : 'text-purple-600 border-purple-100'}`}>
+                                    Deposit Held: ₹{metrics.deposit.toLocaleString()}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          
+                          {/* DOCUMENT VAULT */}
+                          <td className="p-4 align-top space-y-2 border-l border-slate-100">
+                            <div className="inline-block bg-indigo-50 border border-indigo-200 rounded px-2 py-0.5 text-[10px] font-black text-indigo-800 truncate max-w-full" title={po.payment_terms}>
+                              Terms: {po.payment_terms || '100% Payable'}
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                              {po.signed_po_url ? (
+                                <button onClick={() => handlePreview(po.signed_po_url, `Signed PO - ${po.po_number}`)} className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left">
+                                  <span className="font-bold text-slate-700 flex items-center gap-1">✍️ Signed PO</span><ExternalLink size={10} className="text-indigo-400 flex-shrink-0" />
+                                </button>
+                              ) : (
+                                <button onClick={() => openSystemPoView(po)} className="flex items-center justify-between bg-white border border-slate-200 px-2 py-1 rounded text-[10px] hover:border-indigo-400 transition-colors shadow-3xs w-full text-left">
+                                  <span className="font-bold text-slate-700 flex items-center gap-1">📄 System PO</span><span className="text-[9px] font-black text-indigo-600 uppercase">View</span>
                                 </button>
                               )}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-
-                      {/* 🎯 EXPANDED PAYMENT LEDGER ROW */}
-                      {isExpanded && isPartiallyPaid && (
-                        <tr className="bg-amber-50/30 border-b-2 border-slate-200">
-                          <td colSpan="7" className="p-4 pl-12 pr-12">
-                            <div className="bg-white border border-amber-200 p-4 rounded-xl shadow-3xs">
-                              <div className="flex items-center space-x-2 text-[10px] font-black uppercase text-amber-600 tracking-wider mb-3">
-                                <Repeat size={14} /> <span>Multi-Payment / Offset Audit Ledger</span>
-                              </div>
-                              <div className="space-y-2">
-                                {paymentLogs.map((log, idx) => (
-                                  <div key={idx} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                                    <div className="flex flex-col">
-                                      <span className={`font-bold ${log.remarks.includes('offset') ? 'text-rose-600' : 'text-slate-800'}`}>
-                                        {log.remarks.split(' | ')[0]}
-                                      </span>
-                                      <span className="text-[9px] font-mono text-slate-400 mt-0.5">Processed by {log.user_name} on {log.timestamp}</span>
-                                    </div>
-                                    {log.remarks.includes('Proof File:') && (
-                                      <button 
-                                        onClick={() => handlePreview(log.remarks.split('Proof File: ')[1], `Payment Advice`)}
-                                        className="text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded border border-indigo-100 flex items-center gap-1"
-                                      >
-                                        <Paperclip size={10} /> View Bank Receipt
-                                      </button>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
+                              
+                              {po.proforma_invoice_url ? (
+                                <button onClick={() => handlePreview(po.proforma_invoice_url, `Proforma Invoice #${po.invoice_no}`)} className="flex items-center justify-between bg-amber-50/60 border border-amber-200 px-2 py-1 rounded text-[10px] hover:border-amber-400 transition-colors shadow-3xs w-full text-left">
+                                  <span className="font-bold text-amber-800 flex items-center gap-1 truncate max-w-[130px]">📄 PI #{po.invoice_no}</span><ExternalLink size={10} className="text-amber-500 flex-shrink-0" />
+                                </button>
+                              ) : (
+                                <span className="text-[9px] italic text-slate-400 pl-1 block">No PI Attached</span>
+                              )}
+                              
+                              {po.tax_invoice_url ? (
+                                <button onClick={() => handlePreview(po.tax_invoice_url, `Tax Invoice #${po.tax_invoice_no}`)} className="flex items-center justify-between bg-emerald-50/60 border border-emerald-200 px-2 py-1 rounded text-[10px] hover:border-emerald-400 transition-colors shadow-3xs w-full text-left">
+                                  <span className="font-bold text-emerald-800 flex items-center gap-1 truncate max-w-[130px]">🧾 Tax Inv #{po.tax_invoice_no}</span><ExternalLink size={10} className="text-emerald-500 flex-shrink-0" />
+                                </button>
+                              ) : (
+                                <span className="text-[9px] italic text-slate-400 pl-1 block">Tax Inv Pending</span>
+                              )}
                             </div>
                           </td>
+                          
+                          <td className="p-4 align-top text-center">
+                            <StatusBadge status={po.status} />
+                          </td>
+                          
+                          {/* ACCOUNTS ACTION & ALERTS */}
+                          <td className="p-4 text-center align-top border-l border-slate-100">
+                            {po.status === 'PI Approved - Sent to Accounts' || po.status === 'Partially Disbursed' ? (
+                              <div className="space-y-2">
+                                {metrics?.isDueSoon && !metrics?.isOffsetPhase && (
+                                  <div className="text-[9px] uppercase tracking-wider bg-amber-100 text-amber-800 font-bold px-2 py-1 rounded animate-pulse shadow-3xs">
+                                    ⚠️ Rent Due in {metrics.daysUntilDue} Days
+                                  </div>
+                                )}
+                                {metrics?.isOffsetPhase ? (
+                                  <Button variant="danger" onClick={() => openDisbursementModal(po)} className="text-[11px] py-2 px-2 bg-rose-600 hover:bg-rose-700 shadow-3xs w-full font-bold flex flex-col items-center justify-center gap-0.5 h-auto">
+                                    <AlertOctagon size={12} className="mb-0.5" />
+                                    <span>Log Deposit Offset</span>
+                                  </Button>
+                                ) : (
+                                  <Button variant="primary" onClick={() => openDisbursementModal(po)} className="text-[11px] py-2 px-2 bg-[#0b9c54] hover:bg-emerald-600 shadow-3xs w-full font-bold">
+                                    {isPartiallyPaid ? "Pay Monthly / Balance" : "Process Payment"}
+                                  </Button>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="space-y-1.5 text-center flex flex-col items-center">
+                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200 flex flex-col w-full">
+                                  <span className="text-[8px] text-emerald-500 uppercase tracking-widest">Final UTR No:</span>
+                                  {po.utr_no}
+                                </span>
+                                <span className="text-[9px] font-bold text-slate-500">
+                                  Total Paid: ₹{(po.disbursed_amount || po.grand_total).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                </span>
+                                {po.payment_advice_url && (
+                                  <button onClick={() => handlePreview(po.payment_advice_url, `Payment Receipt - ${po.utr_no}`)} className="text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded hover:text-indigo-800 hover:bg-indigo-100 font-bold text-[10px] flex items-center gap-1 justify-center transition-colors w-full mt-1">
+                                    <Download size={10} /> View Receipt
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </td>
                         </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+
+                        {/* EXPANDED PAYMENT LEDGER ROW */}
+                        {isExpanded && isPartiallyPaid && (
+                          <tr className="bg-amber-50/30 border-b-2 border-slate-200">
+                            <td colSpan="7" className="p-4 pl-12 pr-12">
+                              <div className="bg-white border border-amber-200 p-4 rounded-xl shadow-3xs">
+                                <div className="flex items-center space-x-2 text-[10px] font-black uppercase text-amber-600 tracking-wider mb-3">
+                                  <Repeat size={14} /> <span>Multi-Payment / Offset Audit Ledger</span>
+                                </div>
+                                <div className="space-y-2">
+                                  {paymentLogs.map((log, idx) => (
+                                    <div key={idx} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                                      <div className="flex flex-col">
+                                        <span className={`font-bold ${log.remarks.includes('offset') ? 'text-rose-600' : 'text-slate-800'}`}>
+                                          {log.remarks.split(' | ')[0]}
+                                        </span>
+                                        <span className="text-[9px] font-mono text-slate-400 mt-0.5">Processed by {log.user_name} on {log.timestamp}</span>
+                                      </div>
+                                      {log.remarks.includes('Proof File:') && (
+                                        <button 
+                                          onClick={() => handlePreview(log.remarks.split('Proof File: ')[1], `Payment Advice`)} 
+                                          className="text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded border border-indigo-100 flex items-center gap-1"
+                                        >
+                                          <Paperclip size={10} /> View Bank Receipt
+                                        </button>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {/* 🎯 DISBURSEMENT & TDS MODAL */}
       {selectedPo && (() => {
         const metrics = getLeaseMetrics(selectedPo);
         const isFirstPayment = !selectedPo.disbursed_amount || selectedPo.disbursed_amount === 0;
-
         return (
           <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
             <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
@@ -863,7 +998,7 @@ export default function AccountsDesk({ currentUser }) {
                   </div>
                 )}
 
-                {/* 🛑 DEPOSIT OFFSET CRITICAL BANNER */}
+                {/* DEPOSIT OFFSET CRITICAL BANNER */}
                 {metrics?.isOffsetPhase && (
                   <div className="bg-rose-50 border border-rose-300 rounded-xl p-4 flex gap-3 items-start shadow-sm mb-2">
                     <AlertOctagon className="text-rose-600 shrink-0 mt-0.5" size={24} />
@@ -876,7 +1011,7 @@ export default function AccountsDesk({ currentUser }) {
                   </div>
                 )}
 
-                {/* 🎯 INITIAL DISBURSEMENT MATH BANNER */}
+                {/* INITIAL DISBURSEMENT MATH BANNER */}
                 {!metrics?.isOffsetPhase && isFirstPayment && metrics?.deposit > 0 && (
                   <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex gap-3 items-center shadow-sm mb-2 mt-2">
                     <Calculator className="text-indigo-600 shrink-0" size={20} />
@@ -889,7 +1024,7 @@ export default function AccountsDesk({ currentUser }) {
                   </div>
                 )}
 
-                {/* 🎯 FINANCIAL SUMMARY BANNER */}
+                {/* FINANCIAL SUMMARY BANNER */}
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 text-xs shadow-3xs">
                   <div className="flex justify-between items-center border-b border-slate-200/60 pb-2">
                     <span className="font-bold text-slate-500 uppercase tracking-widest text-[9px]">PO Number:</span> 
@@ -941,7 +1076,7 @@ export default function AccountsDesk({ currentUser }) {
                     </div>
                   </div>
 
-                  {/* 🎯 LIVE MATH PREVIEW */}
+                  {/* LIVE MATH PREVIEW */}
                   <div className="bg-slate-100 p-3 rounded-lg border border-slate-200 space-y-1.5 mt-2 mb-2">
                     <div className="flex justify-between text-[11px] text-slate-600 font-bold">
                       <span>Current Outstanding Balance:</span>
@@ -1019,12 +1154,10 @@ export default function AccountsDesk({ currentUser }) {
                   {submitting ? "Processing..." : (metrics?.isOffsetPhase ? "Log Formal Offset" : "Confirm & Send Funds")}
                 </Button>
               </div>
-
             </div>
           </div>
         );
       })()}
-
     </div>
   );
 }

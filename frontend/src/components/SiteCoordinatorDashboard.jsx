@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
   Plus, Trash2, Send, Clock, FileSpreadsheet, CheckCircle2, 
   MessageSquare, Check, AlertTriangle, FileText, CheckCircle, 
-  Truck, UploadCloud, X, AlertOctagon, ShieldAlert
+  Truck, UploadCloud, X, AlertOctagon, ShieldAlert, FileOutput
 } from 'lucide-react';
 import { Card, Input, Button, StatusBadge } from './ui/SharedUI'; 
 
@@ -18,34 +18,44 @@ export default function SiteCoordinatorDashboard() {
   const currentUserRole = activeUser.role;
 
   const [activeTab, setActiveTab] = useState('new_request'); 
+  
+  // New Request Form States
   const [projectCode, setProjectCode] = useState('');
   const [projectName, setProjectName] = useState('');
   const [category, setCategory] = useState('GOODS'); 
-  
   const [siteManagers, setSiteManagers] = useState([]);
   const [projectManagers, setProjectManagers] = useState([]);
-  
   const [dynamicMaterialTypes, setDynamicMaterialTypes] = useState(['Consumable', 'Asset']);
+  const [registeredProjects, setRegisteredProjects] = useState([]);
   const [siteManagerId, setSiteManagerId] = useState('');
   const [projectManagerId, setProjectManagerId] = useState('');
   const [items, setItems] = useState([{ product_description: '', make_brand: '', quantity: 1, purpose: '', item_type: 'Consumable' }]);
   
+  // 🎯 NEW: Employee Expense Claim States
+  const [claimEmpCode, setClaimEmpCode] = useState('');
+  const [claimEmpName, setClaimEmpName] = useState('');
+  const [claimCategory, setClaimCategory] = useState('Daily Allowance');
+  const [claimAmount, setClaimAmount] = useState('');
+  const [claimIsBillable, setClaimIsBillable] = useState(false);
+  const [claimFile, setClaimFile] = useState(null);
+
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState(null);
   
+  // History & Negotiation States
   const [history, setHistory] = useState([]);
   const [proposals, setProposals] = useState([]);
   const [selectedProposal, setSelectedProposal] = useState(null);
   const [proposalItems, setProposalItems] = useState([]);
   const [historyLogs, setHistoryLogs] = useState([]);
   const [coordinatorRemarks, setCoordinatorRemarks] = useState('');
-
+  
+  // GRN States
   const [grnModalTicket, setGrnModalTicket] = useState(null);
   const [receiptType, setReceiptType] = useState('CLEAN'); 
   const [discrepancyCategory, setDiscrepancyCategory] = useState('Damaged Goods'); 
   const [grnFile, setGrnFile] = useState(null);
   const [grnRemarks, setGrnRemarks] = useState('');
-  
   const [extraKm, setExtraKm] = useState('');
   const [extraKmRate, setExtraKmRate] = useState('');
   const [extraFuelCharges, setExtraFuelCharges] = useState('');
@@ -55,12 +65,19 @@ export default function SiteCoordinatorDashboard() {
       try {
         const smRes = await axios.get(`${API_BASE_URL}/users/by-role?role=Site Manager`);
         setSiteManagers(smRes.data);
+        
         const pmRes = await axios.get(`${API_BASE_URL}/users/by-role?role=Project Manager`);
         setProjectManagers(pmRes.data);
         
         const matRes = await axios.get(`${API_BASE_URL}/system/material-types`);
         if (matRes.data && matRes.data.length > 0) {
             setDynamicMaterialTypes(matRes.data);
+        }
+
+        // 🎯 FIX: Fetch Registered Projects for Dropdown Validation
+        const projRes = await axios.get(`${API_BASE_URL}/projects`);
+        if (projRes.data && projRes.data.length > 0) {
+            setRegisteredProjects(projRes.data);
         }
       } catch (err) { console.error("Failed to load initial data", err); }
     };
@@ -159,6 +176,8 @@ export default function SiteCoordinatorDashboard() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!projectManagerId) return setAlert({ type: 'error', message: 'You must assign a Project Manager.' });
+    if (!projectCode || !projectName) return setAlert({ type: 'error', message: 'Valid Project Code and Name are required.' });
+    
     setLoading(true); setAlert(null);
     try {
       const response = await axios.post(`${API_BASE_URL}/requisitions`, {
@@ -175,6 +194,52 @@ export default function SiteCoordinatorDashboard() {
       setItems([{ product_description: '', make_brand: '', quantity: 1, purpose: '', item_type: 'Consumable' }]);
     } catch (error) { setAlert({ type: 'error', message: 'Failed to submit requisition.' }); } 
     finally { setLoading(false); }
+  };
+
+  // 🎯 NEW: SUBMIT EMPLOYEE EXPENSE CLAIM HANDLER
+  const handleExpenseSubmit = async (e) => {
+    e.preventDefault();
+    if (!projectCode || !claimEmpCode || !claimEmpName || !claimAmount || !claimFile) {
+        return setAlert({ type: 'error', message: 'All fields including the receipt file are required.' });
+    }
+
+    setLoading(true);
+    setAlert(null);
+    
+    const formData = new FormData();
+    formData.append('project_code', projectCode);
+    formData.append('emp_code', claimEmpCode);
+    formData.append('emp_name', claimEmpName);
+    formData.append('expense_category', claimCategory);
+    formData.append('total_amount', parseFloat(claimAmount));
+    formData.append('is_billable_to_client', claimIsBillable);
+    formData.append('file', claimFile);
+
+    try {
+        const response = await axios.post(`${API_BASE_URL}/expenses/submit`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        
+        setAlert({ type: 'success', message: `Expense Claim ${response.data.claim_number} submitted to Accounts Desk.` });
+        
+        // Reset form
+        setProjectCode('');
+        setProjectName('');
+        setClaimEmpCode('');
+        setClaimEmpName('');
+        setClaimCategory('Daily Allowance');
+        setClaimAmount('');
+        setClaimIsBillable(false);
+        setClaimFile(null);
+        
+        // Reset file input visually
+        document.getElementById('expenseFileInput').value = '';
+        
+    } catch (error) {
+        setAlert({ type: 'error', message: error.response?.data?.detail || 'Failed to submit expense claim.' });
+    } finally {
+        setLoading(false);
+    }
   };
 
   const closeGrnModal = () => {
@@ -205,7 +270,6 @@ export default function SiteCoordinatorDashboard() {
     
     formData.append('remarks', combinedRemarks);
     formData.append('user_name', currentUserName);
-    
     formData.append('extra_km', extraKm || 0);
     formData.append('extra_km_rate', extraKmRate || 0);
     formData.append('extra_fuel_charges', extraFuelCharges || 0);
@@ -248,14 +312,27 @@ export default function SiteCoordinatorDashboard() {
         {dynamicMaterialTypes.map((type, idx) => <option key={idx} value={type} />)}
       </datalist>
 
+      {/* 🎯 FIX: Validated Project Code Datalist */}
+      <datalist id="registered-projects-list">
+        {registeredProjects.map((p, idx) => (
+          <option key={idx} value={p.project_code}>{p.project_name}</option>
+        ))}
+      </datalist>
+
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-200 pb-5 gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-extrabold text-[#2c2a57] tracking-tight">Site Coordinator Workspace</h1>
-          <p className="text-xs md:text-sm text-slate-500 font-medium">Raise, evaluate, and coordinate project material pipelines</p>
+          <p className="text-xs md:text-sm text-slate-500 font-medium">Raise requests, track material pipelines, and submit employee claims.</p>
         </div>
         <div className="w-full lg:w-auto overflow-x-auto pb-1 lg:pb-0">
           <div className="flex gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-max min-w-full">
-            <Button variant={activeTab === 'new_request' ? 'primary' : 'ghost'} onClick={() => setActiveTab('new_request')} className="text-[11px] md:text-xs py-2 px-3 whitespace-nowrap flex-1">New Request</Button>
+            <Button variant={activeTab === 'new_request' ? 'primary' : 'ghost'} onClick={() => setActiveTab('new_request')} className="text-[11px] md:text-xs py-2 px-3 whitespace-nowrap flex-1">New Material Request</Button>
+            
+            {/* 🎯 NEW TAB: Employee Expense Claims */}
+            <Button variant={activeTab === 'expense_claim' ? 'primary' : 'ghost'} onClick={() => setActiveTab('expense_claim')} className="text-[11px] md:text-xs py-2 px-3 whitespace-nowrap flex-1 border border-transparent">
+              <FileOutput size={14} className="mr-1.5 hidden sm:inline" /> Submit Expense Claim
+            </Button>
+            
             <Button variant={activeTab === 'proposals' ? 'primary' : 'ghost'} onClick={() => setActiveTab('proposals')} className="text-[11px] md:text-xs py-2 px-3 whitespace-nowrap flex-1">Needs Review ({proposals.length})</Button>
             <Button variant={activeTab === 'history' ? 'primary' : 'ghost'} onClick={() => setActiveTab('history')} className="text-[11px] md:text-xs py-2 px-3 whitespace-nowrap flex-1">Pipeline Tracker</Button>
           </div>
@@ -268,13 +345,33 @@ export default function SiteCoordinatorDashboard() {
         </div>
       )}
 
+      {/* VIEW A: NEW MATERIAL REQUEST FORM */}
       {activeTab === 'new_request' && (
         <form onSubmit={handleSubmit} className="space-y-6 max-w-6xl animate-in fade-in duration-300">
           <Card className="p-4 md:p-5 space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input label="Project Code" required value={projectCode} onChange={e => setProjectCode(e.target.value)} placeholder="e.g. REL-JAM-04" />
-              <Input label="Project Name " required value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. Jamnagar Plant Block C" />
+              
+              {/* 🎯 FIX: Validated Project Input */}
+              <div className="flex flex-col space-y-1">
+                <label className="text-[10px] md:text-[11px] font-bold text-slate-500 uppercase tracking-wider">Project Code *</label>
+                <input 
+                  list="registered-projects-list"
+                  required
+                  value={projectCode}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setProjectCode(val);
+                    const match = registeredProjects.find(p => p.project_code === val);
+                    if (match) setProjectName(match.project_name);
+                  }}
+                  placeholder="Type or select Project Code..."
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs md:text-sm font-semibold text-[#2c2a57] outline-none focus:bg-white focus:border-[#2c2a57] transition-all"
+                />
+              </div>
+
+              <Input label="Project Name *" required value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. Jamnagar Plant Block C" />
             </div>
+            
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4">
               <div className="flex flex-col space-y-1.5">
                 <label className="text-[10px] md:text-[11px] font-bold text-slate-500 uppercase tracking-wider">Procurement Category</label>
@@ -302,6 +399,7 @@ export default function SiteCoordinatorDashboard() {
               </div>
             </div>
           </Card>
+          
           <Card className="overflow-hidden">
             <div className="p-4 border-b border-slate-100 flex items-center space-x-2 bg-slate-50">
               <FileSpreadsheet className="text-[#0b9c54]" size={18} />
@@ -328,7 +426,6 @@ export default function SiteCoordinatorDashboard() {
                       <td className="py-2 px-2"><input required value={item.product_description} onChange={e => handleItemChange(index, 'product_description', e.target.value)} placeholder="Description..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                       <td className="py-2 px-2"><input value={item.make_brand} onChange={e => handleItemChange(index, 'make_brand', e.target.value)} placeholder="Tata, Finolex..." className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
                       <td className="py-2 px-2"><input type="number" min="1" required value={item.quantity} onChange={e => handleItemChange(index, 'quantity', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs md:text-sm font-bold text-center text-slate-800 focus:bg-white focus:border-[#2c2a57] outline-none" /></td>
-                      
                       <td className="py-2 px-2">
                         <input 
                           list="dynamic-material-types"
@@ -356,6 +453,115 @@ export default function SiteCoordinatorDashboard() {
         </form>
       )}
 
+      {/* 🎯 NEW VIEW: EMPLOYEE EXPENSE CLAIM FORM */}
+      {activeTab === 'expense_claim' && (
+        <form onSubmit={handleExpenseSubmit} className="space-y-6 max-w-3xl mx-auto animate-in fade-in duration-300">
+          <Card className="overflow-hidden border-indigo-200 shadow-md">
+            <div className="p-5 bg-indigo-600 text-white flex items-center gap-3">
+              <div className="p-2 bg-white/20 rounded-lg">
+                <FileOutput size={20} className="text-indigo-100" />
+              </div>
+              <div>
+                <h2 className="text-lg font-black tracking-wide">Submit Employee Expense Claim</h2>
+                <p className="text-indigo-200 text-xs mt-0.5">Upload bills for immediate reimbursement routing to Accounts & Invoice Desk.</p>
+              </div>
+            </div>
+            
+            <div className="p-6 space-y-6 bg-white">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
+                <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-200 pb-2">1. Project & Employee Identification</h3>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* 🎯 FIX: Validated Project Input */}
+                  <div className="flex flex-col space-y-1 sm:col-span-2">
+                    <label className="text-[10px] md:text-[11px] font-bold text-slate-500 uppercase tracking-wider">Project Code *</label>
+                    <input 
+                      list="registered-projects-list"
+                      required
+                      value={projectCode}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setProjectCode(val);
+                      }}
+                      placeholder="Type or select Project Code..."
+                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-xs md:text-sm font-semibold text-[#2c2a57] outline-none focus:border-indigo-400 transition-all shadow-3xs"
+                    />
+                  </div>
+
+                  <Input label="Employee Code *" required value={claimEmpCode} onChange={e => setClaimEmpCode(e.target.value)} placeholder="e.g. EMP-1045" />
+                  <Input label="Employee Name *" required value={claimEmpName} onChange={e => setClaimEmpName(e.target.value)} placeholder="e.g. John Doe" />
+                </div>
+              </div>
+
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
+                <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-200 pb-2">2. Expense Details & Receipt</h3>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="flex flex-col space-y-1.5">
+                    <label className="text-[10px] md:text-[11px] font-bold text-slate-500 uppercase tracking-wider">Expense Category *</label>
+                    <select required value={claimCategory} onChange={e => setClaimCategory(e.target.value)} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-xs md:text-sm font-semibold text-slate-700 outline-none focus:border-indigo-400 transition-all shadow-3xs">
+                      <option value="Daily Allowance">Daily Allowance (DA)</option>
+                      <option value="Transport">Travel & Transport</option>
+                      <option value="Food">Food & Catering</option>
+                      <option value="Material Purchase">Emergency Material Purchase</option>
+                      <option value="Other">Other Expenses</option>
+                    </select>
+                  </div>
+                  <Input label="Total Amount Claimed (₹) *" type="number" required value={claimAmount} onChange={e => setClaimAmount(e.target.value)} placeholder="e.g. 1500" />
+                </div>
+                
+                <div className="flex flex-col space-y-1.5 pt-2">
+                  <label className="text-[10px] md:text-[11px] font-bold text-slate-500 uppercase tracking-wider">Attach Receipt / Bill Proof (PDF or Image) *</label>
+                  <input 
+                    id="expenseFileInput"
+                    type="file" 
+                    required
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onChange={e => setClaimFile(e.target.files[0])}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs md:text-sm font-semibold text-slate-600 outline-none file:mr-4 file:py-1.5 file:px-4 file:rounded-lg file:border-0 file:text-[10px] file:font-black file:uppercase file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 transition-all shadow-3xs cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200 space-y-3">
+                <h3 className="text-[10px] font-black uppercase text-amber-600 tracking-widest border-b border-amber-200 pb-2">3. Client Billing Configuration</h3>
+                
+                <label className="flex items-center gap-3 cursor-pointer group bg-white p-3 rounded-lg border border-amber-100 hover:border-amber-300 transition-colors shadow-3xs">
+                  <div className="relative flex items-center">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only"
+                      checked={claimIsBillable}
+                      onChange={(e) => setClaimIsBillable(e.target.checked)}
+                    />
+                    <div className={`w-10 h-5 bg-slate-200 rounded-full transition-colors ${claimIsBillable ? 'bg-[#0b9c54]' : ''}`}></div>
+                    <div className={`absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform shadow-sm ${claimIsBillable ? 'translate-x-5' : ''}`}></div>
+                  </div>
+                  <div>
+                    <span className={`text-sm font-bold block ${claimIsBillable ? 'text-[#0b9c54]' : 'text-slate-600'}`}>
+                      {claimIsBillable ? "YES, Billable to Client" : "NO, Company Cost"}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-medium leading-tight block mt-0.5">
+                      {claimIsBillable 
+                        ? "This will route to Accounts for payout, then to the Invoice Desk for client recovery." 
+                        : "This will only route to Accounts for payout and close the loop (Internal Cost)."}
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+            </div>
+            
+            <div className="p-5 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <Button type="submit" variant="primary" disabled={loading} className="w-full sm:w-auto px-8 py-3 text-xs shadow-md bg-indigo-600 hover:bg-indigo-700">
+                {loading ? "Uploading..." : "Submit Claim for Reimbursement"}
+              </Button>
+            </div>
+          </Card>
+        </form>
+      )}
+
+      {/* VIEW B: MANAGER PROPOSALS */}
       {activeTab === 'proposals' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1500px] animate-in fade-in duration-300">
           
@@ -457,6 +663,7 @@ export default function SiteCoordinatorDashboard() {
         </div>
       )}
 
+      {/* VIEW C: LIVE PIPELINE PROGRESS STEPPER TRACKER */}
       {activeTab === 'history' && (
         <div className="space-y-4 max-w-5xl animate-in fade-in duration-300">
           <div className="flex items-center space-x-2"><Clock className="text-[#0b9c54]" size={18} /><h2 className="text-xs md:text-sm font-bold text-[#2c2a57] uppercase tracking-wider">Live Material Pipeline Tracker</h2></div>
