@@ -22,6 +22,7 @@ class User(Base):
 
 class MaterialTicket(Base):
     __tablename__ = "material_tickets"
+    
     id = Column(Integer, primary_key=True, index=True)
     ticket_number = Column(String, unique=True, nullable=False)
     project_code = Column(String, nullable=False)
@@ -37,6 +38,7 @@ class MaterialTicket(Base):
 
 class TicketItem(Base):
     __tablename__ = "ticket_items"
+    
     id = Column(Integer, primary_key=True, index=True)
     ticket_number = Column(String, ForeignKey("material_tickets.ticket_number", ondelete="CASCADE"))
     item_index = Column(Integer, nullable=False)
@@ -54,6 +56,7 @@ class TicketItem(Base):
 
 class Quotation(Base):
     __tablename__ = "quotations"
+    
     id = Column(Integer, primary_key=True, index=True)
     ticket_number = Column(String, ForeignKey("material_tickets.ticket_number", ondelete="CASCADE"))
     item_index = Column(Integer, nullable=False)
@@ -84,6 +87,7 @@ class Quotation(Base):
     site_contact_phone = Column(String, nullable=True)
     base_total_value = Column(Numeric(12, 2), default=0.00)
     net_amount_payable = Column(Numeric(12, 2), default=0.00)
+    
     # 🎯 NEW: Unified Recurring / Subscription Fields
     is_recurring = Column(Boolean, default=False)
     recurring_type = Column(String, default="FIXED_LEASE")
@@ -91,12 +95,14 @@ class Quotation(Base):
     contract_tenure_months = Column(Integer, default=1)
     monthly_rate = Column(Numeric(12, 2), default=0.00)
     approved_spending_cap = Column(Numeric(12, 2), default=0.00)
+    
     # 🎯 NEW: Financial Offset & Trigger Constraints
     security_deposit_amount = Column(Float, default=0.0)
     billing_trigger_date = Column(Integer, default=5)
 
 class TicketHistory(Base):
     __tablename__ = "ticket_history"
+    
     id = Column(Integer, primary_key=True, index=True)
     ticket_number = Column(String, ForeignKey("material_tickets.ticket_number", ondelete="CASCADE"))
     user_name = Column(String, nullable=False)
@@ -106,6 +112,7 @@ class TicketHistory(Base):
 
 class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
+    
     id = Column(Integer, primary_key=True, index=True)
     po_number = Column(String, unique=True, nullable=False)
     ticket_number = Column(String, ForeignKey("material_tickets.ticket_number", ondelete="CASCADE"))
@@ -141,6 +148,7 @@ class PurchaseOrder(Base):
 
 class Vendor(Base):
     __tablename__ = "vendors"
+    
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True)
     address = Column(String)
@@ -161,3 +169,36 @@ class Vendor(Base):
     electricity_bill_url = Column(String, nullable=True)
     cancelled_cheque_url = Column(String, nullable=True)
     iso_cert_url = Column(String, nullable=True)
+
+# =====================================================================
+# 🎯 NEW: EMPLOYEE REIMBURSEMENT & CLIENT RECOVERY TRACKING
+# =====================================================================
+class ExpenseClaim(Base):
+    __tablename__ = "expense_claims"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    claim_number = Column(String, unique=True, nullable=False, index=True)
+    project_code = Column(String, nullable=False)
+    
+    # Employee Details
+    emp_code = Column(String, nullable=False)
+    emp_name = Column(String, nullable=False)
+    
+    # Expense Details
+    expense_category = Column(String, nullable=False)  # e.g., 'Daily Allowance', 'Transport', 'Food'
+    total_amount = Column(Numeric(12, 2), nullable=False)
+    receipt_url = Column(String, nullable=True)
+    is_billable_to_client = Column(Boolean, default=False)
+    
+    # Accounts Payout Phase
+    status = Column(String, default="Pending Accounts") # "Pending Accounts", "Paid to Employee", "Invoiced to Client", "Recovered"
+    neft_utr = Column(String, nullable=True)
+    paid_at = Column(DateTime, nullable=True)
+    
+    # Invoice & Recovery Phase
+    client_invoice_no = Column(String, nullable=True)
+    invoiced_at = Column(DateTime, nullable=True)
+    is_recovered = Column(Boolean, default=False)
+    recovered_at = Column(DateTime, nullable=True)
+    
+    created_at = Column(DateTime, default=get_ist_time)

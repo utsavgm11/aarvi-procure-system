@@ -12,11 +12,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_  
-from database import get_db
+from database import get_db , SessionLocal
 import models
 from email_service import send_workflow_email
 import cloudinary
 import cloudinary.uploader
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # 🎯 PURE PYTHON ENGINES (Zero System Dependencies for Render.com)
 from xhtml2pdf import pisa
@@ -192,6 +193,22 @@ def get_dynamic_material_types(db: Session = Depends(get_db)):
     unique_types = {t[0] for t in types if t[0]}
     unique_types.update(["Consumable", "Asset"])
     return sorted(list(unique_types))
+
+# -------------------------------------------------------------------
+# 🏢 MASTER PROJECT REGISTRY ENDPOINT
+# -------------------------------------------------------------------
+@app.get("/api/projects", response_model=List[dict])
+def get_registered_projects(db: Session = Depends(get_db)):
+    """Fetch distinct existing project codes and names for Site Coordinators."""
+    projects = db.query(
+        models.MaterialTicket.project_code,
+        models.MaterialTicket.project_name
+    ).distinct().all()
+    
+    return [
+        {"project_code": p[0], "project_name": p[1]}
+        for p in projects if p[0] and p[1]
+    ]
 
 # -------------------------------------------------------------------
 # STAGE 1: SITE COORDINATOR ENTRY GATEWAY
@@ -1443,17 +1460,35 @@ def download_word_purchase_order(po_number: str, db: Session = Depends(get_db)):
 # 🚀 PHASE 2: MASTER PO LEDGER & PROFORMA INVOICE (PI) UPLOAD
 # -------------------------------------------------------------------
 @app.get("/api/purchase-orders/finalized", response_model=List[dict])
-def get_finalized_purchase_orders(db: Session = Depends(get_db)):
-    # 🎯 FIX #5: Added "Closed / Completed" so they remain visible in the Master Ledger
-    orders = db.query(
+def get_finalized_purchase_orders(
+    user_id: Optional[int] = None, 
+    user_role: Optional[str] = None, 
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch finalized POs for the Master Ledger.
+    - Project Managers only see POs assigned to their user_id.
+    - Directors, Purchase, Accounts, and Admins see ALL POs.
+    """
+    query = db.query(
         models.PurchaseOrder, 
         models.MaterialTicket
     ).join(
-        models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number
-    ).filter(models.MaterialTicket.status.in_([
-        "Approved", "PI Pending PM Approval", "PI Approved - Sent to Accounts", 
-        "Dispatched", "Partially Delivered", "Material Discrepancy Raised", "Delivered - GRN Logged", "Partially Disbursed", "Closed / Completed"
-    ])).order_by(models.PurchaseOrder.generated_at.desc()).all()
+        models.MaterialTicket, 
+        models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number
+    ).filter(
+        models.MaterialTicket.status.in_([
+            "Approved", "PI Pending PM Approval", "PI Approved - Sent to Accounts", 
+            "Dispatched", "Partially Delivered", "Material Discrepancy Raised", 
+            "Delivered - GRN Logged", "Partially Disbursed", "Closed / Completed"
+        ])
+    )
+    
+    # 🎯 PM SPECIFIC FILTERING: PMs only see POs for their assigned projects
+    if user_role == "Project Manager" and user_id:
+        query = query.filter(models.MaterialTicket.assigned_project_manager_id == user_id)
+        
+    orders = query.order_by(models.PurchaseOrder.generated_at.desc()).all()
     
     response = []
     for po_obj, ticket_obj in orders:
@@ -1463,7 +1498,10 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
         ).all()
         
         if not winning_quotes:
-            winning_quotes = db.query(models.Quotation).filter(models.Quotation.ticket_number == po_obj.ticket_number).all()
+            winning_quotes = db.query(models.Quotation).filter(
+                models.Quotation.ticket_number == po_obj.ticket_number
+            ).all()
+            
         primary_quote = winning_quotes[0] if winning_quotes else None
         primary_vendor = primary_quote.vendor_name if primary_quote else "N/A"
         
@@ -1481,6 +1519,7 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
         pm_user = db.query(models.User).filter(models.User.id == ticket_obj.assigned_project_manager_id).first()
         project_manager = pm_user.name if pm_user else "Pending / N/A"
         pm_id = pm_user.id if pm_user else None
+        
         sm_log = db.query(models.TicketHistory).filter(
             models.TicketHistory.ticket_number == po_obj.ticket_number,
             models.TicketHistory.action_taken == "Explicit Sign-Off Applied",
@@ -1529,7 +1568,6 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             "gst_status": getattr(po_obj, 'gst_status', 'Pending') or 'Pending',
             "gst_clearance_date": getattr(po_obj, 'gst_clearance_date', 'N/A') or 'N/A',
             "gst_verified_by": getattr(po_obj, 'gst_verified_by', 'N/A') or 'N/A',
-            
             "is_recurring": getattr(primary_quote, 'is_recurring', False) if primary_quote else False,
             "security_deposit_amount": float(getattr(primary_quote, 'security_deposit_amount', 0) or 0),
             "monthly_rate": float(getattr(primary_quote, 'monthly_rate', getattr(primary_quote, 'unit_price', 0)) or 0),
@@ -1537,6 +1575,7 @@ def get_finalized_purchase_orders(db: Session = Depends(get_db)):
             "contract_end_date": str(getattr(primary_quote, 'contract_end_date', '')) if primary_quote and getattr(primary_quote, 'contract_end_date', None) else '',
             "billing_trigger_date": int(getattr(primary_quote, 'billing_trigger_date', 5) or 5)
         })
+        
     return response
 
 class UpdateBillingDatePayload(BaseModel):
@@ -1894,6 +1933,7 @@ async def upload_vendor_documents(
     vendor = db.query(models.Vendor).filter(models.Vendor.id == vendor_id).first()
     if not vendor: 
         raise HTTPException(status_code=404, detail="Vendor not found")
+
     def upload_to_cloud(file_obj, doc_name):
         if not file_obj: return None
         ext = os.path.splitext(file_obj.filename)[1].lower()
@@ -2079,7 +2119,9 @@ def get_sidebar_counts(user_id: int, role: str, db: Session = Depends(get_db)):
         "pending_approvals": 0,
         "pending_vetting": 0,
         "pending_disbursements": 0,
-        "coordinator_queries": 0
+        "coordinator_queries": 0,
+        "pending_invoice_generation": 0, 
+        "pending_client_recovery": 0     
     }
     
     if role == "Site Coordinator":
@@ -2119,8 +2161,23 @@ def get_sidebar_counts(user_id: int, role: str, db: Session = Depends(get_db)):
     if role in ["Accounts Executive", "Accounts", "Finance Manager"]:
         counts["pending_disbursements"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status == "PI Approved - Sent to Accounts").count()
         counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
-    if role in ["Admin", "IT Manager"]:
-        counts["po_ledger_alerts"] = db.query(models.MaterialTicket).filter(models.MaterialTicket.status.in_(["Partially Delivered", "Material Discrepancy Raised"])).count()
+        
+        # 🎯 Add counts for Accounts Employee Claim Queue
+        counts["pending_employee_claims"] = db.query(models.ExpenseClaim).filter(models.ExpenseClaim.status == "Pending Accounts").count()
+
+    # 🎯 Add counts for Invoice & Billing Team
+    if role in ["Invoice Team", "Accounts Executive", "Finance Manager", "Admin"]:
+        counts["pending_invoice_generation"] = db.query(models.ExpenseClaim).filter(
+            models.ExpenseClaim.status == "Paid to Employee",
+            models.ExpenseClaim.is_billable_to_client == True
+        ).count()
+        
+        counts["pending_client_recovery"] = db.query(models.ExpenseClaim).filter(
+            models.ExpenseClaim.status == "Invoiced to Client",
+            models.ExpenseClaim.is_billable_to_client == True,
+            models.ExpenseClaim.is_recovered == False
+        ).count()
+
     return counts
 
 @app.get("/api/requisitions/{ticket_number}/po", response_model=dict)
@@ -2713,6 +2770,8 @@ def renew_recurring_contract(
 # -------------------------------------------------------------------
 @app.get("/api/analytics/director-summary", response_model=dict)
 def get_director_analytics_summary(db: Session = Depends(get_db)):
+
+
     closed_statuses = ["Delivered - GRN Logged", "Contract Terminated & Closed", "Rejected", "Closed / Completed"]
     
     active_count = db.query(models.MaterialTicket).filter(
@@ -2735,6 +2794,7 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
     pm_spend_map = {}
     project_spend_map = {}
     
+    # 1. Process Material Requisitions & Vendor Purchase Orders
     for quote, item, ticket in winning_data:
         amount = float(quote.net_amount_payable or quote.total_amount or quote.base_total_value or 0)
         total_spend += amount
@@ -2754,8 +2814,9 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
             active_monthly_spend += m_rate
             
         cat_key = (ticket.category or "GOODS").upper()
-        if cat_key in category_spend:
-            category_spend[cat_key] += amount
+        if cat_key not in category_spend:
+            category_spend[cat_key] = 0.0
+        category_spend[cat_key] += amount
             
         pm_user = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
         pm_name = pm_user.name if pm_user else "Unassigned / Direct"
@@ -2773,10 +2834,52 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
                 "pm_name": pm_name,
                 "category": ticket.category,
                 "total_spend": 0.0,
-                "ticket_count": set()
+                "ticket_count": set(),
+                "category_breakdown": {}
             }
         project_spend_map[p_code]["total_spend"] += amount
         project_spend_map[p_code]["ticket_count"].add(ticket.ticket_number)
+        
+        # 🎯 Project-specific category aggregation
+        project_spend_map[p_code]["category_breakdown"][cat_key] = (
+            project_spend_map[p_code]["category_breakdown"].get(cat_key, 0.0) + amount
+        )
+
+    # 2. 🎯 Process Employee Expense Claims (Reimbursements & Client Recovery)
+    all_expense_claims = db.query(models.ExpenseClaim).all()
+    for claim in all_expense_claims:
+        claim_amt = float(claim.total_amount or 0.0)
+        total_spend += claim_amt
+
+        if claim.is_billable_to_client:
+            reimbursable_spend += claim_amt
+        else:
+            non_reimbursable_spend += claim_amt
+
+        # Normalize claim category (e.g., "Daily Allowance", "Transport", "Food")
+        raw_cat = (claim.expense_category or "OTHER").strip().upper()
+        cat_key = "FOOD" if "FOOD" in raw_cat else ("VEHICLE" if ("TRANSPORT" in raw_cat or "TRAVEL" in raw_cat) else raw_cat)
+        
+        if cat_key not in category_spend:
+            category_spend[cat_key] = 0.0
+        category_spend[cat_key] += claim_amt
+
+        p_code = claim.project_code or "UNKNOWN"
+        if p_code not in project_spend_map:
+            project_spend_map[p_code] = {
+                "project_code": p_code,
+                "project_name": p_code,
+                "pm_name": "Direct Claim",
+                "category": cat_key,
+                "total_spend": 0.0,
+                "ticket_count": set(),
+                "category_breakdown": {}
+            }
+        project_spend_map[p_code]["total_spend"] += claim_amt
+        project_spend_map[p_code]["ticket_count"].add(claim.claim_number)
+        project_spend_map[p_code]["category_breakdown"][cat_key] = (
+            project_spend_map[p_code]["category_breakdown"].get(cat_key, 0.0) + claim_amt
+        )
         
     pm_spend = [
         {"pm_name": pm, "total_spend": data["total_spend"], "orders_count": len(data["po_count"])}
@@ -2791,7 +2894,8 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
             "pm_name": data["pm_name"],
             "category": data["category"],
             "total_spend": data["total_spend"],
-            "orders_count": len(data["ticket_count"])
+            "orders_count": len(data["ticket_count"]),
+            "category_breakdown": data.get("category_breakdown", {})
         }
         for code, data in project_spend_map.items()
     ]
@@ -2810,6 +2914,232 @@ def get_director_analytics_summary(db: Session = Depends(get_db)):
         "pm_spend": pm_spend,
         "all_projects": all_projects
     }
+
+
+
+# =====================================================================
+# 🎯 NEW: EMPLOYEE REIMBURSEMENT & CLIENT RECOVERY ENDPOINTS
+# =====================================================================
+@app.post("/api/expenses/submit", status_code=201)
+async def submit_employee_expense_claim(
+    project_code: str = Form(...),
+    emp_code: str = Form(...),
+    emp_name: str = Form(...),
+    expense_category: str = Form(...),
+    total_amount: float = Form(...),
+    is_billable_to_client: str = Form("false"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    claim_number = f"EXP-{get_ist_time().strftime('%Y%m')}-{random.randint(1000, 9999)}"
+    
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in [".pdf", ".png", ".jpg", ".jpeg"]:
+        raise HTTPException(status_code=400, detail="Only PDF and Image files are allowed for bills.")
+        
+    timestamp = get_ist_time().strftime("%Y%m%d_%H%M%S")
+    filename = f"RECEIPT_{claim_number}_{timestamp}"
+    
+    try:
+        upload_result = cloudinary.uploader.upload(
+            file.file, 
+            public_id=filename,
+            folder="aarvi_expense_receipts",
+            resource_type="auto"
+        )
+        receipt_url = upload_result.get("secure_url")
+    except Exception as e:
+        logger.error(f"Cloudinary Upload Failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upload receipt to cloud storage.")
+
+    is_billable = is_billable_to_client.lower() == 'true'
+
+    new_claim = models.ExpenseClaim(
+        claim_number=claim_number,
+        project_code=project_code,
+        emp_code=emp_code,
+        emp_name=emp_name,
+        expense_category=expense_category,
+        total_amount=total_amount,
+        receipt_url=receipt_url,
+        is_billable_to_client=is_billable,
+        status="Pending Accounts"
+    )
+    
+    db.add(new_claim)
+    db.commit()
+    
+    return {"message": "Expense claim submitted successfully.", "claim_number": claim_number}
+
+@app.get("/api/expenses/pending-accounts", response_model=List[dict])
+def get_pending_expense_claims(db: Session = Depends(get_db)):
+    claims = db.query(models.ExpenseClaim).filter(models.ExpenseClaim.status == "Pending Accounts").order_by(models.ExpenseClaim.created_at.desc()).all()
+    return [{
+        "id": c.id,
+        "claim_number": c.claim_number,
+        "project_code": c.project_code,
+        "emp_code": c.emp_code,
+        "emp_name": c.emp_name,
+        "expense_category": c.expense_category,
+        "total_amount": float(c.total_amount),
+        "receipt_url": c.receipt_url,
+        "is_billable_to_client": c.is_billable_to_client,
+        "created_at": c.created_at.strftime('%d-%b-%Y')
+    } for c in claims]
+
+class PayExpensePayload(BaseModel):
+    neft_utr: str
+
+@app.put("/api/expenses/{claim_id}/pay")
+def mark_expense_as_paid(claim_id: int, payload: PayExpensePayload, db: Session = Depends(get_db)):
+    claim = db.query(models.ExpenseClaim).filter(models.ExpenseClaim.id == claim_id).first()
+    if not claim:
+        raise HTTPException(status_code=404, detail="Expense claim not found.")
+        
+    claim.neft_utr = payload.neft_utr
+    claim.status = "Paid to Employee"
+    claim.paid_at = get_ist_time()
+    
+    db.commit()
+    return {"message": f"Claim {claim.claim_number} successfully marked as Paid via NEFT: {payload.neft_utr}."}
+
+@app.get("/api/expenses/invoice-queue", response_model=dict)
+def get_invoice_and_recovery_queues(db: Session = Depends(get_db)):
+    # 1. Paid to employee, but not yet invoiced to client
+    pending_invoicing = db.query(models.ExpenseClaim).filter(
+        models.ExpenseClaim.status == "Paid to Employee",
+        models.ExpenseClaim.is_billable_to_client == True
+    ).order_by(models.ExpenseClaim.paid_at.desc()).all()
+    
+    # 2. Invoiced to client, but funds not yet recovered
+    pending_recovery = db.query(models.ExpenseClaim).filter(
+        models.ExpenseClaim.status == "Invoiced to Client",
+        models.ExpenseClaim.is_billable_to_client == True,
+        models.ExpenseClaim.is_recovered == False
+    ).order_by(models.ExpenseClaim.invoiced_at.desc()).all()
+
+    def format_claim(c):
+        return {
+            "id": c.id,
+            "claim_number": c.claim_number,
+            "project_code": c.project_code,
+            "emp_code": c.emp_code,
+            "emp_name": c.emp_name,
+            "expense_category": c.expense_category,
+            "total_amount": float(c.total_amount),
+            "receipt_url": c.receipt_url,
+            "neft_utr": c.neft_utr,
+            "client_invoice_no": c.client_invoice_no,
+            "paid_date": c.paid_at.strftime('%d-%b-%Y') if c.paid_at else "N/A",
+            "invoiced_date": c.invoiced_at.strftime('%d-%b-%Y') if c.invoiced_at else "N/A"
+        }
+
+    return {
+        "pending_invoicing": [format_claim(c) for c in pending_invoicing],
+        "pending_recovery": [format_claim(c) for c in pending_recovery]
+    }
+
+class GenerateClientInvoicePayload(BaseModel):
+    client_invoice_no: str
+
+@app.put("/api/expenses/{claim_id}/invoice")
+def generate_client_invoice_for_claim(claim_id: int, payload: GenerateClientInvoicePayload, db: Session = Depends(get_db)):
+    claim = db.query(models.ExpenseClaim).filter(models.ExpenseClaim.id == claim_id).first()
+    if not claim: raise HTTPException(status_code=404, detail="Claim not found.")
+        
+    claim.client_invoice_no = payload.client_invoice_no
+    claim.status = "Invoiced to Client"
+    claim.invoiced_at = get_ist_time()
+    
+    db.commit()
+    return {"message": f"Claim updated. Awaiting client payment against Invoice {payload.client_invoice_no}."}
+
+@app.put("/api/expenses/{claim_id}/recover")
+def mark_client_funds_recovered(claim_id: int, db: Session = Depends(get_db)):
+    claim = db.query(models.ExpenseClaim).filter(models.ExpenseClaim.id == claim_id).first()
+    if not claim: raise HTTPException(status_code=404, detail="Claim not found.")
+        
+    claim.is_recovered = True
+    claim.status = "Recovered"
+    claim.recovered_at = get_ist_time()
+    
+    db.commit()
+    return {"message": "Funds successfully recovered from client. Loop closed."}
+
+# =====================================================================
+# 🕒 APSCHEDULER: AUTOMATED LEASE & BILLING NOTIFICATIONS
+# =====================================================================
+def check_upcoming_lease_billings():
+    db = SessionLocal()
+    try:
+        today = get_ist_time().date()
+        target_day = today.day + 3
+        
+        # 1. Check for Monthly Billing Trigger Dates 3 days out
+        upcoming_billings = db.query(models.PurchaseOrder, models.MaterialTicket, models.Quotation)\
+            .join(models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number)\
+            .join(models.Quotation, models.Quotation.ticket_number == models.MaterialTicket.ticket_number)\
+            .filter(
+                models.Quotation.is_selected == True,
+                models.Quotation.is_recurring == True,
+                models.Quotation.billing_trigger_date == target_day,
+                models.MaterialTicket.status.notin_(["Contract Terminated & Closed", "Rejected", "Closed / Completed"])
+            ).all()
+
+        accounts_users = db.query(models.User).filter(models.User.role.in_(["Accounts Executive", "Finance Manager"]), models.User.is_active == True).all()
+
+        for po, ticket, quote in upcoming_billings:
+            pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
+            recipients = accounts_users + ([pm] if pm else [])
+            
+            for user in recipients:
+                if user.email:
+                    send_workflow_email(
+                        recipient_email=user.email,
+                        recipient_name=user.name,
+                        subject=f"Upcoming Rent/Lease Billing: {po.po_number} due in 3 Days",
+                        ticket_number=po.po_number,
+                        project_name=ticket.project_name,
+                        status="Action Required: Renew or Process Payment"
+                    )
+
+        # 2. Check for Hard Contract Expiry 3 days out
+        target_expiry_date = today + timedelta(days=3)
+        expiring_contracts = db.query(models.PurchaseOrder, models.MaterialTicket, models.Quotation)\
+            .join(models.MaterialTicket, models.PurchaseOrder.ticket_number == models.MaterialTicket.ticket_number)\
+            .join(models.Quotation, models.Quotation.ticket_number == models.MaterialTicket.ticket_number)\
+            .filter(
+                models.Quotation.is_selected == True,
+                models.Quotation.is_recurring == True,
+                models.Quotation.contract_end_date == target_expiry_date,
+                models.MaterialTicket.status.notin_(["Contract Terminated & Closed", "Rejected"])
+            ).all()
+
+        for po, ticket, quote in expiring_contracts:
+            pm = db.query(models.User).filter(models.User.id == ticket.assigned_project_manager_id).first()
+            if pm and pm.email:
+                send_workflow_email(
+                    recipient_email=pm.email,
+                    recipient_name=pm.name,
+                    subject=f"CRITICAL: Lease Contract Expiry for {po.po_number} in 3 Days",
+                    ticket_number=po.po_number,
+                    project_name=ticket.project_name,
+                    status="URGENT: Review Renewal Options"
+                )
+
+    except Exception as e:
+        logger.error(f"Automated Lease Check Failed: {str(e)}")
+    finally:
+        db.close()
+
+# Start the Background Scheduler when FastAPI boots up
+@app.on_event("startup")
+def start_scheduler():
+    scheduler = BackgroundScheduler()
+    # Runs once a day at 9:00 AM IST
+    scheduler.add_job(check_upcoming_lease_billings, 'cron', hour=9, minute=0)
+    scheduler.start()
+    logger.info("Aarvi Encon APScheduler for Lease Notifications started successfully.")
 
 # --- SYSTEM HEALTH ROUTER ---
 @app.get("/")
